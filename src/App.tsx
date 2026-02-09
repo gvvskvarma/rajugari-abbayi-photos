@@ -39,6 +39,7 @@ type RotatingGalleryProps = {
   title: string
   subtitle: string
   images: string[]
+  cycleStep: number
 }
 
 const loadImages = (modules: Record<string, string>) =>
@@ -46,24 +47,72 @@ const loadImages = (modules: Record<string, string>) =>
     .sort(([pathA], [pathB]) => pathA.localeCompare(pathB))
     .map(([, path]) => path)
 
-const RotatingGallery = ({ title, subtitle, images }: RotatingGalleryProps) => {
+const RotatingGallery = ({
+  title,
+  subtitle,
+  images,
+  cycleStep,
+}: RotatingGalleryProps) => {
   const [index, setIndex] = useState(0)
+  const [previousIndex, setPreviousIndex] = useState<number | null>(null)
+  const [isTransitioning, setIsTransitioning] = useState(false)
 
   useEffect(() => {
     if (images.length === 0) return
-    const id = window.setInterval(() => {
-      setIndex((current) => (current + 1) % images.length)
-    }, 2000)
-    return () => window.clearInterval(id)
-  }, [images.length])
+    images.forEach((src) => {
+      const img = new Image()
+      img.src = src
+    })
+  }, [images])
+
+  useEffect(() => {
+    if (images.length === 0) return
+    const nextIndex = cycleStep % images.length
+    setIndex((current) => {
+      if (current === nextIndex) return current
+      setPreviousIndex(current)
+      setIsTransitioning(true)
+      return nextIndex
+    })
+  }, [cycleStep, images.length])
+
+  useEffect(() => {
+    if (!isTransitioning) return
+    const timeout = window.setTimeout(() => {
+      setIsTransitioning(false)
+      setPreviousIndex(null)
+    }, 650)
+    return () => window.clearTimeout(timeout)
+  }, [isTransitioning])
 
   const active = images.length > 0 ? images[index % images.length] : undefined
+  const previous =
+    previousIndex !== null && images.length > 0
+      ? images[previousIndex % images.length]
+      : undefined
 
   return (
     <div className="rotator">
       <div className="rotator-card">
         {active ? (
-          <img key={active} src={active} alt={title} loading="lazy" />
+          <div className="rotator-image-stack">
+            {previous && isTransitioning && (
+              <img
+                className="rotator-image rotator-image-previous"
+                src={previous}
+                alt={title}
+                loading="lazy"
+              />
+            )}
+            <img
+              className={`rotator-image ${
+                isTransitioning ? 'rotator-image-enter' : ''
+              }`}
+              src={active}
+              alt={title}
+              loading="lazy"
+            />
+          </div>
         ) : (
           <div className="rotator-placeholder">
             <p>Add {title} photos</p>
@@ -80,6 +129,15 @@ const RotatingGallery = ({ title, subtitle, images }: RotatingGalleryProps) => {
 }
 
 function App() {
+  const [cycleStep, setCycleStep] = useState(0)
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setCycleStep((current) => current + 1)
+    }, 2000)
+    return () => window.clearInterval(id)
+  }, [])
+
   const babyImages = useMemo(
     () =>
       loadImages(
@@ -252,16 +310,19 @@ function App() {
                 title="BABY SHOOTS"
                 subtitle="New beginnings"
                 images={babyImages}
+                cycleStep={cycleStep}
               />
               <RotatingGallery
                 title="Portraits"
                 subtitle="People & personality"
                 images={portraitImages}
+                cycleStep={cycleStep}
               />
               <RotatingGallery
                 title="Events"
                 subtitle="Milestones & energy"
                 images={eventImages}
+                cycleStep={cycleStep}
               />
             </div>
           </div>
