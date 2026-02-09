@@ -1,0 +1,122 @@
+.book-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 60px;
+  padding: 48px 6vw 120px;
+  width: min(1100px, 100%);
+  margin: 0 auto;
+}
+
+.book-hero {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 32px;
+  align-items: start;
+}
+
+.book-card {
+  background: rgba(248, 243, 234, 0.9);
+  border-radius: 22px;
+  padding: 24px;
+  border: 1px solid rgba(21, 21, 31, 0.15);
+  box-shadow: var(--shadow-soft);
+}
+
+.book-card-title {
+  font-family: 'Bodoni Moda', serif;
+  font-size: 1.2rem;
+  letter-spacing: 0.08em;
+  margin: 0 0 12px;
+  text-transform: uppercase;
+}
+
+.book-card ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-soft);
+  display: grid;
+  gap: 8px;
+}
+
+.book-form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.form-alert {
+  padding: 14px 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(21, 21, 31, 0.2);
+  background: rgba(241, 211, 153, 0.35);
+  color: var(--ink);
+}
+
+.form-success {
+  padding: 14px 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(21, 21, 31, 0.2);
+  background: rgba(168, 211, 194, 0.35);
+  color: var(--ink);
+}
+
+.enquiry-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  background: rgba(248, 243, 234, 0.92);
+  border-radius: 24px;
+  padding: 28px;
+  border: 1px solid rgba(21, 21, 31, 0.18);
+  box-shadow: var(--shadow-soft);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+}
+
+.enquiry-form label {
+  display: grid;
+  gap: 8px;
+  font-size: 0.9rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.enquiry-form input,
+.enquiry-form select,
+.enquiry-form textarea {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(21, 21, 31, 0.2);
+  font-family: 'Sora', sans-serif;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--ink);
+}
+
+.enquiry-form input:focus,
+.enquiry-form select:focus,
+.enquiry-form textarea:focus {
+  outline: 2px solid rgba(241, 211, 153, 0.6);
+  border-color: rgba(241, 211, 153, 0.8);
+}
+
+.form-message textarea {
+  resize: vertical;
+  min-height: 140px;
+}
+
+.enquiry-form button[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (max-width: 600px) {
+  .book-main {
+    padding: 32px 6vw 80px;
+  }
+}
