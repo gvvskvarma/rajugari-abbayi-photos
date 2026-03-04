@@ -49,3 +49,14 @@ The booking page lives at `/book.html`.
 
 - React + TypeScript
 - Vite
+
+## Deploy on Vercel
+
+This repo includes `vercel.json` with build/output settings, asset cache headers, and basic security headers.
+
+In Vercel:
+1. Import `gvvskvarma/rajugari-abbayi-photos`.
+2. Select the `main` branch for production.
+3. Add environment variable:
+   - `VITE_FORMSPREE_ENDPOINT=https://formspree.io/f/mzdabzwy`
+4. Deploy.
