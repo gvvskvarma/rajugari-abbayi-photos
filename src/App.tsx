@@ -9,7 +9,7 @@ const personalInstagramUrl =
 const mediaBaseUrl = (import.meta.env.VITE_MEDIA_BASE_URL ?? '').trim().replace(/\/+$/, '')
 
 const localMediaAssetUrls = import.meta.glob(
-  '/project-rga/**/*.{jpg,jpeg,JPG,JPEG,png,PNG,webp,WEBP}',
+  '/project-rga/optimized/**/*.{jpg,jpeg,JPG,JPEG,png,PNG,webp,WEBP}',
   {
     eager: true,
     import: 'default',
@@ -38,14 +38,23 @@ const buildSrcSet = (variants: Array<{ url?: string; width: number }>) => {
   return srcSet || undefined
 }
 
+const uniqueSources = (sources: Array<{ src?: string; srcSet?: string }>) => {
+  const seen = new Set<string>()
+  return sources
+    .filter((source): source is { src: string; srcSet?: string } => Boolean(source.src))
+    .filter((source) => {
+      if (seen.has(source.src)) return false
+      seen.add(source.src)
+      return true
+    })
+}
+
 type ResponsiveAsset = {
   key: string
-  original: string
-  src: string
-  srcSet?: string
-  localOriginal?: string
-  localSrc?: string
-  localSrcSet?: string
+  sources: Array<{
+    src: string
+    srcSet?: string
+  }>
 }
 
 const createResponsiveAsset = (originalPath: string): ResponsiveAsset => {
@@ -57,12 +66,10 @@ const createResponsiveAsset = (originalPath: string): ResponsiveAsset => {
   const remote640 = toRemoteMediaUrl(`${optimizedBase}-640.jpg`)
   const remote1200 = toRemoteMediaUrl(`${optimizedBase}-1200.jpg`)
   const remote1800 = toRemoteMediaUrl(`${optimizedBase}-1800.jpg`)
-  const remoteOriginal = toRemoteMediaUrl(normalizedPath)
 
   const local640 = toLocalMediaUrl(`${optimizedBase}-640.jpg`)
   const local1200 = toLocalMediaUrl(`${optimizedBase}-1200.jpg`)
   const local1800 = toLocalMediaUrl(`${optimizedBase}-1800.jpg`)
-  const localOriginal = toLocalMediaUrl(normalizedPath)
 
   const remoteSrcSet = buildSrcSet([
     { url: remote640, width: 640 },
@@ -76,17 +83,18 @@ const createResponsiveAsset = (originalPath: string): ResponsiveAsset => {
     { url: local1800, width: 1800 },
   ])
 
-  const primarySrc = remote1200 ?? local1200 ?? remoteOriginal ?? localOriginal ?? ''
-  const primaryOriginal = remoteOriginal ?? localOriginal ?? primarySrc
+  const sources = uniqueSources([
+    { src: remote640, srcSet: remoteSrcSet },
+    { src: local640, srcSet: localSrcSet },
+    { src: remote1200 },
+    { src: local1200 },
+    { src: remote1800 },
+    { src: local1800 },
+  ])
 
   return {
     key: normalizedPath,
-    original: primaryOriginal,
-    src: primarySrc,
-    srcSet: remoteSrcSet ?? localSrcSet,
-    localOriginal,
-    localSrc: local1200 ?? localOriginal,
-    localSrcSet,
+    sources,
   }
 }
 
@@ -96,6 +104,7 @@ type ResponsiveImageProps = {
   className?: string
   sizes: string
   loading?: 'eager' | 'lazy'
+  fetchPriority?: 'high' | 'low' | 'auto'
 }
 
 const ResponsiveImage = ({
@@ -104,32 +113,9 @@ const ResponsiveImage = ({
   className,
   sizes,
   loading = 'lazy',
+  fetchPriority = 'auto',
 }: ResponsiveImageProps) => {
-  const candidates = useMemo(() => {
-    const candidateList = [
-      {
-        src: asset.src,
-        srcSet: asset.srcSet,
-      },
-      {
-        src: asset.original,
-      },
-      {
-        src: asset.localSrc,
-        srcSet: asset.localSrcSet,
-      },
-      {
-        src: asset.localOriginal,
-      },
-    ].filter((candidate): candidate is { src: string; srcSet?: string } => Boolean(candidate.src))
-
-    const seen = new Set<string>()
-    return candidateList.filter((candidate) => {
-      if (seen.has(candidate.src)) return false
-      seen.add(candidate.src)
-      return true
-    })
-  }, [asset])
+  const candidates = useMemo(() => asset.sources, [asset.sources])
 
   const [candidateIndex, setCandidateIndex] = useState(0)
 
@@ -148,6 +134,7 @@ const ResponsiveImage = ({
       sizes={candidate.srcSet ? sizes : undefined}
       alt={alt}
       loading={loading}
+      fetchPriority={fetchPriority}
       decoding="async"
       onError={() =>
         setCandidateIndex((current) => Math.min(current + 1, Math.max(candidates.length - 1, 0)))
@@ -248,7 +235,7 @@ type RotatingGalleryProps = {
 }
 
 const getPrimaryPreloadSource = (asset: ResponsiveAsset) =>
-  asset.localSrc ?? asset.src ?? asset.localOriginal ?? asset.original
+  asset.sources[0]?.src ?? ''
 
 const RotatingGallery = ({
   title,
@@ -414,6 +401,8 @@ function App() {
                 alt="Portrait"
                 className="hero-card-image"
                 sizes="(max-width: 900px) 92vw, 32vw"
+                loading="eager"
+                fetchPriority="high"
               />
               <div className="hero-card-overlay">
                 <p>Portraits</p>
@@ -427,6 +416,8 @@ function App() {
                   alt="Landscape"
                   className="hero-card-image"
                   sizes="(max-width: 900px) 92vw, 66vw"
+                  loading="eager"
+                  fetchPriority="high"
                 />
               )}
               <div className="hero-card-overlay">
@@ -441,6 +432,7 @@ function App() {
                   alt="Travel"
                   className="hero-card-image"
                   sizes="(max-width: 900px) 92vw, 32vw"
+                  loading="eager"
                 />
               )}
               <div className="hero-card-overlay">
@@ -534,14 +526,23 @@ function App() {
               Want to book a shoot, collaborate, or hire me? Send a note and I’ll reply
               within two business days.
             </p>
+            <div className="contact-actions">
+              <a className="button primary" href="/book.html">
+                Book a shoot
+              </a>
+            </div>
           </div>
           <div className="contact-card">
-            <p className="muted">Email</p>
-            <p className="contact-line">rgapics@gmail.com</p>
-            <p className="muted">Instagram</p>
-            <a className="contact-line" href={instagramUrl} target="_blank" rel="noreferrer">
-              @rajugari_abbayi_photography
-            </a>
+            <div className="contact-item">
+              <p className="muted">Email</p>
+              <p className="contact-line">rgapics@gmail.com</p>
+            </div>
+            <div className="contact-item">
+              <p className="muted">Instagram</p>
+              <a className="contact-line" href={instagramUrl} target="_blank" rel="noreferrer">
+                @rajugari_abbayi_photography
+              </a>
+            </div>
           </div>
         </section>
       </main>
