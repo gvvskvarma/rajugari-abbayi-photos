@@ -1,6 +1,6 @@
 # Rajugari_Abbayi Photography
 
-A React + TypeScript portfolio showcasing featured photography, rotating portrait galleries, and a booking enquiry form.
+A React + TypeScript portfolio with externalized media URLs, synchronized rotating galleries, and a booking enquiry form.
 
 ## Getting started
 
@@ -9,20 +9,35 @@ npm install
 npm run dev
 ```
 
-## Adding portrait photos (auto-rotating)
+## Media hosting
 
-Drop images into these folders and they will auto-load and rotate every 2 seconds:
+The app resolves images in this order:
+- Remote CDN/storage (when `VITE_MEDIA_BASE_URL` is set)
+- Local files from `project-rga/...` (default fallback)
 
-- `src/assets/potraits/baby/`
-- `src/assets/potraits/potraits/`
-- `src/assets/potraits/events/`
+Set this in `.env` only if you want remote hosting:
 
-Supported formats: `jpg`, `jpeg`, `png`, `webp` (upper/lower case).
+```bash
+VITE_MEDIA_BASE_URL=https://cdn.jsdelivr.net/gh/gvvskvarma/rajugari-abbayi-photos@main
+```
+
+Notes:
+- `VITE_MEDIA_BASE_URL` should be the parent path that contains `project-rga/...` folders.
+- The app currently expects paths like `project-rga/landscapes/...` and `project-rga/potraits/...`.
+- If remote files fail, the app falls back to local files automatically.
+- For best performance, use optimized/resized derivatives in your CDN instead of original high-res files.
+
+Generate optimized derivatives from originals:
+
+```bash
+./scripts/generate-optimized-images.sh
+```
+
+This creates `640/1200/1800` JPEG variants in `project-rga/optimized/...`.
 
 ## Booking form (Formspree)
 
-1. Create a form at Formspree and copy the form endpoint.
-2. Add it to a `.env` file in the project root:
+Set your Formspree endpoint in `.env`:
 
 ```bash
 VITE_FORMSPREE_ENDPOINT=https://formspree.io/f/yourFormId
