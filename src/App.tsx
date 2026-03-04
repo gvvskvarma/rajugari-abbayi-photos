@@ -355,7 +355,7 @@ function App() {
             />
           </a>
           <div>
-            <a className="brand-title" href={instagramUrl} target="_blank" rel="noreferrer">
+            <a className="brand-title" href="#home">
               Rajugari_Abbayi_Photography
             </a>
             <a
@@ -371,8 +371,7 @@ function App() {
         <nav className="nav">
           <a href="#work">Work</a>
           <a href="#about">About</a>
-          <a href="#contact">Contact</a>
-          <a href="/book.html">Book</a>
+          <a href="/book.html">Contact</a>
         </nav>
       </header>
 
@@ -389,7 +388,7 @@ function App() {
               <a className="button primary" href="#work">
                 View the work
               </a>
-              <a className="button ghost" href="#contact">
+              <a className="button ghost" href="/book.html">
                 Let’s collaborate
               </a>
             </div>
@@ -528,7 +527,7 @@ function App() {
             </p>
             <div className="contact-actions">
               <a className="button primary" href="/book.html">
-                Book a shoot
+                Open contact form
               </a>
             </div>
           </div>

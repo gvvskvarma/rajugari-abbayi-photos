@@ -45,9 +45,7 @@
 .brand-subtitle {
   font-family: 'Twigs', serif;
   display: inline-block;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: color 0.2s ease, text-shadow 0.2s ease, opacity 0.2s ease;
 }
 
 .brand-title {
@@ -66,8 +64,8 @@
 
 .brand-title:hover,
 .brand-subtitle:hover {
-  border-color: var(--line-strong);
-  box-shadow: 0 0 0 4px rgba(200, 168, 121, 0.15);
+  color: #f6f2ea;
+  text-shadow: 0 0 16px rgba(200, 168, 121, 0.45);
   text-decoration: none;
 }
 

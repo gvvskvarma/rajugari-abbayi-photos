@@ -80,7 +80,7 @@ const BookPage = () => {
             <img src="/logo/IMG_3142.PNG" alt="Rajugari_Abbayi Photography logo" />
           </a>
           <div>
-            <a className="brand-title" href={instagramUrl} target="_blank" rel="noreferrer">
+            <a className="brand-title" href="/#home">
               Rajugari_Abbayi_Photography
             </a>
             <a className="brand-subtitle" href={personalInstagramUrl} target="_blank" rel="noreferrer">
@@ -91,7 +91,7 @@ const BookPage = () => {
         <nav className="nav">
           <a href="/#work">Work</a>
           <a href="/#about">About</a>
-          <a href="/#contact">Contact</a>
+          <a href="/book.html">Contact</a>
         </nav>
       </header>
 
@@ -104,6 +104,16 @@ const BookPage = () => {
               Share the essentials and I’ll follow up with availability, pricing,
               and next steps. Required fields are marked.
             </p>
+            <div className="book-direct-contact">
+              <p className="book-direct-label">Email</p>
+              <a className="book-direct-link" href="mailto:rgapics@gmail.com">
+                rgapics@gmail.com
+              </a>
+              <p className="book-direct-label">Instagram</p>
+              <a className="book-direct-link" href={instagramUrl} target="_blank" rel="noreferrer">
+                @rajugari_abbayi_photography
+              </a>
+            </div>
           </div>
           <div className="book-card">
             <p className="book-card-title">What happens next</p>
