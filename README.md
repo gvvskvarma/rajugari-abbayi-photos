@@ -50,6 +50,14 @@ The booking page lives at `/book.html`.
 - React + TypeScript
 - Vite
 
+## Week 1 backend architecture artifacts
+
+Day 1 planning artifacts for the platform stack (Cloudflare Workers + Hono + R2 + Supabase) are included here:
+
+- Supabase schema migration: `supabase/migrations/20260305_day1_init.sql`
+- API contract: `docs/api/day1-api-contract.md`
+- Environment template: `.env.example`
+
 ## Deploy on Vercel
 
 This repo includes `vercel.json` with build/output settings, asset cache headers, and basic security headers.
