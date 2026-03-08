@@ -58,6 +58,18 @@ Day 1 planning artifacts for the platform stack (Cloudflare Workers + Hono + R2 
 - API contract: `docs/api/day1-api-contract.md`
 - Environment template: `.env.example`
 
+Day 2-4 delivery/auth baseline artifacts:
+
+- Supabase migration: `supabase/migrations/20260307_day2_role_delivery.sql`
+- Flow/API notes: `docs/api/day2-customer-admin-flow.md`
+
+## App routes for role-aware flow
+
+- `/#home`: portfolio page (unchanged)
+- `/#my-pictures`: customer delivery view (email OTP login required)
+- `/#upload`: admin upload page (admin role required)
+- `/#share/<token>`: view-only share link
+
 ## Deploy on Vercel
 
 This repo includes `vercel.json` with build/output settings, asset cache headers, and basic security headers.
