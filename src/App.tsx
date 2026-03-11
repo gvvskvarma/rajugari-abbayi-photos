@@ -1170,7 +1170,7 @@ function App() {
               aria-label="Open login menu"
               onClick={() => setAuthMenuOpen((open) => !open)}
             >
-              <span aria-hidden>⎆</span>
+              <span aria-hidden>📷</span>
               <span className="login-label">LOGIN</span>
             </button>
 
