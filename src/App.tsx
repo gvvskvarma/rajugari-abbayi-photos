@@ -402,7 +402,6 @@ function App() {
   const [cycleStep, setCycleStep] = useState(0)
   const [authMenuOpen, setAuthMenuOpen] = useState(false)
   const [emailInput, setEmailInput] = useState('')
-  const [otpInput, setOtpInput] = useState('')
   const [authMessage, setAuthMessage] = useState('')
   const [authBusy, setAuthBusy] = useState(false)
   const [session, setSession] = useState<{ user: { id: string; email?: string } } | null>(null)
@@ -635,44 +634,14 @@ function App() {
       email,
       options: {
         shouldCreateUser: true,
+        emailRedirectTo: window.location.origin,
       },
     })
 
     if (error) {
       setAuthMessage(error.message)
     } else {
-      setAuthMessage('OTP sent. Enter the code from your email to continue.')
-    }
-
-    setAuthBusy(false)
-  }
-
-  const handleVerifyOtp = async (event: FormEvent) => {
-    event.preventDefault()
-    if (!supabase) return
-
-    const email = emailInput.trim().toLowerCase()
-    const token = otpInput.trim()
-    if (!email || !token) {
-      setAuthMessage('Enter both email and OTP code.')
-      return
-    }
-
-    setAuthBusy(true)
-    setAuthMessage('')
-
-    const { error } = await supabase.auth.verifyOtp({
-      email,
-      token,
-      type: 'email',
-    })
-
-    if (error) {
-      setAuthMessage(error.message)
-    } else {
-      setAuthMessage('Logged in successfully.')
-      setOtpInput('')
-      setAuthMenuOpen(false)
+      setAuthMessage('Magic link sent. Open your email to log in.')
     }
 
     setAuthBusy(false)
@@ -1201,14 +1170,15 @@ function App() {
               aria-label="Open login menu"
               onClick={() => setAuthMenuOpen((open) => !open)}
             >
-              <span>⎆</span>
+              <span aria-hidden>⎆</span>
+              <span className="login-label">LOGIN</span>
             </button>
 
             {authMenuOpen && (
               <div className="auth-menu">
                 {!isSupabaseConfigured && (
                   <p className="auth-note">
-                    Configure Supabase env vars to enable OTP login.
+                    Configure Supabase env vars to enable login.
                   </p>
                 )}
 
@@ -1235,23 +1205,7 @@ function App() {
                         />
                       </label>
                       <button className="button primary" type="submit" disabled={authBusy}>
-                        {authBusy ? 'Sending...' : 'Send OTP'}
-                      </button>
-                    </form>
-
-                    <form className="auth-form" onSubmit={handleVerifyOtp}>
-                      <label>
-                        OTP code
-                        <input
-                          type="text"
-                          value={otpInput}
-                          onChange={(event) => setOtpInput(event.target.value)}
-                          placeholder="6-digit code"
-                          required
-                        />
-                      </label>
-                      <button className="button ghost" type="submit" disabled={authBusy}>
-                        Verify & Login
+                        {authBusy ? 'Sending...' : 'Send Magic Link'}
                       </button>
                     </form>
                   </>
