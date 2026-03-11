@@ -68,3 +68,16 @@ In Vercel:
 3. Add environment variable:
    - `VITE_FORMSPREE_ENDPOINT=https://formspree.io/f/mzdabzwy`
 4. Deploy.
+
+## Day 2 auth/admin artifacts
+
+- Supabase migration: `supabase/migrations/20260310_day2_auth_roles_admin.sql`
+- API contract: `docs/api/day2-auth-admin-contract.md`
+- Frontend: role-guarded admin dashboard in `src/App.tsx`
+
+## Day 3 upload pipeline artifacts
+
+- Supabase migration: `supabase/migrations/20260311_day3_upload_pipeline.sql`
+- API contract: `docs/api/day3-upload-pipeline-contract.md`
+- Worker APIs: `POST /api/v1/request-upload-url` and `POST /api/v1/upload/complete`
+- Frontend: admin direct-to-R2 upload flow with retry/progress in `src/App.tsx`

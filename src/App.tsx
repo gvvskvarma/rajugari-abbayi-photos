@@ -1,555 +1,667 @@
 import { useEffect, useMemo, useState } from 'react'
+import type { FormEvent } from 'react'
+import type { Session } from '@supabase/supabase-js'
+import { supabase } from './lib/supabase'
 import './App.css'
 
-const instagramUrl =
-  'https://www.instagram.com/rajugari_abbayi_photography?igsh=azYxaHdwYmdhaTh0&utm_source=qr'
-const personalInstagramUrl =
-  'https://www.instagram.com/rajugari_abbayi?igsh=MTB3MHk4ODZxODM5dg%3D%3D&utm_source=qr'
+type Role = 'admin' | 'customer'
 
-const mediaBaseUrl = (import.meta.env.VITE_MEDIA_BASE_URL ?? '').trim().replace(/\/+$/, '')
+type Profile = {
+  id: string
+  email: string
+  role: Role
+  displayName: string | null
+}
 
-const localMediaAssetUrls = import.meta.glob(
-  '/project-rga/optimized/**/*.{jpg,jpeg,JPG,JPEG,png,PNG,webp,WEBP}',
-  {
-    eager: true,
-    import: 'default',
-    query: '?url',
+type Client = {
+  id: string
+  full_name: string
+  email: string
+  phone: string | null
+  notes: string | null
+}
+
+type Project = {
+  id: string
+  client_id: string
+  name: string
+  description: string | null
+  shoot_date: string | null
+  location: string | null
+  status: 'draft' | 'active' | 'completed' | 'archived'
+}
+
+type UploadRecord = {
+  fileName: string
+  status: 'pending' | 'uploading' | 'finalizing' | 'done' | 'failed'
+  attempts: number
+  progress: number
+  message: string
+}
+
+const apiBase = (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/+$/, '')
+
+const apiRequest = async <T,>(
+  path: string,
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  token: string,
+  body?: unknown
+): Promise<T> => {
+  const response = await fetch(`${apiBase}${path}`, {
+    method,
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  })
+
+  const text = await response.text()
+  const parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {}
+
+  if (!response.ok) {
+    const message =
+      typeof parsed?.error === 'object' &&
+      parsed.error !== null &&
+      typeof (parsed.error as { message?: string }).message === 'string'
+        ? ((parsed.error as { message: string }).message ?? 'Request failed')
+        : 'Request failed'
+    throw new Error(message)
   }
-) as Record<string, string>
 
-const normalizeMediaPath = (path: string) => path.replace(/^\/+/, '')
-
-const toRemoteMediaUrl = (path: string) => {
-  if (!mediaBaseUrl) return undefined
-  if (/^https?:\/\//.test(path)) return path
-  return `${mediaBaseUrl}/${normalizeMediaPath(path)}`
+  return parsed as T
 }
 
-const toLocalMediaUrl = (path: string) => {
-  const key = `/${normalizeMediaPath(path)}`
-  return localMediaAssetUrls[key]
-}
+const pause = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
-const buildSrcSet = (variants: Array<{ url?: string; width: number }>) => {
-  const srcSet = variants
-    .filter((variant): variant is { url: string; width: number } => Boolean(variant.url))
-    .map((variant) => `${variant.url} ${variant.width}w`)
-    .join(', ')
-  return srcSet || undefined
-}
+const putFileToSignedUrl = (
+  uploadUrl: string,
+  file: File,
+  onProgress: (value: number) => void
+): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest()
+    request.open('PUT', uploadUrl)
+    request.timeout = 2 * 60 * 1000
+    request.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return
+      onProgress(Math.round((event.loaded / event.total) * 100))
+    }
+    request.onerror = () => reject(new Error('Network upload error'))
+    request.ontimeout = () => reject(new Error('Upload timed out'))
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) {
+        onProgress(100)
+        resolve()
+        return
+      }
+      reject(new Error(`Upload failed with status ${request.status}`))
+    }
+    request.send(file)
+  })
 
-const uniqueSources = (sources: Array<{ src?: string; srcSet?: string }>) => {
-  const seen = new Set<string>()
-  return sources
-    .filter((source): source is { src: string; srcSet?: string } => Boolean(source.src))
-    .filter((source) => {
-      if (seen.has(source.src)) return false
-      seen.add(source.src)
-      return true
-    })
-}
+const ClientEditor = ({
+  client,
+  token,
+  onSaved,
+  onDeleted,
+}: {
+  client: Client
+  token: string
+  onSaved: (client: Client) => void
+  onDeleted: (id: string) => void
+}) => {
+  const [fullName, setFullName] = useState(client.full_name)
+  const [email, setEmail] = useState(client.email)
+  const [phone, setPhone] = useState(client.phone ?? '')
+  const [notes, setNotes] = useState(client.notes ?? '')
+  const [busy, setBusy] = useState(false)
 
-type ResponsiveAsset = {
-  key: string
-  sources: Array<{
-    src: string
-    srcSet?: string
-  }>
-}
-
-const createResponsiveAsset = (originalPath: string): ResponsiveAsset => {
-  const normalizedPath = normalizeMediaPath(originalPath)
-  const optimizedBase = normalizedPath
-    .replace(/^project-rga\//, 'project-rga/optimized/')
-    .replace(/\.[^.]+$/, '')
-
-  const remote640 = toRemoteMediaUrl(`${optimizedBase}-640.jpg`)
-  const remote1200 = toRemoteMediaUrl(`${optimizedBase}-1200.jpg`)
-  const remote1800 = toRemoteMediaUrl(`${optimizedBase}-1800.jpg`)
-
-  const local640 = toLocalMediaUrl(`${optimizedBase}-640.jpg`)
-  const local1200 = toLocalMediaUrl(`${optimizedBase}-1200.jpg`)
-  const local1800 = toLocalMediaUrl(`${optimizedBase}-1800.jpg`)
-
-  const remoteSrcSet = buildSrcSet([
-    { url: remote640, width: 640 },
-    { url: remote1200, width: 1200 },
-    { url: remote1800, width: 1800 },
-  ])
-
-  const localSrcSet = buildSrcSet([
-    { url: local640, width: 640 },
-    { url: local1200, width: 1200 },
-    { url: local1800, width: 1800 },
-  ])
-
-  const sources = uniqueSources([
-    { src: remote640, srcSet: remoteSrcSet },
-    { src: local640, srcSet: localSrcSet },
-    { src: remote1200 },
-    { src: local1200 },
-    { src: remote1800 },
-    { src: local1800 },
-  ])
-
-  return {
-    key: normalizedPath,
-    sources,
+  const save = async () => {
+    setBusy(true)
+    try {
+      const data = await apiRequest<{ client: Client }>(
+        `/api/v1/admin/clients/${client.id}`,
+        'PATCH',
+        token,
+        { fullName, email, phone, notes }
+      )
+      onSaved(data.client)
+    } finally {
+      setBusy(false)
+    }
   }
-}
 
-type ResponsiveImageProps = {
-  asset: ResponsiveAsset
-  alt: string
-  className?: string
-  sizes: string
-  loading?: 'eager' | 'lazy'
-  fetchPriority?: 'high' | 'low' | 'auto'
-}
-
-const ResponsiveImage = ({
-  asset,
-  alt,
-  className,
-  sizes,
-  loading = 'lazy',
-  fetchPriority = 'auto',
-}: ResponsiveImageProps) => {
-  const candidates = useMemo(() => asset.sources, [asset.sources])
-
-  const [candidateIndex, setCandidateIndex] = useState(0)
-
-  useEffect(() => {
-    setCandidateIndex(0)
-  }, [asset])
-
-  const candidate = candidates[Math.min(candidateIndex, Math.max(candidates.length - 1, 0))]
-  if (!candidate) return null
+  const remove = async () => {
+    if (!confirm('Delete this client?')) return
+    setBusy(true)
+    try {
+      await apiRequest<{ ok: boolean }>(`/api/v1/admin/clients/${client.id}`, 'DELETE', token)
+      onDeleted(client.id)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
-    <img
-      className={className}
-      src={candidate.src}
-      srcSet={candidate.srcSet}
-      sizes={candidate.srcSet ? sizes : undefined}
-      alt={alt}
-      loading={loading}
-      fetchPriority={fetchPriority}
-      decoding="async"
-      onError={() =>
-        setCandidateIndex((current) => Math.min(current + 1, Math.max(candidates.length - 1, 0)))
-      }
-    />
+    <div className="card compact">
+      <div className="grid">
+        <input value={fullName} onChange={(event) => setFullName(event.target.value)} />
+        <input value={email} onChange={(event) => setEmail(event.target.value)} />
+        <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="Phone" />
+        <input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Notes" />
+      </div>
+      <div className="actions">
+        <button disabled={busy} onClick={save}>
+          Save
+        </button>
+        <button disabled={busy} className="danger" onClick={remove}>
+          Delete
+        </button>
+      </div>
+    </div>
   )
 }
 
-type GalleryShot = {
-  image: ResponsiveAsset
-  title: string
-  tag: string
-}
+const ProjectEditor = ({
+  project,
+  token,
+  onSaved,
+  onDeleted,
+}: {
+  project: Project
+  token: string
+  onSaved: (project: Project) => void
+  onDeleted: (id: string) => void
+}) => {
+  const [name, setName] = useState(project.name)
+  const [status, setStatus] = useState<Project['status']>(project.status)
+  const [description, setDescription] = useState(project.description ?? '')
+  const [shootDate, setShootDate] = useState(project.shoot_date ?? '')
+  const [location, setLocation] = useState(project.location ?? '')
+  const [busy, setBusy] = useState(false)
 
-const landscapePaths = [
-  'project-rga/landscapes/RGA02744.jpg',
-  'project-rga/landscapes/RGA02755.jpg',
-  'project-rga/landscapes/RGA02761.jpg',
-  'project-rga/landscapes/RGA02807.jpg',
-  'project-rga/landscapes/RGA03800.jpg',
-]
-
-const featuredShots: GalleryShot[] = [
-  {
-    image: createResponsiveAsset(landscapePaths[0]),
-    title: 'North Cascades',
-    tag: 'Landscape',
-  },
-  {
-    image: createResponsiveAsset(landscapePaths[1]),
-    title: 'North Cascades',
-    tag: 'Landscape',
-  },
-  {
-    image: createResponsiveAsset(landscapePaths[2]),
-    title: 'North Cascades',
-    tag: 'Landscape',
-  },
-  {
-    image: createResponsiveAsset(landscapePaths[3]),
-    title: 'North Cascades',
-    tag: 'Landscape',
-  },
-  {
-    image: createResponsiveAsset(landscapePaths[4]),
-    title: 'San Francisco',
-    tag: 'Landscape',
-  },
-]
-
-const babyImages = [
-  'project-rga/potraits/baby/RGA03628.jpg',
-  'project-rga/potraits/baby/RGA03631.jpg',
-  'project-rga/potraits/baby/RGA03639.jpg',
-  'project-rga/potraits/baby/RGA03656.jpg',
-  'project-rga/potraits/baby/RGA03664.jpg',
-  'project-rga/potraits/baby/RGA03667.jpg',
-].map(createResponsiveAsset)
-
-const portraitImages = [
-  'project-rga/potraits/potraits/RGA04154.jpg',
-  'project-rga/potraits/potraits/RGA04156.jpg',
-  'project-rga/potraits/potraits/RGA04170-2.jpg',
-  'project-rga/potraits/potraits/RGA04174-2.jpg',
-  'project-rga/potraits/potraits/RGA04188-2.jpg',
-  'project-rga/potraits/potraits/RGA04203-2.jpg',
-  'project-rga/potraits/potraits/RGA04280.jpg',
-  'project-rga/potraits/potraits/RGA04306-4.jpg',
-].map(createResponsiveAsset)
-
-const eventImages = [
-  'project-rga/potraits/events/RGA03248-2.jpg',
-  'project-rga/potraits/events/RGA03250.jpg',
-  'project-rga/potraits/events/RGA03281.jpg',
-  'project-rga/potraits/events/RGA03341.jpg',
-  'project-rga/potraits/events/RGA03884.jpg',
-  'project-rga/potraits/events/RGA03886.jpg',
-  'project-rga/potraits/events/RGA03898.jpg',
-  'project-rga/potraits/events/RGA03987.jpg',
-  'project-rga/potraits/events/RGA03994.jpg',
-  'project-rga/potraits/events/RGA04058.jpg',
-  'project-rga/potraits/events/RGA04064.jpg',
-  'project-rga/potraits/events/RGA04135.jpg',
-  'project-rga/potraits/events/RGA04158.jpg',
-  'project-rga/potraits/events/RGA04191.jpg',
-  'project-rga/potraits/events/RGA04205.jpg',
-].map(createResponsiveAsset)
-
-const heroPortrait = createResponsiveAsset('project-rga/potraits/events/RGA03248-2.jpg')
-const heroLandscape = featuredShots[0]?.image
-const heroTravel = featuredShots[4]?.image ?? featuredShots[2]?.image
-
-type RotatingGalleryProps = {
-  title: string
-  subtitle: string
-  images: ResponsiveAsset[]
-  cycleStep: number
-}
-
-const getPrimaryPreloadSource = (asset: ResponsiveAsset) =>
-  asset.sources[0]?.src ?? ''
-
-const RotatingGallery = ({
-  title,
-  subtitle,
-  images,
-  cycleStep,
-}: RotatingGalleryProps) => {
-  const [displayIndex, setDisplayIndex] = useState(0)
-  const [incomingIndex, setIncomingIndex] = useState<number | null>(null)
-  const [isTransitioning, setIsTransitioning] = useState(false)
-
-  useEffect(() => {
-    if (images.length === 0) {
-      setDisplayIndex(0)
-      setIncomingIndex(null)
-      setIsTransitioning(false)
-      return
+  const save = async () => {
+    setBusy(true)
+    try {
+      const data = await apiRequest<{ project: Project }>(
+        `/api/v1/admin/projects/${project.id}`,
+        'PATCH',
+        token,
+        { name, status, description, shootDate, location }
+      )
+      onSaved(data.project)
+    } finally {
+      setBusy(false)
     }
-    setDisplayIndex((current) => current % images.length)
-  }, [images.length])
+  }
 
-  useEffect(() => {
-    if (images.length === 0 || isTransitioning || incomingIndex !== null) return
-    const nextIndex = cycleStep % images.length
-    if (nextIndex === displayIndex) return
-
-    let canceled = false
-    const preloadImage = new Image()
-    preloadImage.src = getPrimaryPreloadSource(images[nextIndex])
-
-    const beginTransition = () => {
-      if (canceled) return
-      setIncomingIndex(nextIndex)
-      setIsTransitioning(true)
+  const remove = async () => {
+    if (!confirm('Delete this project?')) return
+    setBusy(true)
+    try {
+      await apiRequest<{ ok: boolean }>(`/api/v1/admin/projects/${project.id}`, 'DELETE', token)
+      onDeleted(project.id)
+    } finally {
+      setBusy(false)
     }
-
-    if (typeof preloadImage.decode === 'function') {
-      preloadImage.decode().then(beginTransition).catch(beginTransition)
-    } else {
-      preloadImage.onload = beginTransition
-      preloadImage.onerror = beginTransition
-    }
-
-    return () => {
-      canceled = true
-    }
-  }, [cycleStep, displayIndex, images, incomingIndex, isTransitioning])
-
-  useEffect(() => {
-    if (!isTransitioning || incomingIndex === null) return
-    const timeout = window.setTimeout(() => {
-      setDisplayIndex(incomingIndex % images.length)
-      setIncomingIndex(null)
-      setIsTransitioning(false)
-    }, 520)
-    return () => window.clearTimeout(timeout)
-  }, [images.length, incomingIndex, isTransitioning])
-
-  const active = images.length > 0 ? images[displayIndex % images.length] : undefined
-  const incoming =
-    incomingIndex !== null && images.length > 0 ? images[incomingIndex % images.length] : undefined
+  }
 
   return (
-    <div className="rotator">
-      <div className="rotator-card">
-        {active ? (
-          <div className="rotator-image-stack">
-            <ResponsiveImage
-              asset={active}
-              alt={title}
-              className="rotator-image"
-              sizes="(max-width: 900px) 92vw, 33vw"
-            />
-            {incoming && isTransitioning && (
-              <ResponsiveImage
-                asset={incoming}
-                alt={title}
-                className="rotator-image rotator-image-enter"
-                sizes="(max-width: 900px) 92vw, 33vw"
-              />
-            )}
-          </div>
-        ) : (
-          <div className="rotator-placeholder">
-            <p>Add {title} photos</p>
-            <span>Add files to project-rga folders</span>
-          </div>
-        )}
-        <div className="rotator-overlay">
-          <p>{title}</p>
-          <span>{subtitle}</span>
-        </div>
+    <div className="card compact">
+      <div className="grid">
+        <input value={name} onChange={(event) => setName(event.target.value)} />
+        <select value={status} onChange={(event) => setStatus(event.target.value as Project['status'])}>
+          <option value="draft">Draft</option>
+          <option value="active">Active</option>
+          <option value="completed">Completed</option>
+          <option value="archived">Archived</option>
+        </select>
+        <input
+          value={shootDate}
+          onChange={(event) => setShootDate(event.target.value)}
+          placeholder="Shoot date YYYY-MM-DD"
+        />
+        <input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Location" />
+        <input
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+          placeholder="Description"
+        />
+      </div>
+      <div className="actions">
+        <button disabled={busy} onClick={save}>
+          Save
+        </button>
+        <button disabled={busy} className="danger" onClick={remove}>
+          Delete
+        </button>
       </div>
     </div>
   )
 }
 
 function App() {
-  const [cycleStep, setCycleStep] = useState(0)
+  const [session, setSession] = useState<Session | null>(null)
+  const [profile, setProfile] = useState<Profile | null>(null)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [authMessage, setAuthMessage] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  const [clients, setClients] = useState<Client[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
+  const [newClientName, setNewClientName] = useState('')
+  const [newClientEmail, setNewClientEmail] = useState('')
+  const [newProjectName, setNewProjectName] = useState('')
+  const [newProjectClientId, setNewProjectClientId] = useState('')
+  const [uploadDeliveryId, setUploadDeliveryId] = useState('')
+  const [uploadQueue, setUploadQueue] = useState<File[]>([])
+  const [uploadRecords, setUploadRecords] = useState<UploadRecord[]>([])
+  const [isUploading, setIsUploading] = useState(false)
+
+  const token = session?.access_token ?? ''
+
+  const sortedClients = useMemo(() => [...clients].sort((a, b) => a.full_name.localeCompare(b.full_name)), [clients])
+
+  const loadAdminData = async (accessToken: string) => {
+    const [clientsResponse, projectsResponse] = await Promise.all([
+      apiRequest<{ clients: Client[] }>('/api/v1/admin/clients', 'GET', accessToken),
+      apiRequest<{ projects: Project[] }>('/api/v1/admin/projects', 'GET', accessToken),
+    ])
+    setClients(clientsResponse.clients)
+    setProjects(projectsResponse.projects)
+  }
+
+  const loadProfile = async (activeSession: Session | null) => {
+    if (!activeSession) {
+      setProfile(null)
+      setClients([])
+      setProjects([])
+      setLoading(false)
+      return
+    }
+
+    setLoading(true)
+    setError('')
+    try {
+      const me = await apiRequest<Profile>('/api/v1/me', 'GET', activeSession.access_token)
+      setProfile(me)
+      if (me.role === 'admin') {
+        await loadAdminData(activeSession.access_token)
+      }
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Failed to load profile')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
-    const id = window.setInterval(() => {
-      setCycleStep((current) => current + 1)
-    }, 2000)
-    return () => window.clearInterval(id)
+    let mounted = true
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return
+      setSession(data.session)
+      void loadProfile(data.session)
+    })
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession)
+      void loadProfile(nextSession)
+    })
+
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
   }, [])
 
-  return (
-    <div className="page">
-      <header className="topbar">
-        <div className="brand">
-          <a className="brand-mark" href="#home" aria-label="Go to top">
-            <img
-              src="/logo/IMG_3142.PNG"
-              alt="Rajugari_Abbayi Photography logo"
-              loading="lazy"
-            />
-          </a>
-          <div>
-            <a className="brand-title" href="#home">
-              Rajugari_Abbayi_Photography
-            </a>
-            <a
-              className="brand-subtitle"
-              href={personalInstagramUrl}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Vishnu Varma
-            </a>
-          </div>
-        </div>
-        <nav className="nav">
-          <a href="#work">Work</a>
-          <a href="#about">About</a>
-          <a href="/book.html">Contact</a>
-        </nav>
-      </header>
+  const onLogin = async (event: FormEvent) => {
+    event.preventDefault()
+    setError('')
+    setAuthMessage('')
 
-      <main>
-        <section id="home" className="hero">
-          <div className="hero-text">
-            <p className="eyebrow">Photography portfolio</p>
-            <h1>Light, texture, and quiet moments — curated from my shoots.</h1>
-            <p className="lead">
-              I focus on landscapes, portraits, and the subtle details that make
-              a scene feel alive. Browse the gallery and reach out to collaborate.
-            </p>
-            <div className="hero-actions">
-              <a className="button primary" href="#work">
-                View the work
-              </a>
-              <a className="button ghost" href="/book.html">
-                Let’s collaborate
-              </a>
-            </div>
-          </div>
-          <div className="hero-cards">
-            <div className="hero-card tall">
-              <ResponsiveImage
-                asset={heroPortrait}
-                alt="Portrait"
-                className="hero-card-image"
-                sizes="(max-width: 900px) 92vw, 32vw"
-                loading="eager"
-                fetchPriority="high"
-              />
-              <div className="hero-card-overlay">
-                <p>Portraits</p>
-                <span>Studio & natural light</span>
-              </div>
-            </div>
-            <div className="hero-card wide">
-              {heroLandscape && (
-                <ResponsiveImage
-                  asset={heroLandscape}
-                  alt="Landscape"
-                  className="hero-card-image"
-                  sizes="(max-width: 900px) 92vw, 66vw"
-                  loading="eager"
-                  fetchPriority="high"
-                />
-              )}
-              <div className="hero-card-overlay">
-                <p>Landscapes</p>
-                <span>Golden hour stories</span>
-              </div>
-            </div>
-            <div className="hero-card square">
-              {heroTravel && (
-                <ResponsiveImage
-                  asset={heroTravel}
-                  alt="Travel"
-                  className="hero-card-image"
-                  sizes="(max-width: 900px) 92vw, 32vw"
-                  loading="eager"
-                />
-              )}
-              <div className="hero-card-overlay">
-                <p>Travel</p>
-                <span>Everyday poetry</span>
-              </div>
-            </div>
-          </div>
-        </section>
+    try {
+      if (password.trim()) {
+        const { error: loginError } = await supabase.auth.signInWithPassword({ email, password })
+        if (loginError) throw loginError
+        setAuthMessage('Signed in successfully.')
+      } else {
+        const { error: otpError } = await supabase.auth.signInWithOtp({
+          email,
+          options: { emailRedirectTo: window.location.origin },
+        })
+        if (otpError) throw otpError
+        setAuthMessage('Magic link sent. Complete login from your email inbox.')
+      }
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : 'Sign-in failed')
+    }
+  }
 
-        <section id="work" className="work">
-          <div className="section-head">
-            <h2>Landscapes</h2>
-            <p>
-              A curated selection of my favorite scenes from the road. Each frame is a
-              slow, cinematic moment.
-            </p>
-          </div>
+  const onLogout = async () => {
+    await supabase.auth.signOut()
+    setAuthMessage('Signed out.')
+  }
 
-          <div className="grid">
-            {featuredShots.map((shot) => (
-              <div key={shot.image.key} className="shot">
-                <ResponsiveImage
-                  asset={shot.image}
-                  alt={shot.title}
-                  sizes="(max-width: 900px) 92vw, (max-width: 1200px) 44vw, 30vw"
-                />
-                <div className="shot-overlay">
-                  <p>{shot.title}</p>
-                  <span>{shot.tag}</span>
-                </div>
-              </div>
-            ))}
-          </div>
+  const createClient = async (event: FormEvent) => {
+    event.preventDefault()
+    setError('')
+    const data = await apiRequest<{ client: Client }>('/api/v1/admin/clients', 'POST', token, {
+      fullName: newClientName,
+      email: newClientEmail,
+    })
+    setClients((current) => [data.client, ...current])
+    setNewClientName('')
+    setNewClientEmail('')
+    if (!newProjectClientId) setNewProjectClientId(data.client.id)
+  }
 
-          <div className="work-block">
-            <div className="section-head">
-              <h2>Portrait stories</h2>
-              <p>
-                Three rotating collections for baby portraits, classic portraits,
-                and event moments.
-              </p>
-            </div>
-            <div className="rotator-grid">
-              <RotatingGallery
-                title="BABY SHOOTS"
-                subtitle="New beginnings"
-                images={babyImages}
-                cycleStep={cycleStep}
-              />
-              <RotatingGallery
-                title="Portraits"
-                subtitle="People & personality"
-                images={portraitImages}
-                cycleStep={cycleStep}
-              />
-              <RotatingGallery
-                title="Events"
-                subtitle="Milestones & energy"
-                images={eventImages}
-                cycleStep={cycleStep}
-              />
-            </div>
-          </div>
-        </section>
+  const createProject = async (event: FormEvent) => {
+    event.preventDefault()
+    setError('')
+    const data = await apiRequest<{ project: Project }>('/api/v1/admin/projects', 'POST', token, {
+      clientId: newProjectClientId,
+      name: newProjectName,
+    })
+    setProjects((current) => [data.project, ...current])
+    setNewProjectName('')
+  }
 
-        <section id="about" className="about">
-          <div>
-            <h2>About the lens</h2>
-            <p>
-              I’m Vishnu Varma, a photographer focused on candid stories, textured light,
-              and the quiet energy of people in their spaces. My work blends editorial
-              composition with documentary honesty.
-            </p>
-          </div>
-          <div className="about-card">
-            <h3>Available for</h3>
-            <ul>
-              <li>Portrait sessions</li>
-              <li>Brand campaigns</li>
-              <li>Editorial shoots</li>
-              <li>Travel collaborations</li>
-            </ul>
-          </div>
-        </section>
+  const updateUploadRecord = (fileName: string, patch: Partial<UploadRecord>) => {
+    setUploadRecords((current) =>
+      current.map((record) => (record.fileName === fileName ? { ...record, ...patch } : record))
+    )
+  }
 
-        <section id="contact" className="contact">
-          <div>
-            <h2>Let’s build something beautiful</h2>
-            <p>
-              Want to book a shoot, collaborate, or hire me? Send a note and I’ll reply
-              within two business days.
-            </p>
-            <div className="contact-actions">
-              <a className="button primary" href="/book.html">
-                Open contact form
-              </a>
-            </div>
-          </div>
-          <div className="contact-card">
-            <div className="contact-item">
-              <p className="muted">Email</p>
-              <p className="contact-line">rgapics@gmail.com</p>
-            </div>
-            <div className="contact-item">
-              <p className="muted">Instagram</p>
-              <a className="contact-line" href={instagramUrl} target="_blank" rel="noreferrer">
-                @rajugari_abbayi_photography
-              </a>
-            </div>
-          </div>
+  const uploadSelectedFiles = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!uploadDeliveryId.trim() || uploadQueue.length === 0 || !token) return
+
+    setError('')
+    setAuthMessage('')
+    setIsUploading(true)
+    setUploadRecords(
+      uploadQueue.map((file) => ({
+        fileName: file.name,
+        status: 'pending',
+        attempts: 0,
+        progress: 0,
+        message: 'Queued',
+      }))
+    )
+
+    try {
+      const failedUploads: string[] = []
+      for (const file of uploadQueue) {
+        let completed = false
+        for (let attempt = 1; attempt <= 3 && !completed; attempt += 1) {
+          updateUploadRecord(file.name, {
+            status: 'uploading',
+            attempts: attempt,
+            message: `Requesting signed URL (attempt ${attempt}/3)...`,
+            progress: 0,
+          })
+
+          try {
+            const requestResult = await apiRequest<{
+              objectKey: string
+              uploadToken: string
+              uploadUrl: string
+              expiresInSeconds: number
+            }>('/api/v1/request-upload-url', 'POST', token, {
+              deliveryId: uploadDeliveryId.trim(),
+              fileName: file.name,
+              contentType: file.type || 'application/octet-stream',
+              fileSize: file.size,
+            })
+
+            updateUploadRecord(file.name, {
+              status: 'uploading',
+              message: `Uploading directly to R2 (attempt ${attempt}/3)...`,
+            })
+
+            await putFileToSignedUrl(requestResult.uploadUrl, file, (progress) => {
+              updateUploadRecord(file.name, { progress })
+            })
+
+            updateUploadRecord(file.name, {
+              status: 'finalizing',
+              message: 'Saving asset metadata...',
+            })
+
+            await apiRequest<{ ok: boolean; assetId: string | null }>('/api/v1/upload/complete', 'POST', token, {
+              deliveryId: uploadDeliveryId.trim(),
+              objectKey: requestResult.objectKey,
+              uploadToken: requestResult.uploadToken,
+              fileName: file.name,
+              mimeType: file.type || 'application/octet-stream',
+              bytes: file.size,
+            })
+
+            updateUploadRecord(file.name, {
+              status: 'done',
+              progress: 100,
+              message: 'Upload completed',
+            })
+            completed = true
+          } catch (uploadError) {
+            const reason = uploadError instanceof Error ? uploadError.message : 'Upload failed'
+            const hasRetry = attempt < 3
+            updateUploadRecord(file.name, {
+              status: hasRetry ? 'uploading' : 'failed',
+              message: hasRetry ? `${reason} — retrying...` : reason,
+            })
+            if (hasRetry) {
+              await pause(attempt * 800)
+              continue
+            }
+            failedUploads.push(file.name)
+          }
+        }
+      }
+      if (failedUploads.length > 0) {
+        setError(`Some uploads failed: ${failedUploads.join(', ')}`)
+      } else {
+        setAuthMessage('All selected uploads completed successfully.')
+      }
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  if (!apiBase) {
+    return (
+      <main className="page">
+        <section className="card">
+          <h1>Day 2 Admin Base</h1>
+          <p>Set VITE_API_BASE_URL in your .env file before running this app.</p>
         </section>
       </main>
+    )
+  }
 
-      <footer className="footer">
-        <p>© 2026 Rajugari_Abbayi Photography. Crafted with intention.</p>
-      </footer>
-    </div>
+  return (
+    <main className="page">
+      <section className="card">
+        <h1>Week 1 Day 3: Upload Pipeline</h1>
+        <p className="muted">Stack: React + Supabase auth + Cloudflare Worker signed R2 upload flow.</p>
+
+        {!session ? (
+          <form onSubmit={onLogin} className="stack">
+            <label>
+              Email
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="admin@example.com"
+                required
+              />
+            </label>
+            <label>
+              Password (optional)
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="Use blank for magic-link login"
+              />
+            </label>
+            <button type="submit">Sign In</button>
+          </form>
+        ) : (
+          <div className="stack">
+            <div className="row between">
+              <div>
+                <p className="muted">Logged in as</p>
+                <strong>{profile?.email ?? session.user.email}</strong>
+              </div>
+              <button onClick={onLogout}>Sign Out</button>
+            </div>
+          </div>
+        )}
+
+        {authMessage && <p className="success">{authMessage}</p>}
+        {error && <p className="error">{error}</p>}
+      </section>
+
+      {loading ? <section className="card">Loading account context...</section> : null}
+
+      {session && profile && profile.role !== 'admin' ? (
+        <section className="card">
+          <h2>Role Guard Active</h2>
+          <p>
+            Your role is <strong>{profile.role}</strong>. Admin CRUD endpoints are blocked for this account.
+          </p>
+        </section>
+      ) : null}
+
+      {session && profile?.role === 'admin' ? (
+        <>
+          <section className="card">
+            <h2>Admin Clients CRUD</h2>
+            <form onSubmit={createClient} className="row">
+              <input
+                value={newClientName}
+                onChange={(event) => setNewClientName(event.target.value)}
+                placeholder="Client full name"
+                required
+              />
+              <input
+                type="email"
+                value={newClientEmail}
+                onChange={(event) => setNewClientEmail(event.target.value)}
+                placeholder="client@example.com"
+                required
+              />
+              <button type="submit">Create Client</button>
+            </form>
+            <div className="stack">
+              {sortedClients.map((client) => (
+                <ClientEditor
+                  key={client.id}
+                  client={client}
+                  token={token}
+                  onSaved={(saved) => setClients((current) => current.map((item) => (item.id === saved.id ? saved : item)))}
+                  onDeleted={(id) => setClients((current) => current.filter((item) => item.id !== id))}
+                />
+              ))}
+              {sortedClients.length === 0 ? <p className="muted">No clients yet.</p> : null}
+            </div>
+          </section>
+
+          <section className="card">
+            <h2>Admin Projects CRUD</h2>
+            <form onSubmit={createProject} className="row">
+              <select
+                value={newProjectClientId}
+                onChange={(event) => setNewProjectClientId(event.target.value)}
+                required
+              >
+                <option value="">Select client</option>
+                {sortedClients.map((client) => (
+                  <option key={client.id} value={client.id}>
+                    {client.full_name}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={newProjectName}
+                onChange={(event) => setNewProjectName(event.target.value)}
+                placeholder="Project name"
+                required
+              />
+              <button type="submit">Create Project</button>
+            </form>
+
+            <div className="stack">
+              {projects.map((project) => (
+                <ProjectEditor
+                  key={project.id}
+                  project={project}
+                  token={token}
+                  onSaved={(saved) =>
+                    setProjects((current) => current.map((item) => (item.id === saved.id ? saved : item)))
+                  }
+                  onDeleted={(id) => setProjects((current) => current.filter((item) => item.id !== id))}
+                />
+              ))}
+              {projects.length === 0 ? <p className="muted">No projects yet.</p> : null}
+            </div>
+          </section>
+
+          <section className="card">
+            <h2>Admin Upload Pipeline</h2>
+            <form onSubmit={uploadSelectedFiles} className="stack">
+              <label>
+                Delivery ID
+                <input
+                  value={uploadDeliveryId}
+                  onChange={(event) => setUploadDeliveryId(event.target.value)}
+                  placeholder="UUID delivery id"
+                  required
+                />
+              </label>
+              <label>
+                Files
+                <input
+                  type="file"
+                  multiple
+                  onChange={(event) => setUploadQueue(Array.from(event.target.files ?? []))}
+                  required
+                />
+              </label>
+              <button type="submit" disabled={isUploading || uploadQueue.length === 0}>
+                {isUploading ? 'Uploading...' : 'Upload Files'}
+              </button>
+            </form>
+
+            <div className="stack">
+              {uploadRecords.map((record) => (
+                <div className="card compact" key={record.fileName}>
+                  <div className="row between">
+                    <strong>{record.fileName}</strong>
+                    <span>{record.progress}%</span>
+                  </div>
+                  <progress max={100} value={record.progress} />
+                  <p className={record.status === 'failed' ? 'error' : 'muted'}>
+                    {record.message} ({record.status})
+                  </p>
+                </div>
+              ))}
+              {uploadRecords.length === 0 ? (
+                <p className="muted">Select files to start browser-to-R2 upload.</p>
+              ) : null}
+            </div>
+          </section>
+        </>
+      ) : null}
+    </main>
   )
 }
 
