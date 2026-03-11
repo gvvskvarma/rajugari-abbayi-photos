@@ -12,6 +12,14 @@ const mediaBaseUrl = (import.meta.env.VITE_MEDIA_BASE_URL ?? '').trim().replace(
 const authRedirectUrl =
   (import.meta.env.VITE_AUTH_REDIRECT_URL ?? '').trim() || 'https://rajugariabbayishots.vercel.app'
 
+const toFirstName = (value?: string) => {
+  const cleaned = (value ?? '').trim()
+  if (!cleaned) return ''
+  const firstToken = cleaned.split(/[\s._-]+/)[0] ?? ''
+  if (!firstToken) return ''
+  return firstToken.charAt(0).toUpperCase() + firstToken.slice(1).toLowerCase()
+}
+
 const localMediaAssetUrls = import.meta.glob(
   '/project-rga/optimized/**/*.{jpg,jpeg,JPG,JPEG,png,PNG,webp,WEBP}',
   {
@@ -406,6 +414,7 @@ function App() {
   const [emailInput, setEmailInput] = useState('')
   const [authMessage, setAuthMessage] = useState('')
   const [authBusy, setAuthBusy] = useState(false)
+  const [profileDisplayName, setProfileDisplayName] = useState('')
   const [session, setSession] = useState<{ user: { id: string; email?: string } } | null>(null)
   const [role, setRole] = useState<Role>('customer')
 
@@ -453,6 +462,7 @@ function App() {
       if (!nextSession?.user) {
         setSession(null)
         setRole('customer')
+        setProfileDisplayName('')
         return
       }
       setSession({ user: { id: nextSession.user.id, email: nextSession.user.email ?? undefined } })
@@ -464,6 +474,7 @@ function App() {
       if (!nextSession?.user) {
         setSession(null)
         setRole('customer')
+        setProfileDisplayName('')
         return
       }
       setSession({ user: { id: nextSession.user.id, email: nextSession.user.email ?? undefined } })
@@ -481,20 +492,27 @@ function App() {
     const fetchRole = async () => {
       const { data } = await client
         .from('profiles')
-        .select('role')
+        .select('role, display_name')
         .eq('id', session.user.id)
         .single()
 
       if (!data) {
         setRole('customer')
+        setProfileDisplayName('')
         return
       }
 
       setRole(data.role === 'admin' ? 'admin' : 'customer')
+      setProfileDisplayName(data.display_name ?? '')
     }
 
     void fetchRole()
   }, [session?.user.id])
+
+  const loginLabel = useMemo(() => {
+    if (!session) return 'LOGIN'
+    return toFirstName(profileDisplayName) || toFirstName(session.user.email) || 'LOGIN'
+  }, [profileDisplayName, session])
 
   useEffect(() => {
     if (!supabase || view !== 'my-pictures' || !session?.user.email) return
@@ -1173,7 +1191,7 @@ function App() {
               onClick={() => setAuthMenuOpen((open) => !open)}
             >
               <span aria-hidden>📷</span>
-              <span className="login-label">LOGIN</span>
+              <span className="login-label">{loginLabel}</span>
             </button>
 
             {authMenuOpen && (
