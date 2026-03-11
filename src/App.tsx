@@ -39,7 +39,24 @@ type UploadRecord = {
   message: string
 }
 
+type DeliveryAsset = {
+  id: string
+  filename: string
+  mime_type: string
+  bytes: number
+  canView: boolean
+  canDownload: boolean
+}
+
+type DeliveryGallery = {
+  deliveryId: string
+  accessMode: 'owner' | 'viewer' | 'admin'
+  expiresAt: string | null
+  assets: DeliveryAsset[]
+}
+
 const apiBase = (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/+$/, '')
+const requestTimeoutMs = 20_000
 
 const apiRequest = async <T,>(
   path: string,
@@ -47,19 +64,34 @@ const apiRequest = async <T,>(
   token: string,
   body?: unknown
 ): Promise<T> => {
-  const response = await fetch(`${apiBase}${path}`, {
-    method,
-    headers: {
-      authorization: `Bearer ${token}`,
-      'content-type': 'application/json',
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  })
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), requestTimeoutMs)
+  let response: Response | null = null
+  let text = ''
+  let parsed: Record<string, unknown> = {}
 
-  const text = await response.text()
-  const parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {}
+  try {
+    response = await fetch(`${apiBase}${path}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    })
+    text = await response.text()
+    parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {}
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('Request timed out. Please retry.')
+    }
+    throw new Error('Network request failed. Check connection and retry.')
+  } finally {
+    window.clearTimeout(timeout)
+  }
 
-  if (!response.ok) {
+  if (!response || !response.ok) {
     const message =
       typeof parsed?.error === 'object' &&
       parsed.error !== null &&
@@ -260,6 +292,8 @@ function App() {
   const [uploadQueue, setUploadQueue] = useState<File[]>([])
   const [uploadRecords, setUploadRecords] = useState<UploadRecord[]>([])
   const [isUploading, setIsUploading] = useState(false)
+  const [deliveries, setDeliveries] = useState<DeliveryGallery[]>([])
+  const [galleryLoading, setGalleryLoading] = useState(false)
 
   const token = session?.access_token ?? ''
 
@@ -274,11 +308,26 @@ function App() {
     setProjects(projectsResponse.projects)
   }
 
+  const loadPrivateGallery = async (accessToken: string) => {
+    setGalleryLoading(true)
+    try {
+      const response = await apiRequest<{ deliveries: DeliveryGallery[] }>(
+        '/api/v1/my-pictures',
+        'GET',
+        accessToken
+      )
+      setDeliveries(response.deliveries)
+    } finally {
+      setGalleryLoading(false)
+    }
+  }
+
   const loadProfile = async (activeSession: Session | null) => {
     if (!activeSession) {
       setProfile(null)
       setClients([])
       setProjects([])
+      setDeliveries([])
       setLoading(false)
       return
     }
@@ -291,6 +340,7 @@ function App() {
       if (me.role === 'admin') {
         await loadAdminData(activeSession.access_token)
       }
+      await loadPrivateGallery(activeSession.access_token)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Failed to load profile')
     } finally {
@@ -376,6 +426,20 @@ function App() {
     setUploadRecords((current) =>
       current.map((record) => (record.fileName === fileName ? { ...record, ...patch } : record))
     )
+  }
+
+  const requestAssetUrl = async (assetId: string, mode: 'view' | 'download') => {
+    if (!token) return
+    setError('')
+    try {
+      const result = await apiRequest<{ signedUrl: string }>('/api/v1/media/signed-url', 'POST', token, {
+        assetId,
+        mode,
+      })
+      window.open(result.signedUrl, '_blank', 'noopener,noreferrer')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Failed to open media')
+    }
   }
 
   const uploadSelectedFiles = async (event: FormEvent) => {
@@ -478,7 +542,7 @@ function App() {
     return (
       <main className="page">
         <section className="card">
-          <h1>Day 2 Admin Base</h1>
+          <h1>Day 4 Delivery + Downloads</h1>
           <p>Set VITE_API_BASE_URL in your .env file before running this app.</p>
         </section>
       </main>
@@ -488,8 +552,8 @@ function App() {
   return (
     <main className="page">
       <section className="card">
-        <h1>Week 1 Day 3: Upload Pipeline</h1>
-        <p className="muted">Stack: React + Supabase auth + Cloudflare Worker signed R2 upload flow.</p>
+        <h1>Week 1 Day 4: Client Delivery + Secure Downloads</h1>
+        <p className="muted">Stack: React + Supabase auth + Cloudflare Worker private gallery delivery APIs.</p>
 
         {!session ? (
           <form onSubmit={onLogin} className="stack">
@@ -534,10 +598,58 @@ function App() {
 
       {session && profile && profile.role !== 'admin' ? (
         <section className="card">
-          <h2>Role Guard Active</h2>
+          <h2>Private Gallery Access</h2>
           <p>
             Your role is <strong>{profile.role}</strong>. Admin CRUD endpoints are blocked for this account.
           </p>
+        </section>
+      ) : null}
+
+      {session && profile ? (
+        <section className="card">
+          <div className="row between">
+            <h2>Private Client Deliveries</h2>
+            <button disabled={galleryLoading} onClick={() => void loadPrivateGallery(token)}>
+              {galleryLoading ? 'Refreshing...' : 'Refresh'}
+            </button>
+          </div>
+
+          {deliveries.length === 0 ? (
+            <p className="muted">No active delivery files for this account.</p>
+          ) : (
+            <div className="stack">
+              {deliveries.map((delivery) => (
+                <div className="card compact" key={delivery.deliveryId}>
+                  <p>
+                    <strong>Delivery:</strong> {delivery.deliveryId}
+                  </p>
+                  <p className="muted">
+                    Access: {delivery.accessMode}
+                    {delivery.expiresAt ? ` | Expires: ${new Date(delivery.expiresAt).toLocaleString()}` : ''}
+                  </p>
+                  <div className="stack">
+                    {delivery.assets.map((asset) => (
+                      <div className="row between" key={asset.id}>
+                        <span>
+                          {asset.filename} ({Math.max(1, Math.round(asset.bytes / 1024))} KB)
+                        </span>
+                        <div className="actions">
+                          <button onClick={() => void requestAssetUrl(asset.id, 'view')}>View</button>
+                          <button
+                            disabled={!asset.canDownload}
+                            onClick={() => void requestAssetUrl(asset.id, 'download')}
+                          >
+                            Download
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {delivery.assets.length === 0 ? <p className="muted">No files visible in this delivery.</p> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       ) : null}
 

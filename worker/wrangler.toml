@@ -1,6 +1,8 @@
 name = "photography-api"
 main = "src/index.ts"
 compatibility_date = "2026-03-08"
+workers_dev = true
+preview_urls = false
 
 [observability]
 enabled = true
@@ -10,7 +12,7 @@ binding = "R2_MEDIA_BUCKET"
 bucket_name = "photography-private"
 
 [vars]
-APP_ORIGIN = "http://localhost:5174"
+APP_ORIGIN = "https://rajugariabbayishots.vercel.app"
 SUPABASE_URL = "https://ogcafgdhchzheennyzva.supabase.co"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9nY2FmZ2RoY2h6aGVlbm55enZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5MjM2MjUsImV4cCI6MjA4ODQ5OTYyNX0.KIzrmyFJcFIf5UlLs-1CZmADULdh3bKEamdrEdglYaw"
 R2_ACCOUNT_ID = "3bb24180dda29410cb330891f7c62322"

@@ -28,38 +28,69 @@ const rateWindowMs = 60_000
 const maxUploadBytes = 5 * 1024 * 1024 * 1024
 const uploadUrlExpirySeconds = 900
 const routeRateLimits = new Map<string, { count: number; windowStart: number }>()
-
-const jsonError = (message: string, status = 400) =>
-  new Response(JSON.stringify({ error: { message } }), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  })
-
-const baseHeaders = {
-  'content-type': 'application/json',
-  'access-control-allow-origin': '*',
-  'access-control-allow-headers': 'content-type,authorization',
-  'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+const routeLimits: Record<string, number> = {
+  '/api/v1/media/signed-url': 90,
+  '/api/v1/request-upload-url': 30,
+  '/api/v1/upload/complete': 60,
 }
 
-app.options('*', (c) => c.body(null, 204, baseHeaders))
+const resolveAllowedOrigin = (env: Env, requestOrigin?: string): string => {
+  const allowList = new Set([env.APP_ORIGIN, 'http://localhost:5173', 'http://localhost:5174'])
+  if (requestOrigin && allowList.has(requestOrigin)) return requestOrigin
+  return env.APP_ORIGIN || '*'
+}
+
+const buildBaseHeaders = (origin: string) => ({
+  'content-type': 'application/json',
+  'access-control-allow-origin': origin,
+  'access-control-allow-headers': 'content-type,authorization',
+  'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+})
+const responseHeaders = (c: Context<{ Bindings: Env }>) =>
+  buildBaseHeaders(resolveAllowedOrigin(c.env, c.req.header('Origin')))
+
+const jsonError = (message: string, status = 400, origin = '*') =>
+  new Response(JSON.stringify({ error: { message } }), {
+    status,
+    headers: buildBaseHeaders(origin),
+  })
+
+app.options('*', (c) => {
+  const origin = resolveAllowedOrigin(c.env, c.req.header('Origin'))
+  return c.body(null, 204, buildBaseHeaders(origin))
+})
 
 app.use('/api/*', async (c, next) => {
+  const origin = resolveAllowedOrigin(c.env, c.req.header('Origin'))
   const ip = c.req.header('CF-Connecting-IP') ?? 'unknown'
-  const routeKey = `${ip}:${new URL(c.req.url).pathname}`
+  const path = new URL(c.req.url).pathname
+  const routeKey = `${ip}:${path}`
   const current = routeRateLimits.get(routeKey)
   const now = Date.now()
+  const limit = routeLimits[path] ?? 60
 
   if (!current || now - current.windowStart > rateWindowMs) {
     routeRateLimits.set(routeKey, { count: 1, windowStart: now })
   } else {
     current.count += 1
-    if (current.count > 60) {
-      return jsonError('Rate limit exceeded', 429)
+    if (current.count > limit) {
+      return jsonError('Rate limit exceeded', 429, origin)
+    }
+  }
+
+  if (routeRateLimits.size > 5000) {
+    for (const [key, value] of routeRateLimits.entries()) {
+      if (now - value.windowStart > rateWindowMs) routeRateLimits.delete(key)
     }
   }
 
   await next()
+})
+
+app.onError((error, c) => {
+  const origin = resolveAllowedOrigin(c.env, c.req.header('Origin'))
+  const status = error instanceof Error && error.message.toLowerCase().includes('not found') ? 404 : 500
+  return jsonError(error instanceof Error ? error.message : 'Unexpected error', status, origin)
 })
 
 const supabaseRequest = async <T>(
@@ -266,6 +297,55 @@ const ensureDeliveryAccess = async (
   return recipient.access_mode
 }
 
+type DeliveryAssetRule = {
+  assetId: string
+  canView: boolean
+  canDownload: boolean
+}
+
+const getDeliveryAssetRules = async (
+  env: Env,
+  deliveryId: string
+): Promise<Map<string, DeliveryAssetRule>> => {
+  const rows = await supabaseRequest<
+    Array<{ asset_id: string; can_view: boolean; can_download: boolean }>
+  >(
+    env,
+    `delivery_assets?delivery_id=eq.${encodeURIComponent(
+      deliveryId
+    )}&select=asset_id,can_view,can_download`
+  )
+
+  return new Map(
+    rows.map((row) => [
+      row.asset_id,
+      { assetId: row.asset_id, canView: row.can_view, canDownload: row.can_download },
+    ])
+  )
+}
+
+const logDownloadEvent = async (
+  env: Env,
+  payload: { deliveryId: string; assetId: string; requesterProfileId: string | null; ipHash: string | null; userAgent: string | null }
+) => {
+  await supabaseRequest(
+    env,
+    'download_events',
+    {
+      method: 'POST',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        delivery_id: payload.deliveryId,
+        asset_id: payload.assetId,
+        requester_profile_id: payload.requesterProfileId,
+        ip_hash: payload.ipHash,
+        user_agent: payload.userAgent,
+      }),
+    },
+    true
+  )
+}
+
 const ensureAdmin = (user: User) => {
   if (user.role !== 'admin') {
     throw new Error('Admin access required')
@@ -302,7 +382,7 @@ app.get('/api/v1/health', (c) =>
       timestamp: new Date().toISOString(),
     },
     200,
-    baseHeaders
+    responseHeaders(c)
   )
 )
 
@@ -321,7 +401,7 @@ app.get('/api/v1/me', async (c) => {
         displayName: profile[0]?.display_name ?? null,
       },
       200,
-      baseHeaders
+      responseHeaders(c)
     )
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Failed to load profile', 401)
@@ -337,7 +417,7 @@ app.get('/api/v1/admin/clients', async (c) => {
       Array<{ id: string; full_name: string; email: string; phone: string | null; notes: string | null }>
     >(c.env, `clients?owner_user_id=eq.${encodeURIComponent(user.id)}&select=id,full_name,email,phone,notes&order=created_at.desc`)
 
-    return c.json({ clients }, 200, baseHeaders)
+    return c.json({ clients }, 200, responseHeaders(c))
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Failed to load clients', 403)
   }
@@ -372,7 +452,7 @@ app.post('/api/v1/admin/clients', async (c) => {
       }
     )
 
-    return c.json({ client: inserted[0] }, 201, baseHeaders)
+    return c.json({ client: inserted[0] }, 201, responseHeaders(c))
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Failed to create client', 400)
   }
@@ -405,7 +485,7 @@ app.patch('/api/v1/admin/clients/:clientId', async (c) => {
     )
 
     if (!updated[0]) return jsonError('Client not found', 404)
-    return c.json({ client: updated[0] }, 200, baseHeaders)
+    return c.json({ client: updated[0] }, 200, responseHeaders(c))
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Failed to update client', 400)
   }
@@ -427,7 +507,7 @@ app.delete('/api/v1/admin/clients/:clientId', async (c) => {
       }
     )
 
-    return c.json({ ok: true }, 200, baseHeaders)
+    return c.json({ ok: true }, 200, responseHeaders(c))
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Failed to delete client', 400)
   }
@@ -454,7 +534,7 @@ app.get('/api/v1/admin/projects', async (c) => {
       }>
     >(c.env, `projects?${filters.join('&')}&select=id,client_id,name,description,shoot_date,location,status&order=created_at.desc`)
 
-    return c.json({ projects }, 200, baseHeaders)
+    return c.json({ projects }, 200, responseHeaders(c))
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Failed to load projects', 403)
   }
@@ -504,7 +584,7 @@ app.post('/api/v1/admin/projects', async (c) => {
       }
     )
 
-    return c.json({ project: inserted[0] }, 201, baseHeaders)
+    return c.json({ project: inserted[0] }, 201, responseHeaders(c))
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Failed to create project', 400)
   }
@@ -556,7 +636,7 @@ app.patch('/api/v1/admin/projects/:projectId', async (c) => {
     )
 
     if (!updated[0]) return jsonError('Project not found', 404)
-    return c.json({ project: updated[0] }, 200, baseHeaders)
+    return c.json({ project: updated[0] }, 200, responseHeaders(c))
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Failed to update project', 400)
   }
@@ -578,7 +658,7 @@ app.delete('/api/v1/admin/projects/:projectId', async (c) => {
       }
     )
 
-    return c.json({ ok: true }, 200, baseHeaders)
+    return c.json({ ok: true }, 200, responseHeaders(c))
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Failed to delete project', 400)
   }
@@ -648,7 +728,7 @@ const handleRequestUploadUrl = async (c: Context<{ Bindings: Env }>) => {
         maxFileBytes: maxUploadBytes,
       },
       200,
-      baseHeaders
+      responseHeaders(c)
     )
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Upload request failed', 400)
@@ -734,6 +814,24 @@ app.post('/api/v1/upload/complete', async (c) => {
       },
       true
     )
+    const assetId = insertedAssets[0]?.id
+    if (!assetId) return jsonError('Asset insert failed', 500)
+
+    await supabaseRequest(
+      c.env,
+      'delivery_assets',
+      {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          delivery_id: body.deliveryId,
+          asset_id: assetId,
+          can_view: true,
+          can_download: true,
+        }),
+      },
+      true
+    )
 
     await supabaseRequest(
       c.env,
@@ -753,11 +851,11 @@ app.post('/api/v1/upload/complete', async (c) => {
     return c.json(
       {
         ok: true,
-        assetId: insertedAssets[0]?.id ?? null,
+        assetId,
         uploadSessionId: session.id,
       },
       200,
-      baseHeaders
+      responseHeaders(c)
     )
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Upload finalize failed', 400)
@@ -773,7 +871,7 @@ app.post('/api/v1/media/signed-url', async (c) => {
     if (!body.assetId) return jsonError('assetId is required', 400)
 
     const assets = await supabaseRequest<
-      Array<{ id: string; delivery_id: string; r2_object_key: string; mime_type: string }>
+      Array<{ id: string; delivery_id: string | null; r2_object_key: string; mime_type: string }>
     >(
       c.env,
       `assets?id=eq.${encodeURIComponent(body.assetId)}&select=id,delivery_id,r2_object_key,mime_type&limit=1`
@@ -781,6 +879,22 @@ app.post('/api/v1/media/signed-url', async (c) => {
 
     const asset = assets[0]
     if (!asset) return jsonError('Asset not found', 404)
+    const deliveryAssetRows = await supabaseRequest<
+      Array<{ delivery_id: string; can_view: boolean; can_download: boolean }>
+    >(
+      c.env,
+      `delivery_assets?asset_id=eq.${encodeURIComponent(
+        body.assetId
+      )}&select=delivery_id,can_view,can_download&limit=1`
+    )
+    const deliveryAsset = deliveryAssetRows[0]
+    const deliveryId = asset.delivery_id ?? deliveryAsset?.delivery_id
+    if (!deliveryId || !deliveryAsset) return jsonError('Asset delivery mapping missing', 403)
+
+    if (!deliveryAsset.can_view) return jsonError('Viewing this file is disabled', 403)
+    if (mode === 'download' && !deliveryAsset.can_download) {
+      return jsonError('Download disabled for this file', 403)
+    }
 
     if (body.shareToken) {
       const links = await supabaseRequest<
@@ -794,20 +908,85 @@ app.post('/api/v1/media/signed-url', async (c) => {
       const link = links[0]
       if (!link) return jsonError('Invalid share token', 403)
       if (new Date(link.expires_at).getTime() <= Date.now()) return jsonError('Share link expired', 403)
-      if (link.delivery_id !== asset.delivery_id) return jsonError('Asset not in shared delivery', 403)
+      if (link.delivery_id !== deliveryId) return jsonError('Asset not in shared delivery', 403)
       if (mode === 'download' && !link.allow_download) return jsonError('Download not allowed', 403)
 
+      if (mode === 'download') {
+        const requesterIp = c.req.header('CF-Connecting-IP')
+        const ipHash = requesterIp ? await sha256Hex(requesterIp) : null
+        await logDownloadEvent(c.env, {
+          deliveryId,
+          assetId: asset.id,
+          requesterProfileId: null,
+          ipHash,
+          userAgent: c.req.header('User-Agent') ?? null,
+        })
+      }
+
       const signedUrl = await buildR2SignedUrl(c.env, 'GET', asset.r2_object_key, 300, mode)
-      return c.json({ signedUrl, expiresInSeconds: 300, mode }, 200, baseHeaders)
+      return c.json({ signedUrl, expiresInSeconds: 300, mode }, 200, responseHeaders(c))
     }
 
     const user = await getUserFromBearer(c.env, authHeader)
-    await ensureDeliveryAccess(c.env, user, asset.delivery_id, mode)
+    await ensureDeliveryAccess(c.env, user, deliveryId, mode)
+
+    if (mode === 'download') {
+      const requesterIp = c.req.header('CF-Connecting-IP')
+      const ipHash = requesterIp ? await sha256Hex(requesterIp) : null
+      await logDownloadEvent(c.env, {
+        deliveryId,
+        assetId: asset.id,
+        requesterProfileId: user.id,
+        ipHash,
+        userAgent: c.req.header('User-Agent') ?? null,
+      })
+    }
 
     const signedUrl = await buildR2SignedUrl(c.env, 'GET', asset.r2_object_key, 300, mode)
-    return c.json({ signedUrl, expiresInSeconds: 300, mode }, 200, baseHeaders)
+    return c.json({ signedUrl, expiresInSeconds: 300, mode }, 200, responseHeaders(c))
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Signed URL request failed', 400)
+  }
+})
+
+app.get('/api/v1/deliveries/:deliveryId/gallery', async (c) => {
+  try {
+    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
+    const deliveryId = c.req.param('deliveryId')
+    if (!deliveryId) return jsonError('deliveryId is required', 400)
+
+    const accessMode = await ensureDeliveryAccess(c.env, user, deliveryId, 'view')
+    const assetRules = await getDeliveryAssetRules(c.env, deliveryId)
+    const visibleAssetIds = [...assetRules.values()]
+      .filter((rule) => rule.canView)
+      .map((rule) => rule.assetId)
+
+    if (visibleAssetIds.length === 0) {
+      return c.json({ deliveryId, accessMode, assets: [] }, 200, responseHeaders(c))
+    }
+
+    const assetFilter = visibleAssetIds.map((id) => `id.eq.${id}`).join(',')
+    const assets = await supabaseRequest<Array<{ id: string; filename: string; mime_type: string; bytes: number }>>(
+      c.env,
+      `assets?or=(${assetFilter})&select=id,filename,mime_type,bytes&order=created_at.desc`
+    )
+
+    return c.json(
+      {
+        deliveryId,
+        accessMode,
+        assets: assets.map((asset) => ({
+          ...asset,
+          canView: true,
+          canDownload:
+            accessMode !== 'viewer' && (assetRules.get(asset.id)?.canDownload ?? false),
+        })),
+      },
+      200,
+      responseHeaders(c)
+    )
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Failed to load private gallery', 400)
   }
 })
 
@@ -850,7 +1029,7 @@ app.post('/api/v1/share-links', async (c) => {
         expiresAt,
       },
       200,
-      baseHeaders
+      responseHeaders(c)
     )
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Share link creation failed', 400)
@@ -870,31 +1049,57 @@ app.get('/api/v1/my-pictures', async (c) => {
       )}&select=delivery_id,access_mode,expires_at`
     )
 
-    const activeDeliveryIds = recipients
-      .filter((row) => !row.expires_at || new Date(row.expires_at).getTime() > Date.now())
-      .map((row) => row.delivery_id)
+    const activeRecipients = recipients.filter(
+      (row) => !row.expires_at || new Date(row.expires_at).getTime() > Date.now()
+    )
 
-    if (activeDeliveryIds.length === 0) {
-      return c.json({ deliveries: [] }, 200, baseHeaders)
+    if (activeRecipients.length === 0) {
+      return c.json({ deliveries: [] }, 200, responseHeaders(c))
     }
 
-    const filter = activeDeliveryIds.map((id) => `delivery_id.eq.${id}`).join(',')
-    const assets = await supabaseRequest<
-      Array<{ id: string; delivery_id: string; filename: string; mime_type: string; bytes: number }>
-    >(
-      c.env,
-      `assets?or=(${filter})&select=id,delivery_id,filename,mime_type,bytes&order=created_at.desc`
+    const deliveries = await Promise.all(
+      activeRecipients.map(async (recipient) => {
+        const deliveryId = recipient.delivery_id
+        const assetRules = await getDeliveryAssetRules(c.env, deliveryId)
+        const visibleAssetIds = [...assetRules.values()]
+          .filter((rule) => rule.canView)
+          .map((rule) => rule.assetId)
+
+        if (visibleAssetIds.length === 0) {
+          return {
+            deliveryId,
+            accessMode: recipient.access_mode,
+            expiresAt: recipient.expires_at,
+            assets: [],
+          }
+        }
+
+        const assetFilter = visibleAssetIds.map((id) => `id.eq.${id}`).join(',')
+        const assets = await supabaseRequest<Array<{ id: string; filename: string; mime_type: string; bytes: number }>>(
+          c.env,
+          `assets?or=(${assetFilter})&select=id,filename,mime_type,bytes&order=created_at.desc`
+        )
+
+        return {
+          deliveryId,
+          accessMode: recipient.access_mode,
+          expiresAt: recipient.expires_at,
+          assets: assets.map((asset) => ({
+            ...asset,
+            canView: true,
+            canDownload:
+              recipient.access_mode !== 'viewer' && (assetRules.get(asset.id)?.canDownload ?? false),
+          })),
+        }
+      })
     )
 
     return c.json(
       {
-        deliveries: activeDeliveryIds.map((deliveryId) => ({
-          deliveryId,
-          assets: assets.filter((asset) => asset.delivery_id === deliveryId),
-        })),
+        deliveries,
       },
       200,
-      baseHeaders
+      responseHeaders(c)
     )
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Failed to load pictures', 400)

@@ -81,3 +81,24 @@ In Vercel:
 - API contract: `docs/api/day3-upload-pipeline-contract.md`
 - Worker APIs: `POST /api/v1/request-upload-url` and `POST /api/v1/upload/complete`
 - Frontend: admin direct-to-R2 upload flow with retry/progress in `src/App.tsx`
+
+## Day 4 delivery/security artifacts
+
+- Supabase migration: `supabase/migrations/20260311_day4_delivery_security.sql`
+- API contract: `docs/api/day4-delivery-contract.md`
+- Worker APIs:
+  - `GET /api/v1/deliveries/:deliveryId/gallery`
+  - `POST /api/v1/media/signed-url` (per-file rules + download logging)
+  - `GET /api/v1/my-pictures` (private gallery delivery listing)
+- Frontend: private gallery + controlled view/download actions in `src/App.tsx`
+
+## Day 5 hardening/release artifacts
+
+- Runbook: `docs/runbook/day5-mvp-runbook.md`
+- Validation report: `docs/validation/day5-e2e-validation.md`
+- Worker hardening:
+  - per-route rate-limit caps + in-memory cleanup
+  - stricter CORS origin resolution
+  - global API error middleware
+- Frontend hardening:
+  - API request timeout and clearer network/timeout error messages
