@@ -163,7 +163,7 @@ type GalleryShot = {
 }
 
 type Role = 'admin' | 'customer'
-type AppView = 'home' | 'my-pictures' | 'upload' | 'share'
+type AppView = 'home' | 'my-pictures' | 'upload' | 'share' | 'admin-work'
 
 type DeliveryAsset = {
   id: string
@@ -182,6 +182,24 @@ type DeliveryCard = {
   expiresAt: string | null
   firstViewedAt?: string | null
   accessMode?: 'owner' | 'viewer' | 'admin'
+  assets: DeliveryAsset[]
+}
+
+type AdminProject = {
+  id: string
+  name: string
+}
+
+type AdminDeliveryRow = {
+  id: string
+  project_id: string
+  created_at: string
+}
+
+type AdminFolder = {
+  deliveryId: string
+  title: string
+  createdAt: string
   assets: DeliveryAsset[]
 }
 
@@ -270,6 +288,7 @@ const readViewFromHash = () => {
   if (hash.startsWith('#share/')) return 'share'
   if (hash === '#my-pictures') return 'my-pictures'
   if (hash === '#upload') return 'upload'
+  if (hash === '#admin-work') return 'admin-work'
   return 'home'
 }
 
@@ -427,6 +446,9 @@ function App() {
   const [uploadFiles, setUploadFiles] = useState<File[]>([])
   const [uploadBusy, setUploadBusy] = useState(false)
   const [uploadMessage, setUploadMessage] = useState('')
+  const [adminFolders, setAdminFolders] = useState<AdminFolder[]>([])
+  const [adminWorkBusy, setAdminWorkBusy] = useState(false)
+  const [adminWorkError, setAdminWorkError] = useState('')
 
   const [shareAssets, setShareAssets] = useState<DeliveryAsset[]>([])
   const [shareBusy, setShareBusy] = useState(false)
@@ -571,6 +593,68 @@ function App() {
 
     void loadCustomerData()
   }, [session?.user.email, view])
+
+  useEffect(() => {
+    if (!supabase || !session?.user.id || role !== 'admin' || view !== 'admin-work') return
+    const client = supabase
+
+    const loadAdminFolders = async () => {
+      setAdminWorkBusy(true)
+      setAdminWorkError('')
+      try {
+        const [projectsResult, deliveriesResult, assetsResult] = await Promise.all([
+          client
+            .from('projects')
+            .select('id, name')
+            .eq('owner_user_id', session.user.id),
+          client
+            .from('deliveries')
+            .select('id, project_id, created_at')
+            .eq('owner_user_id', session.user.id)
+            .order('created_at', { ascending: false }),
+          client
+            .from('assets')
+            .select('id, delivery_id, filename, mime_type, bytes, created_at')
+            .eq('owner_user_id', session.user.id)
+            .not('delivery_id', 'is', null)
+            .order('created_at', { ascending: false }),
+        ])
+
+        if (projectsResult.error) throw projectsResult.error
+        if (deliveriesResult.error) throw deliveriesResult.error
+        if (assetsResult.error) throw assetsResult.error
+
+        const projects = (projectsResult.data ?? []) as AdminProject[]
+        const deliveries = (deliveriesResult.data ?? []) as AdminDeliveryRow[]
+        const assets = (assetsResult.data ?? []) as DeliveryAsset[]
+
+        const projectById = new Map(projects.map((project) => [project.id, project.name]))
+        const assetsByDelivery = new Map<string, DeliveryAsset[]>()
+        for (const asset of assets) {
+          const key = asset.delivery_id
+          if (!key) continue
+          const current = assetsByDelivery.get(key) ?? []
+          current.push(asset)
+          assetsByDelivery.set(key, current)
+        }
+
+        const folders: AdminFolder[] = deliveries.map((delivery) => ({
+          deliveryId: delivery.id,
+          title: projectById.get(delivery.project_id) ?? `Delivery ${delivery.id.slice(0, 8)}`,
+          createdAt: delivery.created_at,
+          assets: assetsByDelivery.get(delivery.id) ?? [],
+        }))
+
+        setAdminFolders(folders)
+      } catch (error) {
+        setAdminWorkError(error instanceof Error ? error.message : 'Failed to load admin folders')
+      } finally {
+        setAdminWorkBusy(false)
+      }
+    }
+
+    void loadAdminFolders()
+  }, [role, session?.user.id, view])
 
   useEffect(() => {
     if (!supabase || view !== 'share' || !shareToken) return
@@ -1218,6 +1302,72 @@ function App() {
     )
   }
 
+  const renderAdminWork = () => {
+    if (!session?.user.id || role !== 'admin') {
+      return (
+        <section className="portal-section">
+          <h2>Work Folders</h2>
+          <p className="portal-error">Only admin users can access this page.</p>
+        </section>
+      )
+    }
+
+    return (
+      <section className="portal-section">
+        <h2>Work Folders</h2>
+        <p>Each folder maps to a delivery title you used during upload.</p>
+        {adminWorkBusy && <p className="portal-hint">Loading folders...</p>}
+        {adminWorkError && <p className="portal-error">{adminWorkError}</p>}
+        {!adminWorkBusy && !adminWorkError && adminFolders.length === 0 && (
+          <p className="portal-hint">No uploaded delivery folders found yet.</p>
+        )}
+
+        <div className="delivery-list">
+          {adminFolders.map((folder) => (
+            <article key={folder.deliveryId} className="delivery-card">
+              <div className="delivery-header">
+                <div>
+                  <p className="delivery-title">{folder.title}</p>
+                  <p className="delivery-expiry">
+                    Delivery {folder.deliveryId.slice(0, 8)} | {new Date(folder.createdAt).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+              <ul className="delivery-assets">
+                {folder.assets.map((asset) => (
+                  <li key={asset.id}>
+                    <span>{asset.filename}</span>
+                    <span>{formatBytes(asset.bytes)}</span>
+                    <div className="delivery-asset-actions">
+                      <button
+                        className="button ghost"
+                        type="button"
+                        onClick={() => {
+                          void handleOpenAsset(asset.id, 'view')
+                        }}
+                      >
+                        View
+                      </button>
+                      <button
+                        className="button ghost"
+                        type="button"
+                        onClick={() => {
+                          void handleOpenAsset(asset.id, 'download')
+                        }}
+                      >
+                        Download
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </article>
+          ))}
+        </div>
+      </section>
+    )
+  }
+
   const renderShareView = () => (
     <section className="portal-section">
       <h2>Shared Gallery</h2>
@@ -1270,8 +1420,8 @@ function App() {
           <nav className="nav">
             {session && role === 'customer' && <a href="#my-pictures">My Pictures</a>}
             {session && role === 'admin' && <a href="#upload">Upload</a>}
-            <a href="#work">Work</a>
-            <a href="#about">About</a>
+            <a href={session && role === 'admin' ? '#admin-work' : '#work'}>Work</a>
+            {!(session && role === 'admin') && <a href="#about">About</a>}
             <a href="/book.html">Contact</a>
           </nav>
 
@@ -1334,6 +1484,7 @@ function App() {
         {view === 'home' && renderHomeSections()}
         {view === 'my-pictures' && renderMyPictures()}
         {view === 'upload' && renderUpload()}
+        {view === 'admin-work' && renderAdminWork()}
         {view === 'share' && renderShareView()}
       </main>
 
