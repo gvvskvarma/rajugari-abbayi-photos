@@ -1,779 +1,1280 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
-import type { Session } from '@supabase/supabase-js'
-import { supabase } from './lib/supabase'
+import type { ChangeEvent, FormEvent } from 'react'
 import './App.css'
+import { isSupabaseConfigured, supabase } from './lib/supabase'
+
+const instagramUrl =
+  'https://www.instagram.com/rajugari_abbayi_photography?igsh=azYxaHdwYmdhaTh0&utm_source=qr'
+const personalInstagramUrl =
+  'https://www.instagram.com/rajugari_abbayi?igsh=MTB3MHk4ODZxODM5dg%3D%3D&utm_source=qr'
+
+const mediaBaseUrl = (import.meta.env.VITE_MEDIA_BASE_URL ?? '').trim().replace(/\/+$/, '')
+
+const localMediaAssetUrls = import.meta.glob(
+  '/project-rga/optimized/**/*.{jpg,jpeg,JPG,JPEG,png,PNG,webp,WEBP}',
+  {
+    eager: true,
+    import: 'default',
+    query: '?url',
+  }
+) as Record<string, string>
+
+const normalizeMediaPath = (path: string) => path.replace(/^\/+/, '')
+
+const toRemoteMediaUrl = (path: string) => {
+  if (!mediaBaseUrl) return undefined
+  if (/^https?:\/\//.test(path)) return path
+  return `${mediaBaseUrl}/${normalizeMediaPath(path)}`
+}
+
+const toLocalMediaUrl = (path: string) => {
+  const key = `/${normalizeMediaPath(path)}`
+  return localMediaAssetUrls[key]
+}
+
+const buildSrcSet = (variants: Array<{ url?: string; width: number }>) => {
+  const srcSet = variants
+    .filter((variant): variant is { url: string; width: number } => Boolean(variant.url))
+    .map((variant) => `${variant.url} ${variant.width}w`)
+    .join(', ')
+  return srcSet || undefined
+}
+
+const uniqueSources = (sources: Array<{ src?: string; srcSet?: string }>) => {
+  const seen = new Set<string>()
+  return sources
+    .filter((source): source is { src: string; srcSet?: string } => Boolean(source.src))
+    .filter((source) => {
+      if (seen.has(source.src)) return false
+      seen.add(source.src)
+      return true
+    })
+}
+
+type ResponsiveAsset = {
+  key: string
+  sources: Array<{
+    src: string
+    srcSet?: string
+  }>
+}
+
+const createResponsiveAsset = (originalPath: string): ResponsiveAsset => {
+  const normalizedPath = normalizeMediaPath(originalPath)
+  const optimizedBase = normalizedPath
+    .replace(/^project-rga\//, 'project-rga/optimized/')
+    .replace(/\.[^.]+$/, '')
+
+  const remote640 = toRemoteMediaUrl(`${optimizedBase}-640.jpg`)
+  const remote1200 = toRemoteMediaUrl(`${optimizedBase}-1200.jpg`)
+  const remote1800 = toRemoteMediaUrl(`${optimizedBase}-1800.jpg`)
+
+  const local640 = toLocalMediaUrl(`${optimizedBase}-640.jpg`)
+  const local1200 = toLocalMediaUrl(`${optimizedBase}-1200.jpg`)
+  const local1800 = toLocalMediaUrl(`${optimizedBase}-1800.jpg`)
+
+  const remoteSrcSet = buildSrcSet([
+    { url: remote640, width: 640 },
+    { url: remote1200, width: 1200 },
+    { url: remote1800, width: 1800 },
+  ])
+
+  const localSrcSet = buildSrcSet([
+    { url: local640, width: 640 },
+    { url: local1200, width: 1200 },
+    { url: local1800, width: 1800 },
+  ])
+
+  const sources = uniqueSources([
+    { src: remote640, srcSet: remoteSrcSet },
+    { src: local640, srcSet: localSrcSet },
+    { src: remote1200 },
+    { src: local1200 },
+    { src: remote1800 },
+    { src: local1800 },
+  ])
+
+  return {
+    key: normalizedPath,
+    sources,
+  }
+}
+
+type ResponsiveImageProps = {
+  asset: ResponsiveAsset
+  alt: string
+  className?: string
+  sizes: string
+  loading?: 'eager' | 'lazy'
+  fetchPriority?: 'high' | 'low' | 'auto'
+}
+
+const ResponsiveImage = ({
+  asset,
+  alt,
+  className,
+  sizes,
+  loading = 'lazy',
+  fetchPriority = 'auto',
+}: ResponsiveImageProps) => {
+  const candidates = useMemo(() => asset.sources, [asset.sources])
+
+  const [candidateIndex, setCandidateIndex] = useState(0)
+
+  useEffect(() => {
+    setCandidateIndex(0)
+  }, [asset])
+
+  const candidate = candidates[Math.min(candidateIndex, Math.max(candidates.length - 1, 0))]
+  if (!candidate) return null
+
+  return (
+    <img
+      className={className}
+      src={candidate.src}
+      srcSet={candidate.srcSet}
+      sizes={candidate.srcSet ? sizes : undefined}
+      alt={alt}
+      loading={loading}
+      fetchPriority={fetchPriority}
+      decoding="async"
+      onError={() =>
+        setCandidateIndex((current) => Math.min(current + 1, Math.max(candidates.length - 1, 0)))
+      }
+    />
+  )
+}
+
+type GalleryShot = {
+  image: ResponsiveAsset
+  title: string
+  tag: string
+}
 
 type Role = 'admin' | 'customer'
+type AppView = 'home' | 'my-pictures' | 'upload' | 'share'
 
-type Profile = {
+type DeliveryRecipient = {
   id: string
+  delivery_id: string
   email: string
-  role: Role
-  displayName: string | null
-}
-
-type Client = {
-  id: string
-  full_name: string
-  email: string
-  phone: string | null
-  notes: string | null
-}
-
-type Project = {
-  id: string
-  client_id: string
-  name: string
-  description: string | null
-  shoot_date: string | null
-  location: string | null
-  status: 'draft' | 'active' | 'completed' | 'archived'
-}
-
-type UploadRecord = {
-  fileName: string
-  status: 'pending' | 'uploading' | 'finalizing' | 'done' | 'failed'
-  attempts: number
-  progress: number
-  message: string
+  access_mode: 'owner' | 'viewer'
+  first_viewed_at: string | null
+  expires_at: string | null
 }
 
 type DeliveryAsset = {
   id: string
+  delivery_id: string
   filename: string
   mime_type: string
   bytes: number
-  canView: boolean
-  canDownload: boolean
+  r2_object_key: string
+  created_at: string
 }
 
-type DeliveryGallery = {
+type DeliveryCard = {
   deliveryId: string
-  accessMode: 'owner' | 'viewer' | 'admin'
   expiresAt: string | null
+  firstViewedAt: string | null
   assets: DeliveryAsset[]
 }
 
-const apiBase = (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/+$/, '')
-const requestTimeoutMs = 20_000
+const landscapePaths = [
+  'project-rga/landscapes/RGA02744.jpg',
+  'project-rga/landscapes/RGA02755.jpg',
+  'project-rga/landscapes/RGA02761.jpg',
+  'project-rga/landscapes/RGA02807.jpg',
+  'project-rga/landscapes/RGA03800.jpg',
+]
 
-const apiRequest = async <T,>(
-  path: string,
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
-  token: string,
-  body?: unknown
-): Promise<T> => {
-  const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), requestTimeoutMs)
-  let response: Response | null = null
-  let text = ''
-  let parsed: Record<string, unknown> = {}
+const featuredShots: GalleryShot[] = [
+  {
+    image: createResponsiveAsset(landscapePaths[0]),
+    title: 'North Cascades',
+    tag: 'Landscape',
+  },
+  {
+    image: createResponsiveAsset(landscapePaths[1]),
+    title: 'North Cascades',
+    tag: 'Landscape',
+  },
+  {
+    image: createResponsiveAsset(landscapePaths[2]),
+    title: 'North Cascades',
+    tag: 'Landscape',
+  },
+  {
+    image: createResponsiveAsset(landscapePaths[3]),
+    title: 'North Cascades',
+    tag: 'Landscape',
+  },
+  {
+    image: createResponsiveAsset(landscapePaths[4]),
+    title: 'San Francisco',
+    tag: 'Landscape',
+  },
+]
 
-  try {
-    response = await fetch(`${apiBase}${path}`, {
-      method,
-      headers: {
-        authorization: `Bearer ${token}`,
-        'content-type': 'application/json',
-      },
-      body: body ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
-    })
-    text = await response.text()
-    parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {}
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('Request timed out. Please retry.')
-    }
-    throw new Error('Network request failed. Check connection and retry.')
-  } finally {
-    window.clearTimeout(timeout)
-  }
+const babyImages = [
+  'project-rga/potraits/baby/RGA03628.jpg',
+  'project-rga/potraits/baby/RGA03631.jpg',
+  'project-rga/potraits/baby/RGA03639.jpg',
+  'project-rga/potraits/baby/RGA03656.jpg',
+  'project-rga/potraits/baby/RGA03664.jpg',
+  'project-rga/potraits/baby/RGA03667.jpg',
+].map(createResponsiveAsset)
 
-  if (!response || !response.ok) {
-    const message =
-      typeof parsed?.error === 'object' &&
-      parsed.error !== null &&
-      typeof (parsed.error as { message?: string }).message === 'string'
-        ? ((parsed.error as { message: string }).message ?? 'Request failed')
-        : 'Request failed'
-    throw new Error(message)
-  }
+const portraitImages = [
+  'project-rga/potraits/potraits/RGA04154.jpg',
+  'project-rga/potraits/potraits/RGA04156.jpg',
+  'project-rga/potraits/potraits/RGA04170-2.jpg',
+  'project-rga/potraits/potraits/RGA04174-2.jpg',
+  'project-rga/potraits/potraits/RGA04188-2.jpg',
+  'project-rga/potraits/potraits/RGA04203-2.jpg',
+  'project-rga/potraits/potraits/RGA04280.jpg',
+  'project-rga/potraits/potraits/RGA04306-4.jpg',
+].map(createResponsiveAsset)
 
-  return parsed as T
+const eventImages = [
+  'project-rga/potraits/events/RGA03248-2.jpg',
+  'project-rga/potraits/events/RGA03250.jpg',
+  'project-rga/potraits/events/RGA03281.jpg',
+  'project-rga/potraits/events/RGA03341.jpg',
+  'project-rga/potraits/events/RGA03884.jpg',
+  'project-rga/potraits/events/RGA03886.jpg',
+  'project-rga/potraits/events/RGA03898.jpg',
+  'project-rga/potraits/events/RGA03987.jpg',
+  'project-rga/potraits/events/RGA03994.jpg',
+  'project-rga/potraits/events/RGA04058.jpg',
+  'project-rga/potraits/events/RGA04064.jpg',
+  'project-rga/potraits/events/RGA04135.jpg',
+  'project-rga/potraits/events/RGA04158.jpg',
+  'project-rga/potraits/events/RGA04191.jpg',
+  'project-rga/potraits/events/RGA04205.jpg',
+].map(createResponsiveAsset)
+
+const heroPortrait = createResponsiveAsset('project-rga/potraits/events/RGA03248-2.jpg')
+const heroLandscape = featuredShots[0]?.image
+const heroTravel = featuredShots[4]?.image ?? featuredShots[2]?.image
+
+const getPrimaryPreloadSource = (asset: ResponsiveAsset) => asset.sources[0]?.src ?? ''
+
+const readViewFromHash = () => {
+  const hash = window.location.hash || '#home'
+  if (hash.startsWith('#share/')) return 'share'
+  if (hash === '#my-pictures') return 'my-pictures'
+  if (hash === '#upload') return 'upload'
+  return 'home'
 }
 
-const pause = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
-
-const putFileToSignedUrl = (
-  uploadUrl: string,
-  file: File,
-  onProgress: (value: number) => void
-): Promise<void> =>
-  new Promise((resolve, reject) => {
-    const request = new XMLHttpRequest()
-    request.open('PUT', uploadUrl)
-    request.timeout = 2 * 60 * 1000
-    request.upload.onprogress = (event) => {
-      if (!event.lengthComputable) return
-      onProgress(Math.round((event.loaded / event.total) * 100))
-    }
-    request.onerror = () => reject(new Error('Network upload error'))
-    request.ontimeout = () => reject(new Error('Upload timed out'))
-    request.onload = () => {
-      if (request.status >= 200 && request.status < 300) {
-        onProgress(100)
-        resolve()
-        return
-      }
-      reject(new Error(`Upload failed with status ${request.status}`))
-    }
-    request.send(file)
-  })
-
-const ClientEditor = ({
-  client,
-  token,
-  onSaved,
-  onDeleted,
-}: {
-  client: Client
-  token: string
-  onSaved: (client: Client) => void
-  onDeleted: (id: string) => void
-}) => {
-  const [fullName, setFullName] = useState(client.full_name)
-  const [email, setEmail] = useState(client.email)
-  const [phone, setPhone] = useState(client.phone ?? '')
-  const [notes, setNotes] = useState(client.notes ?? '')
-  const [busy, setBusy] = useState(false)
-
-  const save = async () => {
-    setBusy(true)
-    try {
-      const data = await apiRequest<{ client: Client }>(
-        `/api/v1/admin/clients/${client.id}`,
-        'PATCH',
-        token,
-        { fullName, email, phone, notes }
-      )
-      onSaved(data.client)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const remove = async () => {
-    if (!confirm('Delete this client?')) return
-    setBusy(true)
-    try {
-      await apiRequest<{ ok: boolean }>(`/api/v1/admin/clients/${client.id}`, 'DELETE', token)
-      onDeleted(client.id)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="card compact">
-      <div className="grid">
-        <input value={fullName} onChange={(event) => setFullName(event.target.value)} />
-        <input value={email} onChange={(event) => setEmail(event.target.value)} />
-        <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="Phone" />
-        <input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Notes" />
-      </div>
-      <div className="actions">
-        <button disabled={busy} onClick={save}>
-          Save
-        </button>
-        <button disabled={busy} className="danger" onClick={remove}>
-          Delete
-        </button>
-      </div>
-    </div>
-  )
+const readShareTokenFromHash = () => {
+  const hash = window.location.hash || ''
+  if (!hash.startsWith('#share/')) return ''
+  return hash.replace('#share/', '').trim()
 }
 
-const ProjectEditor = ({
-  project,
-  token,
-  onSaved,
-  onDeleted,
-}: {
-  project: Project
-  token: string
-  onSaved: (project: Project) => void
-  onDeleted: (id: string) => void
-}) => {
-  const [name, setName] = useState(project.name)
-  const [status, setStatus] = useState<Project['status']>(project.status)
-  const [description, setDescription] = useState(project.description ?? '')
-  const [shootDate, setShootDate] = useState(project.shoot_date ?? '')
-  const [location, setLocation] = useState(project.location ?? '')
-  const [busy, setBusy] = useState(false)
+const formatBytes = (value: number) => {
+  if (value < 1024) return `${value} B`
+  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`
+  if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MB`
+  return `${(value / 1024 ** 3).toFixed(2)} GB`
+}
 
-  const save = async () => {
-    setBusy(true)
-    try {
-      const data = await apiRequest<{ project: Project }>(
-        `/api/v1/admin/projects/${project.id}`,
-        'PATCH',
-        token,
-        { name, status, description, shootDate, location }
-      )
-      onSaved(data.project)
-    } finally {
-      setBusy(false)
-    }
-  }
+const daysRemainingText = (expiresAt: string | null) => {
+  if (!expiresAt) return 'Not started'
+  const diffMs = new Date(expiresAt).getTime() - Date.now()
+  if (diffMs <= 0) return 'Expired'
+  const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
+  return `Expires in ${days} day${days === 1 ? '' : 's'}`
+}
 
-  const remove = async () => {
-    if (!confirm('Delete this project?')) return
-    setBusy(true)
-    try {
-      await apiRequest<{ ok: boolean }>(`/api/v1/admin/projects/${project.id}`, 'DELETE', token)
-      onDeleted(project.id)
-    } finally {
-      setBusy(false)
+const randomToken = () => {
+  const buffer = new Uint8Array(24)
+  crypto.getRandomValues(buffer)
+  return Array.from(buffer, (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+type RotatingGalleryProps = {
+  title: string
+  subtitle: string
+  images: ResponsiveAsset[]
+  cycleStep: number
+}
+
+const RotatingGallery = ({
+  title,
+  subtitle,
+  images,
+  cycleStep,
+}: RotatingGalleryProps) => {
+  const [displayIndex, setDisplayIndex] = useState(0)
+  const [incomingIndex, setIncomingIndex] = useState<number | null>(null)
+  const [isTransitioning, setIsTransitioning] = useState(false)
+
+  useEffect(() => {
+    if (images.length === 0) {
+      setDisplayIndex(0)
+      setIncomingIndex(null)
+      setIsTransitioning(false)
+      return
     }
-  }
+    setDisplayIndex((current) => current % images.length)
+  }, [images.length])
+
+  useEffect(() => {
+    if (images.length === 0 || isTransitioning || incomingIndex !== null) return
+    const nextIndex = cycleStep % images.length
+    if (nextIndex === displayIndex) return
+
+    let canceled = false
+    const preloadImage = new Image()
+    preloadImage.src = getPrimaryPreloadSource(images[nextIndex])
+
+    const beginTransition = () => {
+      if (canceled) return
+      setIncomingIndex(nextIndex)
+      setIsTransitioning(true)
+    }
+
+    if (typeof preloadImage.decode === 'function') {
+      preloadImage.decode().then(beginTransition).catch(beginTransition)
+    } else {
+      preloadImage.onload = beginTransition
+      preloadImage.onerror = beginTransition
+    }
+
+    return () => {
+      canceled = true
+    }
+  }, [cycleStep, displayIndex, images, incomingIndex, isTransitioning])
+
+  useEffect(() => {
+    if (!isTransitioning || incomingIndex === null) return
+    const timeout = window.setTimeout(() => {
+      setDisplayIndex(incomingIndex % images.length)
+      setIncomingIndex(null)
+      setIsTransitioning(false)
+    }, 520)
+    return () => window.clearTimeout(timeout)
+  }, [images.length, incomingIndex, isTransitioning])
+
+  const active = images.length > 0 ? images[displayIndex % images.length] : undefined
+  const incoming =
+    incomingIndex !== null && images.length > 0 ? images[incomingIndex % images.length] : undefined
 
   return (
-    <div className="card compact">
-      <div className="grid">
-        <input value={name} onChange={(event) => setName(event.target.value)} />
-        <select value={status} onChange={(event) => setStatus(event.target.value as Project['status'])}>
-          <option value="draft">Draft</option>
-          <option value="active">Active</option>
-          <option value="completed">Completed</option>
-          <option value="archived">Archived</option>
-        </select>
-        <input
-          value={shootDate}
-          onChange={(event) => setShootDate(event.target.value)}
-          placeholder="Shoot date YYYY-MM-DD"
-        />
-        <input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Location" />
-        <input
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          placeholder="Description"
-        />
-      </div>
-      <div className="actions">
-        <button disabled={busy} onClick={save}>
-          Save
-        </button>
-        <button disabled={busy} className="danger" onClick={remove}>
-          Delete
-        </button>
+    <div className="rotator">
+      <div className="rotator-card">
+        {active ? (
+          <div className="rotator-image-stack">
+            <ResponsiveImage
+              asset={active}
+              alt={title}
+              className="rotator-image"
+              sizes="(max-width: 900px) 92vw, 33vw"
+            />
+            {incoming && isTransitioning && (
+              <ResponsiveImage
+                asset={incoming}
+                alt={title}
+                className="rotator-image rotator-image-enter"
+                sizes="(max-width: 900px) 92vw, 33vw"
+              />
+            )}
+          </div>
+        ) : (
+          <div className="rotator-placeholder">
+            <p>Add {title} photos</p>
+            <span>Add files to project-rga folders</span>
+          </div>
+        )}
+        <div className="rotator-overlay">
+          <p>{title}</p>
+          <span>{subtitle}</span>
+        </div>
       </div>
     </div>
   )
 }
 
 function App() {
-  const [session, setSession] = useState<Session | null>(null)
-  const [profile, setProfile] = useState<Profile | null>(null)
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [cycleStep, setCycleStep] = useState(0)
+  const [authMenuOpen, setAuthMenuOpen] = useState(false)
+  const [emailInput, setEmailInput] = useState('')
+  const [otpInput, setOtpInput] = useState('')
   const [authMessage, setAuthMessage] = useState('')
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(true)
+  const [authBusy, setAuthBusy] = useState(false)
+  const [session, setSession] = useState<{ user: { id: string; email?: string } } | null>(null)
+  const [role, setRole] = useState<Role>('customer')
 
-  const [clients, setClients] = useState<Client[]>([])
-  const [projects, setProjects] = useState<Project[]>([])
-  const [newClientName, setNewClientName] = useState('')
-  const [newClientEmail, setNewClientEmail] = useState('')
-  const [newProjectName, setNewProjectName] = useState('')
-  const [newProjectClientId, setNewProjectClientId] = useState('')
-  const [uploadDeliveryId, setUploadDeliveryId] = useState('')
-  const [uploadQueue, setUploadQueue] = useState<File[]>([])
-  const [uploadRecords, setUploadRecords] = useState<UploadRecord[]>([])
-  const [isUploading, setIsUploading] = useState(false)
-  const [deliveries, setDeliveries] = useState<DeliveryGallery[]>([])
-  const [galleryLoading, setGalleryLoading] = useState(false)
+  const [view, setView] = useState<AppView>(readViewFromHash())
+  const [shareToken, setShareToken] = useState(readShareTokenFromHash())
 
-  const token = session?.access_token ?? ''
+  const [myDeliveries, setMyDeliveries] = useState<DeliveryCard[]>([])
+  const [customerError, setCustomerError] = useState('')
+  const [customerBusy, setCustomerBusy] = useState(false)
+  const [newShareLinks, setNewShareLinks] = useState<Record<string, string>>({})
 
-  const sortedClients = useMemo(() => [...clients].sort((a, b) => a.full_name.localeCompare(b.full_name)), [clients])
+  const [uploadEmail, setUploadEmail] = useState('')
+  const [uploadTitle, setUploadTitle] = useState('Client Delivery')
+  const [uploadFiles, setUploadFiles] = useState<File[]>([])
+  const [uploadBusy, setUploadBusy] = useState(false)
+  const [uploadMessage, setUploadMessage] = useState('')
 
-  const loadAdminData = async (accessToken: string) => {
-    const [clientsResponse, projectsResponse] = await Promise.all([
-      apiRequest<{ clients: Client[] }>('/api/v1/admin/clients', 'GET', accessToken),
-      apiRequest<{ projects: Project[] }>('/api/v1/admin/projects', 'GET', accessToken),
-    ])
-    setClients(clientsResponse.clients)
-    setProjects(projectsResponse.projects)
-  }
-
-  const loadPrivateGallery = async (accessToken: string) => {
-    setGalleryLoading(true)
-    try {
-      const response = await apiRequest<{ deliveries: DeliveryGallery[] }>(
-        '/api/v1/my-pictures',
-        'GET',
-        accessToken
-      )
-      setDeliveries(response.deliveries)
-    } finally {
-      setGalleryLoading(false)
-    }
-  }
-
-  const loadProfile = async (activeSession: Session | null) => {
-    if (!activeSession) {
-      setProfile(null)
-      setClients([])
-      setProjects([])
-      setDeliveries([])
-      setLoading(false)
-      return
-    }
-
-    setLoading(true)
-    setError('')
-    try {
-      const me = await apiRequest<Profile>('/api/v1/me', 'GET', activeSession.access_token)
-      setProfile(me)
-      if (me.role === 'admin') {
-        await loadAdminData(activeSession.access_token)
-      }
-      await loadPrivateGallery(activeSession.access_token)
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Failed to load profile')
-    } finally {
-      setLoading(false)
-    }
-  }
+  const [shareAssets, setShareAssets] = useState<DeliveryAsset[]>([])
+  const [shareBusy, setShareBusy] = useState(false)
+  const [shareMessage, setShareMessage] = useState('')
 
   useEffect(() => {
-    let mounted = true
+    const id = window.setInterval(() => {
+      setCycleStep((current) => current + 1)
+    }, 2000)
+    return () => window.clearInterval(id)
+  }, [])
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return
-      setSession(data.session)
-      void loadProfile(data.session)
-    })
+  useEffect(() => {
+    const onHashChange = () => {
+      setView(readViewFromHash())
+      setShareToken(readShareTokenFromHash())
+    }
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession)
-      void loadProfile(nextSession)
+  useEffect(() => {
+    if (!supabase) return
+    const client = supabase
+
+    const boot = async () => {
+      const { data } = await client.auth.getSession()
+      const nextSession = data.session
+      if (!nextSession?.user) {
+        setSession(null)
+        setRole('customer')
+        return
+      }
+      setSession({ user: { id: nextSession.user.id, email: nextSession.user.email ?? undefined } })
+    }
+
+    void boot()
+
+    const { data: listener } = client.auth.onAuthStateChange((_event, nextSession) => {
+      if (!nextSession?.user) {
+        setSession(null)
+        setRole('customer')
+        return
+      }
+      setSession({ user: { id: nextSession.user.id, email: nextSession.user.email ?? undefined } })
     })
 
     return () => {
-      mounted = false
-      subscription.unsubscribe()
+      listener.subscription.unsubscribe()
     }
   }, [])
 
-  const onLogin = async (event: FormEvent) => {
-    event.preventDefault()
-    setError('')
-    setAuthMessage('')
+  useEffect(() => {
+    if (!supabase || !session?.user.id) return
+    const client = supabase
 
-    try {
-      if (password.trim()) {
-        const { error: loginError } = await supabase.auth.signInWithPassword({ email, password })
-        if (loginError) throw loginError
-        setAuthMessage('Signed in successfully.')
-      } else {
-        const { error: otpError } = await supabase.auth.signInWithOtp({
-          email,
-          options: { emailRedirectTo: window.location.origin },
-        })
-        if (otpError) throw otpError
-        setAuthMessage('Magic link sent. Complete login from your email inbox.')
+    const fetchRole = async () => {
+      const { data } = await client
+        .from('profiles')
+        .select('role')
+        .eq('id', session.user.id)
+        .single()
+
+      if (!data) {
+        setRole('customer')
+        return
       }
-    } catch (authError) {
-      setError(authError instanceof Error ? authError.message : 'Sign-in failed')
+
+      setRole(data.role === 'admin' ? 'admin' : 'customer')
     }
-  }
 
-  const onLogout = async () => {
-    await supabase.auth.signOut()
-    setAuthMessage('Signed out.')
-  }
+    void fetchRole()
+  }, [session?.user.id])
 
-  const createClient = async (event: FormEvent) => {
-    event.preventDefault()
-    setError('')
-    const data = await apiRequest<{ client: Client }>('/api/v1/admin/clients', 'POST', token, {
-      fullName: newClientName,
-      email: newClientEmail,
-    })
-    setClients((current) => [data.client, ...current])
-    setNewClientName('')
-    setNewClientEmail('')
-    if (!newProjectClientId) setNewProjectClientId(data.client.id)
-  }
+  useEffect(() => {
+    if (!supabase || view !== 'my-pictures' || !session?.user.email) return
+    const client = supabase
+    const normalizedEmail = session.user.email.toLowerCase()
 
-  const createProject = async (event: FormEvent) => {
-    event.preventDefault()
-    setError('')
-    const data = await apiRequest<{ project: Project }>('/api/v1/admin/projects', 'POST', token, {
-      clientId: newProjectClientId,
-      name: newProjectName,
-    })
-    setProjects((current) => [data.project, ...current])
-    setNewProjectName('')
-  }
+    const loadCustomerData = async () => {
+      setCustomerBusy(true)
+      setCustomerError('')
 
-  const updateUploadRecord = (fileName: string, patch: Partial<UploadRecord>) => {
-    setUploadRecords((current) =>
-      current.map((record) => (record.fileName === fileName ? { ...record, ...patch } : record))
-    )
-  }
+      const recipientsResult = await client
+        .from('delivery_recipients')
+        .select('id, delivery_id, email, access_mode, first_viewed_at, expires_at')
+        .eq('email', normalizedEmail)
 
-  const requestAssetUrl = async (assetId: string, mode: 'view' | 'download') => {
-    if (!token) return
-    setError('')
-    try {
-      const result = await apiRequest<{ signedUrl: string }>('/api/v1/media/signed-url', 'POST', token, {
-        assetId,
-        mode,
-      })
-      window.open(result.signedUrl, '_blank', 'noopener,noreferrer')
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Failed to open media')
-    }
-  }
+      if (recipientsResult.error) {
+        setCustomerError(recipientsResult.error.message)
+        setCustomerBusy(false)
+        return
+      }
 
-  const uploadSelectedFiles = async (event: FormEvent) => {
-    event.preventDefault()
-    if (!uploadDeliveryId.trim() || uploadQueue.length === 0 || !token) return
+      const recipients = (recipientsResult.data ?? []) as DeliveryRecipient[]
 
-    setError('')
-    setAuthMessage('')
-    setIsUploading(true)
-    setUploadRecords(
-      uploadQueue.map((file) => ({
-        fileName: file.name,
-        status: 'pending',
-        attempts: 0,
-        progress: 0,
-        message: 'Queued',
-      }))
-    )
-
-    try {
-      const failedUploads: string[] = []
-      for (const file of uploadQueue) {
-        let completed = false
-        for (let attempt = 1; attempt <= 3 && !completed; attempt += 1) {
-          updateUploadRecord(file.name, {
-            status: 'uploading',
-            attempts: attempt,
-            message: `Requesting signed URL (attempt ${attempt}/3)...`,
-            progress: 0,
-          })
-
-          try {
-            const requestResult = await apiRequest<{
-              objectKey: string
-              uploadToken: string
-              uploadUrl: string
-              expiresInSeconds: number
-            }>('/api/v1/request-upload-url', 'POST', token, {
-              deliveryId: uploadDeliveryId.trim(),
-              fileName: file.name,
-              contentType: file.type || 'application/octet-stream',
-              fileSize: file.size,
-            })
-
-            updateUploadRecord(file.name, {
-              status: 'uploading',
-              message: `Uploading directly to R2 (attempt ${attempt}/3)...`,
-            })
-
-            await putFileToSignedUrl(requestResult.uploadUrl, file, (progress) => {
-              updateUploadRecord(file.name, { progress })
-            })
-
-            updateUploadRecord(file.name, {
-              status: 'finalizing',
-              message: 'Saving asset metadata...',
-            })
-
-            await apiRequest<{ ok: boolean; assetId: string | null }>('/api/v1/upload/complete', 'POST', token, {
-              deliveryId: uploadDeliveryId.trim(),
-              objectKey: requestResult.objectKey,
-              uploadToken: requestResult.uploadToken,
-              fileName: file.name,
-              mimeType: file.type || 'application/octet-stream',
-              bytes: file.size,
-            })
-
-            updateUploadRecord(file.name, {
-              status: 'done',
-              progress: 100,
-              message: 'Upload completed',
-            })
-            completed = true
-          } catch (uploadError) {
-            const reason = uploadError instanceof Error ? uploadError.message : 'Upload failed'
-            const hasRetry = attempt < 3
-            updateUploadRecord(file.name, {
-              status: hasRetry ? 'uploading' : 'failed',
-              message: hasRetry ? `${reason} — retrying...` : reason,
-            })
-            if (hasRetry) {
-              await pause(attempt * 800)
-              continue
-            }
-            failedUploads.push(file.name)
-          }
+      for (const recipient of recipients) {
+        if (!recipient.first_viewed_at) {
+          await client.rpc('activate_delivery_retention', { recipient_row_id: recipient.id })
         }
       }
-      if (failedUploads.length > 0) {
-        setError(`Some uploads failed: ${failedUploads.join(', ')}`)
-      } else {
-        setAuthMessage('All selected uploads completed successfully.')
+
+      const refreshedRecipientsResult = await client
+        .from('delivery_recipients')
+        .select('id, delivery_id, email, access_mode, first_viewed_at, expires_at')
+        .eq('email', normalizedEmail)
+
+      const refreshedRecipients = (refreshedRecipientsResult.data ?? recipients) as DeliveryRecipient[]
+      const activeRecipients = refreshedRecipients.filter((recipient) => {
+        if (!recipient.expires_at) return true
+        return new Date(recipient.expires_at).getTime() > Date.now()
+      })
+
+      const deliveryIds = activeRecipients.map((recipient) => recipient.delivery_id)
+      if (deliveryIds.length === 0) {
+        setMyDeliveries([])
+        setCustomerBusy(false)
+        return
       }
-    } finally {
-      setIsUploading(false)
+
+      const assetsResult = await client
+        .from('assets')
+        .select('id, delivery_id, filename, mime_type, bytes, r2_object_key, created_at')
+        .in('delivery_id', deliveryIds)
+        .order('created_at', { ascending: false })
+
+      if (assetsResult.error) {
+        setCustomerError(assetsResult.error.message)
+        setCustomerBusy(false)
+        return
+      }
+
+      const assets = (assetsResult.data ?? []) as DeliveryAsset[]
+      const cards: DeliveryCard[] = activeRecipients.map((recipient) => ({
+        deliveryId: recipient.delivery_id,
+        expiresAt: recipient.expires_at,
+        firstViewedAt: recipient.first_viewed_at,
+        assets: assets.filter((asset) => asset.delivery_id === recipient.delivery_id),
+      }))
+
+      setMyDeliveries(cards)
+      setCustomerBusy(false)
     }
+
+    void loadCustomerData()
+  }, [session?.user.email, view])
+
+  useEffect(() => {
+    if (!supabase || view !== 'share' || !shareToken) return
+    const client = supabase
+
+    const loadShareView = async () => {
+      setShareBusy(true)
+      setShareMessage('')
+
+      const linkResult = await client
+        .from('share_links')
+        .select('delivery_id, expires_at, allow_download')
+        .eq('token', shareToken)
+        .single()
+
+      if (linkResult.error || !linkResult.data) {
+        setShareMessage('This share link is invalid or unavailable.')
+        setShareAssets([])
+        setShareBusy(false)
+        return
+      }
+
+      if (new Date(linkResult.data.expires_at).getTime() <= Date.now()) {
+        setShareMessage('This share link has expired.')
+        setShareAssets([])
+        setShareBusy(false)
+        return
+      }
+
+      const assetsResult = await client
+        .from('assets')
+        .select('id, delivery_id, filename, mime_type, bytes, r2_object_key, created_at')
+        .eq('delivery_id', linkResult.data.delivery_id)
+        .order('created_at', { ascending: false })
+
+      if (assetsResult.error) {
+        setShareMessage(assetsResult.error.message)
+        setShareAssets([])
+      } else {
+        setShareAssets((assetsResult.data ?? []) as DeliveryAsset[])
+      }
+
+      setShareBusy(false)
+    }
+
+    void loadShareView()
+  }, [shareToken, view])
+
+  const handleSendOtp = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!supabase) {
+      setAuthMessage('Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env to enable login.')
+      return
+    }
+
+    const email = emailInput.trim().toLowerCase()
+    if (!email) {
+      setAuthMessage('Enter an email address first.')
+      return
+    }
+
+    setAuthBusy(true)
+    setAuthMessage('')
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        shouldCreateUser: true,
+      },
+    })
+
+    if (error) {
+      setAuthMessage(error.message)
+    } else {
+      setAuthMessage('OTP sent. Enter the code from your email to continue.')
+    }
+
+    setAuthBusy(false)
   }
 
-  if (!apiBase) {
-    return (
-      <main className="page">
-        <section className="card">
-          <h1>Day 4 Delivery + Downloads</h1>
-          <p>Set VITE_API_BASE_URL in your .env file before running this app.</p>
+  const handleVerifyOtp = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!supabase) return
+
+    const email = emailInput.trim().toLowerCase()
+    const token = otpInput.trim()
+    if (!email || !token) {
+      setAuthMessage('Enter both email and OTP code.')
+      return
+    }
+
+    setAuthBusy(true)
+    setAuthMessage('')
+
+    const { error } = await supabase.auth.verifyOtp({
+      email,
+      token,
+      type: 'email',
+    })
+
+    if (error) {
+      setAuthMessage(error.message)
+    } else {
+      setAuthMessage('Logged in successfully.')
+      setOtpInput('')
+      setAuthMenuOpen(false)
+    }
+
+    setAuthBusy(false)
+  }
+
+  const handleSignOut = async () => {
+    if (!supabase) return
+    await supabase.auth.signOut()
+    setAuthMenuOpen(false)
+    setMyDeliveries([])
+    setNewShareLinks({})
+    window.location.hash = '#home'
+  }
+
+  const handleUploadFilesChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(event.target.files ?? [])
+    setUploadFiles(selected)
+  }
+
+  const handleCreateShareLink = async (deliveryId: string) => {
+    if (!supabase || !session?.user.id) return
+
+    const token = randomToken()
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+
+    const { error } = await supabase.from('share_links').insert({
+      token,
+      owner_profile_id: session.user.id,
+      delivery_id: deliveryId,
+      access_mode: 'viewer',
+      allow_download: false,
+      expires_at: expiresAt,
+    })
+
+    if (error) {
+      setCustomerError(error.message)
+      return
+    }
+
+    const url = `${window.location.origin}/#share/${token}`
+    setNewShareLinks((current) => ({ ...current, [deliveryId]: url }))
+  }
+
+  const handleUploadDelivery = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!supabase || !session?.user.id) return
+
+    const targetEmail = uploadEmail.trim().toLowerCase()
+    if (!targetEmail || uploadFiles.length === 0) {
+      setUploadMessage('Enter client email and add at least one photo/video.')
+      return
+    }
+
+    setUploadBusy(true)
+    setUploadMessage('')
+
+    let clientId = ''
+    const existingClient = await supabase
+      .from('clients')
+      .select('id')
+      .eq('email', targetEmail)
+      .eq('owner_user_id', session.user.id)
+      .maybeSingle()
+
+    if (existingClient.error) {
+      setUploadMessage(existingClient.error.message)
+      setUploadBusy(false)
+      return
+    }
+
+    if (existingClient.data?.id) {
+      clientId = existingClient.data.id
+    } else {
+      const insertedClient = await supabase
+        .from('clients')
+        .insert({
+          owner_user_id: session.user.id,
+          full_name: targetEmail.split('@')[0] || 'Client',
+          email: targetEmail,
+        })
+        .select('id')
+        .single()
+
+      if (insertedClient.error || !insertedClient.data) {
+        setUploadMessage(insertedClient.error?.message ?? 'Unable to create client.')
+        setUploadBusy(false)
+        return
+      }
+
+      clientId = insertedClient.data.id
+    }
+
+    const insertedProject = await supabase
+      .from('projects')
+      .insert({
+        owner_user_id: session.user.id,
+        client_id: clientId,
+        name: uploadTitle || `Delivery ${new Date().toISOString().slice(0, 10)}`,
+        status: 'active',
+      })
+      .select('id')
+      .single()
+
+    if (insertedProject.error || !insertedProject.data) {
+      setUploadMessage(insertedProject.error?.message ?? 'Unable to create project.')
+      setUploadBusy(false)
+      return
+    }
+
+    const deliveryToken = randomToken()
+    const insertedDelivery = await supabase
+      .from('deliveries')
+      .insert({
+        owner_user_id: session.user.id,
+        project_id: insertedProject.data.id,
+        client_id: clientId,
+        status: 'shared',
+        access_token: deliveryToken,
+        shared_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single()
+
+    if (insertedDelivery.error || !insertedDelivery.data) {
+      setUploadMessage(insertedDelivery.error?.message ?? 'Unable to create delivery.')
+      setUploadBusy(false)
+      return
+    }
+
+    const recipientInsert = await supabase.from('delivery_recipients').insert({
+      delivery_id: insertedDelivery.data.id,
+      email: targetEmail,
+      access_mode: 'owner',
+    })
+
+    if (recipientInsert.error) {
+      setUploadMessage(recipientInsert.error.message)
+      setUploadBusy(false)
+      return
+    }
+
+    const assetRows = uploadFiles.map((file, index) => {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+      return {
+        owner_user_id: session.user.id,
+        project_id: insertedProject.data.id,
+        delivery_id: insertedDelivery.data.id,
+        filename: file.name,
+        mime_type: file.type || 'application/octet-stream',
+        bytes: Math.max(1, file.size),
+        kind: file.type.startsWith('video') ? 'video' : 'photo',
+        r2_object_key: `pending/${insertedDelivery.data.id}/${Date.now()}-${index}-${safeName}`,
+      }
+    })
+
+    const insertedAssets = await supabase.from('assets').insert(assetRows)
+    if (insertedAssets.error) {
+      setUploadMessage(insertedAssets.error.message)
+      setUploadBusy(false)
+      return
+    }
+
+    setUploadMessage(
+      `Delivery created for ${targetEmail}. Client link: ${window.location.origin}/#my-pictures`
+    )
+    setUploadFiles([])
+    setUploadEmail('')
+    setUploadBusy(false)
+  }
+
+  const renderHomeSections = () => (
+    <>
+      <section id="home" className="hero">
+        <div className="hero-text">
+          <p className="eyebrow">Photography portfolio</p>
+          <h1>Light, texture, and quiet moments — curated from my shoots.</h1>
+          <p className="lead">
+            I focus on landscapes, portraits, and the subtle details that make
+            a scene feel alive. Browse the gallery and reach out to collaborate.
+          </p>
+          <div className="hero-actions">
+            <a className="button primary" href="#work">
+              View the work
+            </a>
+            <a className="button ghost" href="/book.html">
+              Let’s collaborate
+            </a>
+          </div>
+        </div>
+        <div className="hero-cards">
+          <div className="hero-card tall">
+            <ResponsiveImage
+              asset={heroPortrait}
+              alt="Portrait"
+              className="hero-card-image"
+              sizes="(max-width: 900px) 92vw, 32vw"
+              loading="eager"
+              fetchPriority="high"
+            />
+            <div className="hero-card-overlay">
+              <p>Portraits</p>
+              <span>Studio & natural light</span>
+            </div>
+          </div>
+          <div className="hero-card wide">
+            {heroLandscape && (
+              <ResponsiveImage
+                asset={heroLandscape}
+                alt="Landscape"
+                className="hero-card-image"
+                sizes="(max-width: 900px) 92vw, 66vw"
+                loading="eager"
+                fetchPriority="high"
+              />
+            )}
+            <div className="hero-card-overlay">
+              <p>Landscapes</p>
+              <span>Golden hour stories</span>
+            </div>
+          </div>
+          <div className="hero-card square">
+            {heroTravel && (
+              <ResponsiveImage
+                asset={heroTravel}
+                alt="Travel"
+                className="hero-card-image"
+                sizes="(max-width: 900px) 92vw, 32vw"
+                loading="eager"
+              />
+            )}
+            <div className="hero-card-overlay">
+              <p>Travel</p>
+              <span>Everyday poetry</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="work" className="work">
+        <div className="section-head">
+          <h2>Landscapes</h2>
+          <p>
+            A curated selection of my favorite scenes from the road. Each frame is a
+            slow, cinematic moment.
+          </p>
+        </div>
+
+        <div className="grid">
+          {featuredShots.map((shot) => (
+            <div key={shot.image.key} className="shot">
+              <ResponsiveImage
+                asset={shot.image}
+                alt={shot.title}
+                sizes="(max-width: 900px) 92vw, (max-width: 1200px) 44vw, 30vw"
+              />
+              <div className="shot-overlay">
+                <p>{shot.title}</p>
+                <span>{shot.tag}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="work-block">
+          <div className="section-head">
+            <h2>Portrait stories</h2>
+            <p>
+              Three rotating collections for baby portraits, classic portraits,
+              and event moments.
+            </p>
+          </div>
+          <div className="rotator-grid">
+            <RotatingGallery
+              title="BABY SHOOTS"
+              subtitle="New beginnings"
+              images={babyImages}
+              cycleStep={cycleStep}
+            />
+            <RotatingGallery
+              title="Portraits"
+              subtitle="People & personality"
+              images={portraitImages}
+              cycleStep={cycleStep}
+            />
+            <RotatingGallery
+              title="Events"
+              subtitle="Milestones & energy"
+              images={eventImages}
+              cycleStep={cycleStep}
+            />
+          </div>
+        </div>
+      </section>
+
+      <section id="about" className="about">
+        <div>
+          <h2>About the lens</h2>
+          <p>
+            I’m Vishnu Varma, a photographer focused on candid stories, textured light,
+            and the quiet energy of people in their spaces. My work blends editorial
+            composition with documentary honesty.
+          </p>
+        </div>
+        <div className="about-card">
+          <h3>Available for</h3>
+          <ul>
+            <li>Portrait sessions</li>
+            <li>Brand campaigns</li>
+            <li>Editorial shoots</li>
+            <li>Travel collaborations</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="contact" className="contact">
+        <div>
+          <h2>Let’s build something beautiful</h2>
+          <p>
+            Want to book a shoot, collaborate, or hire me? Send a note and I’ll reply
+            within two business days.
+          </p>
+          <div className="contact-actions">
+            <a className="button primary" href="/book.html">
+              Open contact form
+            </a>
+          </div>
+        </div>
+        <div className="contact-card">
+          <div className="contact-item">
+            <p className="muted">Email</p>
+            <p className="contact-line">rgapics@gmail.com</p>
+          </div>
+          <div className="contact-item">
+            <p className="muted">Instagram</p>
+            <a className="contact-line" href={instagramUrl} target="_blank" rel="noreferrer">
+              @rajugari_abbayi_photography
+            </a>
+          </div>
+        </div>
+      </section>
+    </>
+  )
+
+  const renderMyPictures = () => {
+    if (!session?.user.email) {
+      return (
+        <section className="portal-section">
+          <h2>My Pictures</h2>
+          <p>Log in with your email OTP to view your photos and videos.</p>
         </section>
-      </main>
+      )
+    }
+
+    return (
+      <section className="portal-section">
+        <div className="portal-head">
+          <div>
+            <h2>My Pictures</h2>
+            <p>Media matched to <strong>{session.user.email}</strong>.</p>
+          </div>
+        </div>
+
+        {customerBusy && <p className="portal-hint">Loading your deliveries...</p>}
+        {customerError && <p className="portal-error">{customerError}</p>}
+        {!customerBusy && !customerError && myDeliveries.length === 0 && (
+          <p className="portal-hint">No active deliveries found for this email.</p>
+        )}
+
+        <div className="delivery-list">
+          {myDeliveries.map((delivery) => (
+            <article key={delivery.deliveryId} className="delivery-card">
+              <div className="delivery-header">
+                <div>
+                  <p className="delivery-title">Delivery {delivery.deliveryId.slice(0, 8)}</p>
+                  <p className="delivery-expiry">{daysRemainingText(delivery.expiresAt)}</p>
+                </div>
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={() => {
+                    void handleCreateShareLink(delivery.deliveryId)
+                  }}
+                >
+                  Create view-only link
+                </button>
+              </div>
+
+              {newShareLinks[delivery.deliveryId] && (
+                <p className="portal-share-link">{newShareLinks[delivery.deliveryId]}</p>
+              )}
+
+              <ul className="delivery-assets">
+                {delivery.assets.map((asset) => (
+                  <li key={asset.id}>
+                    <span>{asset.filename}</span>
+                    <span>{formatBytes(asset.bytes)}</span>
+                    <span>{asset.mime_type}</span>
+                  </li>
+                ))}
+              </ul>
+            </article>
+          ))}
+        </div>
+      </section>
     )
   }
 
-  return (
-    <main className="page">
-      <section className="card">
-        <h1>Week 1 Day 4: Client Delivery + Secure Downloads</h1>
-        <p className="muted">Stack: React + Supabase auth + Cloudflare Worker private gallery delivery APIs.</p>
+  const renderUpload = () => {
+    if (!session?.user.id) {
+      return (
+        <section className="portal-section">
+          <h2>Upload</h2>
+          <p>Login required.</p>
+        </section>
+      )
+    }
 
-        {!session ? (
-          <form onSubmit={onLogin} className="stack">
-            <label>
-              Email
-              <input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="admin@example.com"
-                required
-              />
-            </label>
-            <label>
-              Password (optional)
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Use blank for magic-link login"
-              />
-            </label>
-            <button type="submit">Sign In</button>
-          </form>
-        ) : (
-          <div className="stack">
-            <div className="row between">
-              <div>
-                <p className="muted">Logged in as</p>
-                <strong>{profile?.email ?? session.user.email}</strong>
-              </div>
-              <button onClick={onLogout}>Sign Out</button>
-            </div>
-          </div>
-        )}
+    if (role !== 'admin') {
+      return (
+        <section className="portal-section">
+          <h2>Upload</h2>
+          <p className="portal-error">Only admin users can access uploads.</p>
+        </section>
+      )
+    }
 
-        {authMessage && <p className="success">{authMessage}</p>}
-        {error && <p className="error">{error}</p>}
+    return (
+      <section className="portal-section">
+        <h2>Upload</h2>
+        <p>Attach media to a client email and generate delivery access.</p>
+
+        <form className="upload-form" onSubmit={handleUploadDelivery}>
+          <label>
+            Client email
+            <input
+              type="email"
+              value={uploadEmail}
+              onChange={(event) => setUploadEmail(event.target.value)}
+              required
+            />
+          </label>
+          <label>
+            Delivery title
+            <input
+              type="text"
+              value={uploadTitle}
+              onChange={(event) => setUploadTitle(event.target.value)}
+              required
+            />
+          </label>
+          <label>
+            Photos / videos
+            <input type="file" multiple accept="image/*,video/*" onChange={handleUploadFilesChange} />
+          </label>
+          <button className="button primary" type="submit" disabled={uploadBusy || uploadFiles.length === 0}>
+            {uploadBusy ? 'Creating delivery...' : 'Create delivery link'}
+          </button>
+        </form>
+
+        {uploadMessage && <p className="portal-hint">{uploadMessage}</p>}
       </section>
+    )
+  }
 
-      {loading ? <section className="card">Loading account context...</section> : null}
+  const renderShareView = () => (
+    <section className="portal-section">
+      <h2>Shared Gallery</h2>
+      <p>View-only mode. Download is disabled for this link.</p>
 
-      {session && profile && profile.role !== 'admin' ? (
-        <section className="card">
-          <h2>Private Gallery Access</h2>
-          <p>
-            Your role is <strong>{profile.role}</strong>. Admin CRUD endpoints are blocked for this account.
-          </p>
-        </section>
-      ) : null}
+      {shareBusy && <p className="portal-hint">Loading shared media...</p>}
+      {shareMessage && <p className="portal-error">{shareMessage}</p>}
 
-      {session && profile ? (
-        <section className="card">
-          <div className="row between">
-            <h2>Private Client Deliveries</h2>
-            <button disabled={galleryLoading} onClick={() => void loadPrivateGallery(token)}>
-              {galleryLoading ? 'Refreshing...' : 'Refresh'}
-            </button>
+      {!shareBusy && !shareMessage && (
+        <ul className="delivery-assets">
+          {shareAssets.map((asset) => (
+            <li key={asset.id}>
+              <span>{asset.filename}</span>
+              <span>{formatBytes(asset.bytes)}</span>
+              <span>{asset.mime_type}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+
+  return (
+    <div className="page">
+      <header className="topbar">
+        <div className="brand">
+          <a className="brand-mark" href="#home" aria-label="Go to top">
+            <img
+              src="/logo/IMG_3142.PNG"
+              alt="Rajugari_Abbayi Photography logo"
+              loading="lazy"
+            />
+          </a>
+          <div>
+            <a className="brand-title" href="#home">
+              Rajugari_Abbayi_Photography
+            </a>
+            <a
+              className="brand-subtitle"
+              href={personalInstagramUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Vishnu Varma
+            </a>
           </div>
+        </div>
 
-          {deliveries.length === 0 ? (
-            <p className="muted">No active delivery files for this account.</p>
-          ) : (
-            <div className="stack">
-              {deliveries.map((delivery) => (
-                <div className="card compact" key={delivery.deliveryId}>
-                  <p>
-                    <strong>Delivery:</strong> {delivery.deliveryId}
+        <div className="topbar-right">
+          <nav className="nav">
+            {session && role === 'customer' && <a href="#my-pictures">My Pictures</a>}
+            {session && role === 'admin' && <a href="#upload">Upload</a>}
+            <a href="#work">Work</a>
+            <a href="#about">About</a>
+            <a href="/book.html">Contact</a>
+          </nav>
+
+          <div className="auth-box">
+            <button
+              className="login-icon"
+              type="button"
+              aria-label="Open login menu"
+              onClick={() => setAuthMenuOpen((open) => !open)}
+            >
+              <span>⎆</span>
+            </button>
+
+            {authMenuOpen && (
+              <div className="auth-menu">
+                {!isSupabaseConfigured && (
+                  <p className="auth-note">
+                    Configure Supabase env vars to enable OTP login.
                   </p>
-                  <p className="muted">
-                    Access: {delivery.accessMode}
-                    {delivery.expiresAt ? ` | Expires: ${new Date(delivery.expiresAt).toLocaleString()}` : ''}
-                  </p>
-                  <div className="stack">
-                    {delivery.assets.map((asset) => (
-                      <div className="row between" key={asset.id}>
-                        <span>
-                          {asset.filename} ({Math.max(1, Math.round(asset.bytes / 1024))} KB)
-                        </span>
-                        <div className="actions">
-                          <button onClick={() => void requestAssetUrl(asset.id, 'view')}>View</button>
-                          <button
-                            disabled={!asset.canDownload}
-                            onClick={() => void requestAssetUrl(asset.id, 'download')}
-                          >
-                            Download
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                    {delivery.assets.length === 0 ? <p className="muted">No files visible in this delivery.</p> : null}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      ) : null}
+                )}
 
-      {session && profile?.role === 'admin' ? (
-        <>
-          <section className="card">
-            <h2>Admin Clients CRUD</h2>
-            <form onSubmit={createClient} className="row">
-              <input
-                value={newClientName}
-                onChange={(event) => setNewClientName(event.target.value)}
-                placeholder="Client full name"
-                required
-              />
-              <input
-                type="email"
-                value={newClientEmail}
-                onChange={(event) => setNewClientEmail(event.target.value)}
-                placeholder="client@example.com"
-                required
-              />
-              <button type="submit">Create Client</button>
-            </form>
-            <div className="stack">
-              {sortedClients.map((client) => (
-                <ClientEditor
-                  key={client.id}
-                  client={client}
-                  token={token}
-                  onSaved={(saved) => setClients((current) => current.map((item) => (item.id === saved.id ? saved : item)))}
-                  onDeleted={(id) => setClients((current) => current.filter((item) => item.id !== id))}
-                />
-              ))}
-              {sortedClients.length === 0 ? <p className="muted">No clients yet.</p> : null}
-            </div>
-          </section>
+                {session ? (
+                  <>
+                    <p className="auth-note">
+                      Logged in as <strong>{session.user.email}</strong> ({role})
+                    </p>
+                    <button className="button ghost" type="button" onClick={() => void handleSignOut()}>
+                      Logout
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <form className="auth-form" onSubmit={handleSendOtp}>
+                      <label>
+                        Email
+                        <input
+                          type="email"
+                          value={emailInput}
+                          onChange={(event) => setEmailInput(event.target.value)}
+                          placeholder="name@email.com"
+                          required
+                        />
+                      </label>
+                      <button className="button primary" type="submit" disabled={authBusy}>
+                        {authBusy ? 'Sending...' : 'Send OTP'}
+                      </button>
+                    </form>
 
-          <section className="card">
-            <h2>Admin Projects CRUD</h2>
-            <form onSubmit={createProject} className="row">
-              <select
-                value={newProjectClientId}
-                onChange={(event) => setNewProjectClientId(event.target.value)}
-                required
-              >
-                <option value="">Select client</option>
-                {sortedClients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.full_name}
-                  </option>
-                ))}
-              </select>
-              <input
-                value={newProjectName}
-                onChange={(event) => setNewProjectName(event.target.value)}
-                placeholder="Project name"
-                required
-              />
-              <button type="submit">Create Project</button>
-            </form>
+                    <form className="auth-form" onSubmit={handleVerifyOtp}>
+                      <label>
+                        OTP code
+                        <input
+                          type="text"
+                          value={otpInput}
+                          onChange={(event) => setOtpInput(event.target.value)}
+                          placeholder="6-digit code"
+                          required
+                        />
+                      </label>
+                      <button className="button ghost" type="submit" disabled={authBusy}>
+                        Verify & Login
+                      </button>
+                    </form>
+                  </>
+                )}
 
-            <div className="stack">
-              {projects.map((project) => (
-                <ProjectEditor
-                  key={project.id}
-                  project={project}
-                  token={token}
-                  onSaved={(saved) =>
-                    setProjects((current) => current.map((item) => (item.id === saved.id ? saved : item)))
-                  }
-                  onDeleted={(id) => setProjects((current) => current.filter((item) => item.id !== id))}
-                />
-              ))}
-              {projects.length === 0 ? <p className="muted">No projects yet.</p> : null}
-            </div>
-          </section>
+                {authMessage && <p className="auth-note">{authMessage}</p>}
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
 
-          <section className="card">
-            <h2>Admin Upload Pipeline</h2>
-            <form onSubmit={uploadSelectedFiles} className="stack">
-              <label>
-                Delivery ID
-                <input
-                  value={uploadDeliveryId}
-                  onChange={(event) => setUploadDeliveryId(event.target.value)}
-                  placeholder="UUID delivery id"
-                  required
-                />
-              </label>
-              <label>
-                Files
-                <input
-                  type="file"
-                  multiple
-                  onChange={(event) => setUploadQueue(Array.from(event.target.files ?? []))}
-                  required
-                />
-              </label>
-              <button type="submit" disabled={isUploading || uploadQueue.length === 0}>
-                {isUploading ? 'Uploading...' : 'Upload Files'}
-              </button>
-            </form>
+      <main>
+        {view === 'home' && renderHomeSections()}
+        {view === 'my-pictures' && renderMyPictures()}
+        {view === 'upload' && renderUpload()}
+        {view === 'share' && renderShareView()}
+      </main>
 
-            <div className="stack">
-              {uploadRecords.map((record) => (
-                <div className="card compact" key={record.fileName}>
-                  <div className="row between">
-                    <strong>{record.fileName}</strong>
-                    <span>{record.progress}%</span>
-                  </div>
-                  <progress max={100} value={record.progress} />
-                  <p className={record.status === 'failed' ? 'error' : 'muted'}>
-                    {record.message} ({record.status})
-                  </p>
-                </div>
-              ))}
-              {uploadRecords.length === 0 ? (
-                <p className="muted">Select files to start browser-to-R2 upload.</p>
-              ) : null}
-            </div>
-          </section>
-        </>
-      ) : null}
-    </main>
+      <footer className="footer">
+        <p>© 2026 Rajugari_Abbayi Photography. Crafted with intention.</p>
+      </footer>
+    </div>
   )
 }
 
