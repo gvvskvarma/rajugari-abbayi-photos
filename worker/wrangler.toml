@@ -1,0 +1,24 @@
+name = "photography-api"
+main = "src/index.ts"
+compatibility_date = "2026-03-08"
+workers_dev = true
+preview_urls = false
+
+[observability]
+enabled = true
+
+[[r2_buckets]]
+binding = "R2_MEDIA_BUCKET"
+bucket_name = "photography-private"
+
+[vars]
+APP_ORIGIN = "https://rajugariabbayishots.vercel.app"
+SUPABASE_URL = "https://ogcafgdhchzheennyzva.supabase.co"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9nY2FmZ2RoY2h6aGVlbm55enZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5MjM2MjUsImV4cCI6MjA4ODQ5OTYyNX0.KIzrmyFJcFIf5UlLs-1CZmADULdh3bKEamdrEdglYaw"
+R2_ACCOUNT_ID = "3bb24180dda29410cb330891f7c62322"
+R2_BUCKET = "photography-private"
+
+# Set secrets with:
+# wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+# wrangler secret put R2_ACCESS_KEY_ID
+# wrangler secret put R2_SECRET_ACCESS_KEY
