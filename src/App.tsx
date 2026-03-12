@@ -11,6 +11,7 @@ const personalInstagramUrl =
 const mediaBaseUrl = (import.meta.env.VITE_MEDIA_BASE_URL ?? '').trim().replace(/\/+$/, '')
 const authRedirectUrl =
   (import.meta.env.VITE_AUTH_REDIRECT_URL ?? '').trim() || 'https://rajugariabbayishots.vercel.app'
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/+$/, '')
 
 const toFirstName = (value?: string) => {
   const cleaned = (value ?? '').trim()
@@ -164,29 +165,23 @@ type GalleryShot = {
 type Role = 'admin' | 'customer'
 type AppView = 'home' | 'my-pictures' | 'upload' | 'share'
 
-type DeliveryRecipient = {
-  id: string
-  delivery_id: string
-  email: string
-  access_mode: 'owner' | 'viewer'
-  first_viewed_at: string | null
-  expires_at: string | null
-}
-
 type DeliveryAsset = {
   id: string
-  delivery_id: string
   filename: string
   mime_type: string
   bytes: number
-  r2_object_key: string
-  created_at: string
+  delivery_id?: string
+  r2_object_key?: string
+  created_at?: string
+  canView?: boolean
+  canDownload?: boolean
 }
 
 type DeliveryCard = {
   deliveryId: string
   expiresAt: string | null
-  firstViewedAt: string | null
+  firstViewedAt?: string | null
+  accessMode?: 'owner' | 'viewer' | 'admin'
   assets: DeliveryAsset[]
 }
 
@@ -425,6 +420,7 @@ function App() {
   const [customerError, setCustomerError] = useState('')
   const [customerBusy, setCustomerBusy] = useState(false)
   const [newShareLinks, setNewShareLinks] = useState<Record<string, string>>({})
+  const [shareCopyState, setShareCopyState] = useState<Record<string, string>>({})
 
   const [uploadEmail, setUploadEmail] = useState('')
   const [uploadTitle, setUploadTitle] = useState('Client Delivery')
@@ -514,74 +510,63 @@ function App() {
     return toFirstName(profileDisplayName) || toFirstName(session.user.email) || 'LOGIN'
   }, [profileDisplayName, session])
 
+  const getAccessToken = async () => {
+    if (!supabase) return ''
+    const {
+      data: { session: authSession },
+    } = await supabase.auth.getSession()
+    return authSession?.access_token ?? ''
+  }
+
+  const workerRequest = async <T,>(
+    path: string,
+    token: string,
+    options?: {
+      method?: 'GET' | 'POST'
+      body?: unknown
+    }
+  ): Promise<T> => {
+    if (!apiBaseUrl) {
+      throw new Error('Set VITE_API_BASE_URL to enable gallery APIs.')
+    }
+    const response = await fetch(`${apiBaseUrl}${path}`, {
+      method: options?.method ?? 'GET',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: options?.body ? JSON.stringify(options.body) : undefined,
+    })
+    const text = await response.text()
+    const payload = text ? (JSON.parse(text) as Record<string, unknown>) : {}
+    if (!response.ok) {
+      const maybeError = payload.error as { message?: string } | undefined
+      throw new Error(maybeError?.message ?? 'Request failed')
+    }
+    return payload as T
+  }
+
   useEffect(() => {
     if (!supabase || view !== 'my-pictures' || !session?.user.email) return
-    const client = supabase
-    const normalizedEmail = session.user.email.toLowerCase()
 
     const loadCustomerData = async () => {
       setCustomerBusy(true)
       setCustomerError('')
-
-      const recipientsResult = await client
-        .from('delivery_recipients')
-        .select('id, delivery_id, email, access_mode, first_viewed_at, expires_at')
-        .eq('email', normalizedEmail)
-
-      if (recipientsResult.error) {
-        setCustomerError(recipientsResult.error.message)
-        setCustomerBusy(false)
-        return
-      }
-
-      const recipients = (recipientsResult.data ?? []) as DeliveryRecipient[]
-
-      for (const recipient of recipients) {
-        if (!recipient.first_viewed_at) {
-          await client.rpc('activate_delivery_retention', { recipient_row_id: recipient.id })
+      try {
+        const token = await getAccessToken()
+        if (!token) {
+          setCustomerError('Login session expired. Please log in again.')
+          setMyDeliveries([])
+          setCustomerBusy(false)
+          return
         }
-      }
-
-      const refreshedRecipientsResult = await client
-        .from('delivery_recipients')
-        .select('id, delivery_id, email, access_mode, first_viewed_at, expires_at')
-        .eq('email', normalizedEmail)
-
-      const refreshedRecipients = (refreshedRecipientsResult.data ?? recipients) as DeliveryRecipient[]
-      const activeRecipients = refreshedRecipients.filter((recipient) => {
-        if (!recipient.expires_at) return true
-        return new Date(recipient.expires_at).getTime() > Date.now()
-      })
-
-      const deliveryIds = activeRecipients.map((recipient) => recipient.delivery_id)
-      if (deliveryIds.length === 0) {
-        setMyDeliveries([])
+        const payload = await workerRequest<{ deliveries: DeliveryCard[] }>('/api/v1/my-pictures', token)
+        setMyDeliveries(payload.deliveries ?? [])
+      } catch (error) {
+        setCustomerError(error instanceof Error ? error.message : 'Failed to load deliveries')
+      } finally {
         setCustomerBusy(false)
-        return
       }
-
-      const assetsResult = await client
-        .from('assets')
-        .select('id, delivery_id, filename, mime_type, bytes, r2_object_key, created_at')
-        .in('delivery_id', deliveryIds)
-        .order('created_at', { ascending: false })
-
-      if (assetsResult.error) {
-        setCustomerError(assetsResult.error.message)
-        setCustomerBusy(false)
-        return
-      }
-
-      const assets = (assetsResult.data ?? []) as DeliveryAsset[]
-      const cards: DeliveryCard[] = activeRecipients.map((recipient) => ({
-        deliveryId: recipient.delivery_id,
-        expiresAt: recipient.expires_at,
-        firstViewedAt: recipient.first_viewed_at,
-        assets: assets.filter((asset) => asset.delivery_id === recipient.delivery_id),
-      }))
-
-      setMyDeliveries(cards)
-      setCustomerBusy(false)
     }
 
     void loadCustomerData()
@@ -683,26 +668,71 @@ function App() {
 
   const handleCreateShareLink = async (deliveryId: string) => {
     if (!supabase || !session?.user.id) return
-
-    const token = randomToken()
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
-
-    const { error } = await supabase.from('share_links').insert({
-      token,
-      owner_profile_id: session.user.id,
-      delivery_id: deliveryId,
-      access_mode: 'viewer',
-      allow_download: false,
-      expires_at: expiresAt,
-    })
-
-    if (error) {
-      setCustomerError(error.message)
-      return
+    try {
+      const token = await getAccessToken()
+      if (!token) {
+        setCustomerError('Login session expired. Please log in again.')
+        return
+      }
+      const payload = await workerRequest<{ url: string }>(
+        '/api/v1/share-links',
+        token,
+        {
+          method: 'POST',
+          body: { deliveryId, expiresInDays: 7 },
+        }
+      )
+      setNewShareLinks((current) => ({ ...current, [deliveryId]: payload.url }))
+      setShareCopyState((current) => ({ ...current, [deliveryId]: '' }))
+    } catch (error) {
+      setCustomerError(error instanceof Error ? error.message : 'Unable to create share link')
     }
+  }
 
-    const url = `${window.location.origin}/#share/${token}`
-    setNewShareLinks((current) => ({ ...current, [deliveryId]: url }))
+  const handleCopyShareLink = async (deliveryId: string) => {
+    const link = newShareLinks[deliveryId]
+    if (!link) return
+    try {
+      await navigator.clipboard.writeText(link)
+      setShareCopyState((current) => ({ ...current, [deliveryId]: 'Copied' }))
+    } catch {
+      setShareCopyState((current) => ({ ...current, [deliveryId]: 'Copy failed' }))
+    }
+  }
+
+  const handleOpenAsset = async (assetId: string, mode: 'view' | 'download') => {
+    if (!supabase) return
+    try {
+      const token = await getAccessToken()
+      if (!token) {
+        setCustomerError('Login session expired. Please log in again.')
+        return
+      }
+      const payload = await workerRequest<{ signedUrl: string }>(
+        '/api/v1/media/signed-url',
+        token,
+        {
+          method: 'POST',
+          body: { assetId, mode },
+        }
+      )
+      window.open(payload.signedUrl, '_blank', 'noopener,noreferrer')
+    } catch (error) {
+      setCustomerError(error instanceof Error ? error.message : 'Unable to open file')
+    }
+  }
+
+  const uploadFileToSignedUrl = async (uploadUrl: string, file: File) => {
+    const response = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'content-type': file.type || 'application/octet-stream',
+      },
+      body: file,
+    })
+    if (!response.ok) {
+      throw new Error(`Upload failed for ${file.name}`)
+    }
   }
 
   const handleUploadDelivery = async (event: FormEvent) => {
@@ -803,23 +833,53 @@ function App() {
       return
     }
 
-    const assetRows = uploadFiles.map((file, index) => {
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-      return {
-        owner_user_id: session.user.id,
-        project_id: insertedProject.data.id,
-        delivery_id: insertedDelivery.data.id,
-        filename: file.name,
-        mime_type: file.type || 'application/octet-stream',
-        bytes: Math.max(1, file.size),
-        kind: file.type.startsWith('video') ? 'video' : 'photo',
-        r2_object_key: `pending/${insertedDelivery.data.id}/${Date.now()}-${index}-${safeName}`,
-      }
-    })
+    const token = await getAccessToken()
+    if (!token) {
+      setUploadMessage('Login session expired. Please log in again.')
+      setUploadBusy(false)
+      return
+    }
 
-    const insertedAssets = await supabase.from('assets').insert(assetRows)
-    if (insertedAssets.error) {
-      setUploadMessage(insertedAssets.error.message)
+    try {
+      for (const file of uploadFiles) {
+        const requestResult = await workerRequest<{
+          objectKey: string
+          uploadToken: string
+          uploadUrl: string
+        }>(
+          '/api/v1/request-upload-url',
+          token,
+          {
+            method: 'POST',
+            body: {
+              deliveryId: insertedDelivery.data.id,
+              fileName: file.name,
+              contentType: file.type || 'application/octet-stream',
+              fileSize: Math.max(1, file.size),
+            },
+          }
+        )
+
+        await uploadFileToSignedUrl(requestResult.uploadUrl, file)
+
+        await workerRequest(
+          '/api/v1/upload/complete',
+          token,
+          {
+            method: 'POST',
+            body: {
+              deliveryId: insertedDelivery.data.id,
+              objectKey: requestResult.objectKey,
+              uploadToken: requestResult.uploadToken,
+              fileName: file.name,
+              mimeType: file.type || 'application/octet-stream',
+              bytes: Math.max(1, file.size),
+            },
+          }
+        )
+      }
+    } catch (error) {
+      setUploadMessage(error instanceof Error ? error.message : 'Upload failed')
       setUploadBusy(false)
       return
     }
@@ -1041,6 +1101,7 @@ function App() {
                 <button
                   className="button ghost"
                   type="button"
+                  disabled={delivery.accessMode === 'viewer'}
                   onClick={() => {
                     void handleCreateShareLink(delivery.deliveryId)
                   }}
@@ -1050,7 +1111,18 @@ function App() {
               </div>
 
               {newShareLinks[delivery.deliveryId] && (
-                <p className="portal-share-link">{newShareLinks[delivery.deliveryId]}</p>
+                <div className="share-link-row">
+                  <input className="share-link-input" value={newShareLinks[delivery.deliveryId]} readOnly />
+                  <button
+                    className="button ghost"
+                    type="button"
+                    onClick={() => {
+                      void handleCopyShareLink(delivery.deliveryId)
+                    }}
+                  >
+                    {shareCopyState[delivery.deliveryId] || 'Copy'}
+                  </button>
+                </div>
               )}
 
               <ul className="delivery-assets">
@@ -1058,7 +1130,27 @@ function App() {
                   <li key={asset.id}>
                     <span>{asset.filename}</span>
                     <span>{formatBytes(asset.bytes)}</span>
-                    <span>{asset.mime_type}</span>
+                    <div className="delivery-asset-actions">
+                      <button
+                        className="button ghost"
+                        type="button"
+                        onClick={() => {
+                          void handleOpenAsset(asset.id, 'view')
+                        }}
+                      >
+                        View
+                      </button>
+                      <button
+                        className="button ghost"
+                        type="button"
+                        disabled={!asset.canDownload}
+                        onClick={() => {
+                          void handleOpenAsset(asset.id, 'download')
+                        }}
+                      >
+                        Download
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>

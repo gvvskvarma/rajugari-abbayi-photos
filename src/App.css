@@ -260,17 +260,42 @@
 
 .delivery-assets li {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) auto auto;
+  grid-template-columns: minmax(160px, 1fr) auto auto;
   gap: 10px;
   border-bottom: 1px dashed rgba(236, 232, 223, 0.12);
   padding-bottom: 8px;
   font-size: 0.88rem;
+  align-items: center;
 }
 
-.portal-share-link {
-  overflow-wrap: anywhere;
-  font-size: 0.84rem;
-  color: #f0e8d8;
+.share-link-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.share-link-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid rgba(236, 232, 223, 0.2);
+  border-radius: 8px;
+  background: rgba(236, 232, 223, 0.08);
+  color: #f2ece1;
+  padding: 8px 10px;
+  font-size: 0.78rem;
+}
+
+.delivery-asset-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.delivery-asset-actions .button {
+  padding: 7px 10px;
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
 }
 
 .upload-form {
@@ -770,6 +795,15 @@ main > section {
   .delivery-assets li {
     grid-template-columns: 1fr;
     gap: 4px;
+  }
+
+  .share-link-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .delivery-asset-actions {
+    justify-content: flex-start;
   }
 
   .grid {
