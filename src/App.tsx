@@ -447,6 +447,7 @@ function App() {
   const [uploadBusy, setUploadBusy] = useState(false)
   const [uploadMessage, setUploadMessage] = useState('')
   const [adminFolders, setAdminFolders] = useState<AdminFolder[]>([])
+  const [openAdminFolderId, setOpenAdminFolderId] = useState('')
   const [adminWorkBusy, setAdminWorkBusy] = useState(false)
   const [adminWorkError, setAdminWorkError] = useState('')
 
@@ -617,7 +618,6 @@ function App() {
             .select('id, delivery_id, filename, mime_type, bytes, created_at, r2_object_key')
             .eq('owner_user_id', session.user.id)
             .not('delivery_id', 'is', null)
-            .not('r2_object_key', 'like', 'pending/%')
             .order('created_at', { ascending: false }),
         ])
 
@@ -647,6 +647,7 @@ function App() {
         }))
 
         setAdminFolders(folders)
+        setOpenAdminFolderId((current) => current || folders[0]?.deliveryId || '')
       } catch (error) {
         setAdminWorkError(error instanceof Error ? error.message : 'Failed to load admin folders')
       } finally {
@@ -1316,7 +1317,6 @@ function App() {
     return (
       <section className="portal-section">
         <h2>Work Folders</h2>
-        <p>Each folder maps to a delivery title you used during upload.</p>
         {adminWorkBusy && <p className="portal-hint">Loading folders...</p>}
         {adminWorkError && <p className="portal-error">{adminWorkError}</p>}
         {!adminWorkBusy && !adminWorkError && adminFolders.length === 0 && (
@@ -1333,35 +1333,58 @@ function App() {
                     Delivery {folder.deliveryId.slice(0, 8)} | {new Date(folder.createdAt).toLocaleString()}
                   </p>
                 </div>
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={() => {
+                    setOpenAdminFolderId((current) => (current === folder.deliveryId ? '' : folder.deliveryId))
+                  }}
+                >
+                  {openAdminFolderId === folder.deliveryId ? 'Hide files' : 'Open folder'}
+                </button>
               </div>
-              <ul className="delivery-assets">
-                {folder.assets.map((asset) => (
-                  <li key={asset.id}>
-                    <span>{asset.filename}</span>
-                    <span>{formatBytes(asset.bytes)}</span>
-                    <div className="delivery-asset-actions">
-                      <button
-                        className="button ghost"
-                        type="button"
-                        onClick={() => {
-                          void handleOpenAsset(asset.id, 'view')
-                        }}
-                      >
-                        View
-                      </button>
-                      <button
-                        className="button ghost"
-                        type="button"
-                        onClick={() => {
-                          void handleOpenAsset(asset.id, 'download')
-                        }}
-                      >
-                        Download
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+
+              {openAdminFolderId === folder.deliveryId && (
+                <>
+                  {folder.assets.length === 0 ? (
+                    <p className="portal-hint">No files in this folder yet.</p>
+                  ) : (
+                    <ul className="delivery-assets">
+                      {folder.assets.map((asset) => {
+                        const isPending = (asset.r2_object_key ?? '').startsWith('pending/')
+                        return (
+                          <li key={asset.id}>
+                            <span>{asset.filename}</span>
+                            <span>{formatBytes(asset.bytes)}</span>
+                            <div className="delivery-asset-actions">
+                              <button
+                                className="button ghost"
+                                type="button"
+                                disabled={isPending}
+                                onClick={() => {
+                                  void handleOpenAsset(asset.id, 'view')
+                                }}
+                              >
+                                View
+                              </button>
+                              <button
+                                className="button ghost"
+                                type="button"
+                                disabled={isPending}
+                                onClick={() => {
+                                  void handleOpenAsset(asset.id, 'download')
+                                }}
+                              >
+                                Download
+                              </button>
+                            </div>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                </>
+              )}
             </article>
           ))}
         </div>

@@ -305,6 +305,7 @@
 }
 
 main {
+  flex: 1;
   width: min(1180px, 100%);
   margin: 0 auto;
   padding: 52px 5.5vw 110px;
@@ -720,6 +721,7 @@ main > section {
 }
 
 .footer {
+  margin-top: auto;
   padding: 24px 5.5vw 34px;
   color: rgba(236, 232, 223, 0.52);
   font-size: 0.7rem;
