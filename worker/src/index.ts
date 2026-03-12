@@ -879,6 +879,10 @@ app.post('/api/v1/media/signed-url', async (c) => {
 
     const asset = assets[0]
     if (!asset) return jsonError('Asset not found', 404)
+    if (asset.r2_object_key.startsWith('pending/')) {
+      return jsonError('This file was never uploaded to storage. Re-upload it from Admin Upload.', 410)
+    }
+
     const deliveryAssetRows = await supabaseRequest<
       Array<{ delivery_id: string; can_view: boolean; can_download: boolean }>
     >(
@@ -923,6 +927,11 @@ app.post('/api/v1/media/signed-url', async (c) => {
         })
       }
 
+      const objectHead = await c.env.R2_MEDIA_BUCKET.head(asset.r2_object_key)
+      if (!objectHead) {
+        return jsonError('File missing in storage for this asset. Re-upload required.', 404)
+      }
+
       const signedUrl = await buildR2SignedUrl(c.env, 'GET', asset.r2_object_key, 300, mode)
       return c.json({ signedUrl, expiresInSeconds: 300, mode }, 200, responseHeaders(c))
     }
@@ -940,6 +949,11 @@ app.post('/api/v1/media/signed-url', async (c) => {
         ipHash,
         userAgent: c.req.header('User-Agent') ?? null,
       })
+    }
+
+    const objectHead = await c.env.R2_MEDIA_BUCKET.head(asset.r2_object_key)
+    if (!objectHead) {
+      return jsonError('File missing in storage for this asset. Re-upload required.', 404)
     }
 
     const signedUrl = await buildR2SignedUrl(c.env, 'GET', asset.r2_object_key, 300, mode)
@@ -966,16 +980,19 @@ app.get('/api/v1/deliveries/:deliveryId/gallery', async (c) => {
     }
 
     const assetFilter = visibleAssetIds.map((id) => `id.eq.${id}`).join(',')
-    const assets = await supabaseRequest<Array<{ id: string; filename: string; mime_type: string; bytes: number }>>(
+    const assets = await supabaseRequest<
+      Array<{ id: string; filename: string; mime_type: string; bytes: number; r2_object_key: string }>
+    >(
       c.env,
-      `assets?or=(${assetFilter})&select=id,filename,mime_type,bytes&order=created_at.desc`
+      `assets?or=(${assetFilter})&select=id,filename,mime_type,bytes,r2_object_key&order=created_at.desc`
     )
+    const uploadedAssets = assets.filter((asset) => !asset.r2_object_key.startsWith('pending/'))
 
     return c.json(
       {
         deliveryId,
         accessMode,
-        assets: assets.map((asset) => ({
+        assets: uploadedAssets.map((asset) => ({
           ...asset,
           canView: true,
           canDownload:
@@ -1075,16 +1092,19 @@ app.get('/api/v1/my-pictures', async (c) => {
         }
 
         const assetFilter = visibleAssetIds.map((id) => `id.eq.${id}`).join(',')
-        const assets = await supabaseRequest<Array<{ id: string; filename: string; mime_type: string; bytes: number }>>(
+        const assets = await supabaseRequest<
+          Array<{ id: string; filename: string; mime_type: string; bytes: number; r2_object_key: string }>
+        >(
           c.env,
-          `assets?or=(${assetFilter})&select=id,filename,mime_type,bytes&order=created_at.desc`
+          `assets?or=(${assetFilter})&select=id,filename,mime_type,bytes,r2_object_key&order=created_at.desc`
         )
+        const uploadedAssets = assets.filter((asset) => !asset.r2_object_key.startsWith('pending/'))
 
         return {
           deliveryId,
           accessMode: recipient.access_mode,
           expiresAt: recipient.expires_at,
-          assets: assets.map((asset) => ({
+          assets: uploadedAssets.map((asset) => ({
             ...asset,
             canView: true,
             canDownload:

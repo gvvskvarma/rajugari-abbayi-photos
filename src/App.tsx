@@ -614,9 +614,10 @@ function App() {
             .order('created_at', { ascending: false }),
           client
             .from('assets')
-            .select('id, delivery_id, filename, mime_type, bytes, created_at')
+            .select('id, delivery_id, filename, mime_type, bytes, created_at, r2_object_key')
             .eq('owner_user_id', session.user.id)
             .not('delivery_id', 'is', null)
+            .not('r2_object_key', 'like', 'pending/%')
             .order('created_at', { ascending: false }),
         ])
 
