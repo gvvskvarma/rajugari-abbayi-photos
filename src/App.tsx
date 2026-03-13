@@ -680,6 +680,44 @@ function App() {
         .filter((entry): entry is { key: string; assetId: string } => Boolean(entry.assetId)),
     [adminFolders]
   )
+  const uploadSelectionSummary = useMemo(() => {
+    if (uploadFiles.length === 0) return 'No files selected yet.'
+
+    const folders = new Map<string, number>()
+    let directFiles = 0
+
+    for (const file of uploadFiles) {
+      const relative = (file.webkitRelativePath ?? '').trim()
+      if (!relative) {
+        directFiles += 1
+        continue
+      }
+      const topFolder = relative.split('/').filter(Boolean)[0]
+      if (!topFolder) {
+        directFiles += 1
+        continue
+      }
+      folders.set(topFolder, (folders.get(topFolder) ?? 0) + 1)
+    }
+
+    const folderCount = folders.size
+    const folderFiles = Array.from(folders.values()).reduce((sum, count) => sum + count, 0)
+    const parts: string[] = []
+
+    if (folderCount > 0) {
+      parts.push(`${folderCount} folder${folderCount === 1 ? '' : 's'} (${folderFiles} files)`)
+      const folderPreview = Array.from(folders.keys()).sort((a, b) => a.localeCompare(b)).slice(0, 3)
+      if (folderPreview.length > 0) {
+        parts.push(folderPreview.join(', '))
+      }
+    }
+
+    if (directFiles > 0) {
+      parts.push(`${directFiles} direct file${directFiles === 1 ? '' : 's'}`)
+    }
+
+    return parts.join(' | ')
+  }, [uploadFiles])
 
   const getAccessToken = async () => {
     if (!supabase) return ''
@@ -998,6 +1036,7 @@ function App() {
   const handleUploadFilesChange = (event: ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(event.target.files ?? [])
     setUploadFiles((current) => [...current, ...selected])
+    event.target.value = ''
   }
 
   const handleCreateShareLink = async (deliveryId: string) => {
@@ -1614,9 +1653,7 @@ function App() {
                 {...({ webkitdirectory: '' } as Record<string, string>)}
               />
               <p className="upload-selection-count">
-                {uploadFiles.length === 0
-                  ? 'No files selected yet.'
-                  : `${uploadFiles.length} file${uploadFiles.length === 1 ? '' : 's'} selected`}
+                {uploadSelectionSummary}
               </p>
             </div>
           </label>
