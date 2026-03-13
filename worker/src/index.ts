@@ -55,6 +55,12 @@ const jsonError = (message: string, status = 400, origin = '*') =>
     headers: buildBaseHeaders(origin),
   })
 
+const isMissingUploadSessionsTableError = (error: unknown) => {
+  if (!(error instanceof Error)) return false
+  const text = error.message.toLowerCase()
+  return text.includes('upload_sessions') && (text.includes('pgrst205') || text.includes('could not find the table'))
+}
+
 app.options('*', (c) => {
   const origin = resolveAllowedOrigin(c.env, c.req.header('Origin'))
   return c.body(null, 204, buildBaseHeaders(origin))
@@ -697,27 +703,33 @@ const handleRequestUploadUrl = async (c: Context<{ Bindings: Env }>) => {
     const expiresAt = new Date(Date.now() + uploadUrlExpirySeconds * 1000).toISOString()
     const uploadUrl = await buildR2SignedUrl(c.env, 'PUT', objectKey, uploadUrlExpirySeconds, 'view')
 
-    await supabaseRequest(
-      c.env,
-      'upload_sessions',
-      {
-        method: 'POST',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({
-          owner_user_id: user.id,
-          delivery_id: body.deliveryId,
-          project_id: projectId,
-          upload_token: uploadToken,
-          original_filename: safeFileName,
-          mime_type: body.contentType,
-          expected_bytes: Math.max(1, Math.trunc(body.fileSize)),
-          r2_object_key: objectKey,
-          status: 'requested',
-          expires_at: expiresAt,
-        }),
-      },
-      true
-    )
+    try {
+      await supabaseRequest(
+        c.env,
+        'upload_sessions',
+        {
+          method: 'POST',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            owner_user_id: user.id,
+            delivery_id: body.deliveryId,
+            project_id: projectId,
+            upload_token: uploadToken,
+            original_filename: safeFileName,
+            mime_type: body.contentType,
+            expected_bytes: Math.max(1, Math.trunc(body.fileSize)),
+            r2_object_key: objectKey,
+            status: 'requested',
+            expires_at: expiresAt,
+          }),
+        },
+        true
+      )
+    } catch (error) {
+      if (!isMissingUploadSessionsTableError(error)) {
+        throw error
+      }
+    }
 
     return c.json(
       {
@@ -763,27 +775,44 @@ app.post('/api/v1/upload/complete', async (c) => {
 
     await ensureAdminAndOwnedDelivery(c.env, user, body.deliveryId)
 
-    const sessions = await supabaseRequest<
-      Array<{
-        id: string
-        status: 'requested' | 'uploaded' | 'finalized' | 'failed'
-        expires_at: string
-        expected_bytes: number
-      }>
-    >(
-      c.env,
-      `upload_sessions?upload_token=eq.${encodeURIComponent(
-        body.uploadToken
-      )}&owner_user_id=eq.${encodeURIComponent(user.id)}&delivery_id=eq.${encodeURIComponent(
-        body.deliveryId
-      )}&r2_object_key=eq.${encodeURIComponent(body.objectKey)}&select=id,status,expires_at,expected_bytes&limit=1`
-    )
-    const session = sessions[0]
-    if (!session) return jsonError('Upload session not found', 404)
-    if (new Date(session.expires_at).getTime() <= Date.now()) return jsonError('Upload session expired', 410)
-    if (session.status === 'finalized') return jsonError('Upload session already finalized', 409)
-    if (Math.abs(session.expected_bytes - body.bytes) > Math.max(1024, session.expected_bytes * 0.02)) {
-      return jsonError('Uploaded byte count does not match requested file size', 400)
+    let session:
+      | {
+          id: string
+          status: 'requested' | 'uploaded' | 'finalized' | 'failed'
+          expires_at: string
+          expected_bytes: number
+        }
+      | null = null
+
+    try {
+      const sessions = await supabaseRequest<
+        Array<{
+          id: string
+          status: 'requested' | 'uploaded' | 'finalized' | 'failed'
+          expires_at: string
+          expected_bytes: number
+        }>
+      >(
+        c.env,
+        `upload_sessions?upload_token=eq.${encodeURIComponent(
+          body.uploadToken
+        )}&owner_user_id=eq.${encodeURIComponent(user.id)}&delivery_id=eq.${encodeURIComponent(
+          body.deliveryId
+        )}&r2_object_key=eq.${encodeURIComponent(body.objectKey)}&select=id,status,expires_at,expected_bytes&limit=1`
+      )
+      session = sessions[0] ?? null
+    } catch (error) {
+      if (!isMissingUploadSessionsTableError(error)) {
+        throw error
+      }
+    }
+
+    if (session) {
+      if (new Date(session.expires_at).getTime() <= Date.now()) return jsonError('Upload session expired', 410)
+      if (session.status === 'finalized') return jsonError('Upload session already finalized', 409)
+      if (Math.abs(session.expected_bytes - body.bytes) > Math.max(1024, session.expected_bytes * 0.02)) {
+        return jsonError('Uploaded byte count does not match requested file size', 400)
+      }
     }
 
     const deliveries = await supabaseRequest<Array<{ project_id: string }>>(
@@ -833,26 +862,28 @@ app.post('/api/v1/upload/complete', async (c) => {
       true
     )
 
-    await supabaseRequest(
-      c.env,
-      `upload_sessions?id=eq.${encodeURIComponent(session.id)}`,
-      {
-        method: 'PATCH',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({
-          status: 'finalized',
-          completed_at: new Date().toISOString(),
-          attempts: 1,
-        }),
-      },
-      true
-    )
+    if (session) {
+      await supabaseRequest(
+        c.env,
+        `upload_sessions?id=eq.${encodeURIComponent(session.id)}`,
+        {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            status: 'finalized',
+            completed_at: new Date().toISOString(),
+            attempts: 1,
+          }),
+        },
+        true
+      )
+    }
 
     return c.json(
       {
         ok: true,
         assetId,
-        uploadSessionId: session.id,
+        uploadSessionId: session?.id ?? null,
       },
       200,
       responseHeaders(c)
