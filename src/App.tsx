@@ -1576,18 +1576,22 @@ function App() {
             />
           </label>
           <label>
-            Photos / videos
-            <input type="file" multiple accept="image/*,video/*" onChange={handleUploadFilesChange} />
-          </label>
-          <label>
-            Folder upload (optional)
-            <input
-              type="file"
-              multiple
-              onChange={handleUploadFilesChange}
-              // webkitdirectory enables selecting full folders in Chromium/Safari.
-              {...({ webkitdirectory: '' } as Record<string, string>)}
-            />
+            Upload media (photos, videos, or folders)
+            <div className="upload-input-group">
+              <input
+                type="file"
+                multiple
+                accept="image/*,video/*"
+                onChange={handleUploadFilesChange}
+              />
+              <input
+                type="file"
+                multiple
+                onChange={handleUploadFilesChange}
+                // webkitdirectory enables selecting full folders in Chromium/Safari.
+                {...({ webkitdirectory: '' } as Record<string, string>)}
+              />
+            </div>
           </label>
           <button className="button primary" type="submit" disabled={uploadBusy || uploadFiles.length === 0}>
             {uploadBusy ? 'Creating delivery...' : 'Create delivery link'}

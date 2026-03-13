@@ -361,6 +361,11 @@
   max-width: 620px;
 }
 
+.upload-input-group {
+  display: grid;
+  gap: 8px;
+}
+
 main {
   flex: 1;
   width: min(1180px, 100%);
