@@ -319,6 +319,8 @@ const randomToken = () => {
   return Array.from(buffer, (b) => b.toString(16).padStart(2, '0')).join('')
 }
 
+const assetPathParts = (name: string) => name.split('/').filter(Boolean)
+
 type RotatingGalleryProps = {
   title: string
   subtitle: string
@@ -448,6 +450,7 @@ function App() {
   const [uploadMessage, setUploadMessage] = useState('')
   const [adminFolders, setAdminFolders] = useState<AdminFolder[]>([])
   const [openAdminFolderId, setOpenAdminFolderId] = useState('')
+  const [openAdminSubfolderKey, setOpenAdminSubfolderKey] = useState('')
   const [adminWorkBusy, setAdminWorkBusy] = useState(false)
   const [adminWorkError, setAdminWorkError] = useState('')
 
@@ -749,7 +752,7 @@ function App() {
 
   const handleUploadFilesChange = (event: ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(event.target.files ?? [])
-    setUploadFiles(selected)
+    setUploadFiles((current) => [...current, ...selected])
   }
 
   const handleCreateShareLink = async (deliveryId: string) => {
@@ -928,6 +931,7 @@ function App() {
 
     try {
       for (const file of uploadFiles) {
+        const uploadDisplayName = file.webkitRelativePath?.trim() || file.name
         const requestResult = await workerRequest<{
           objectKey: string
           uploadToken: string
@@ -939,7 +943,7 @@ function App() {
             method: 'POST',
             body: {
               deliveryId: insertedDelivery.data.id,
-              fileName: file.name,
+              fileName: uploadDisplayName,
               contentType: file.type || 'application/octet-stream',
               fileSize: Math.max(1, file.size),
             },
@@ -957,7 +961,7 @@ function App() {
               deliveryId: insertedDelivery.data.id,
               objectKey: requestResult.objectKey,
               uploadToken: requestResult.uploadToken,
-              fileName: file.name,
+              fileName: uploadDisplayName,
               mimeType: file.type || 'application/octet-stream',
               bytes: Math.max(1, file.size),
             },
@@ -1294,6 +1298,16 @@ function App() {
             Photos / videos
             <input type="file" multiple accept="image/*,video/*" onChange={handleUploadFilesChange} />
           </label>
+          <label>
+            Folder upload (optional)
+            <input
+              type="file"
+              multiple
+              onChange={handleUploadFilesChange}
+              // webkitdirectory enables selecting full folders in Chromium/Safari.
+              {...({ webkitdirectory: '' } as Record<string, string>)}
+            />
+          </label>
           <button className="button primary" type="submit" disabled={uploadBusy || uploadFiles.length === 0}>
             {uploadBusy ? 'Creating delivery...' : 'Create delivery link'}
           </button>
@@ -1349,39 +1363,129 @@ function App() {
                   {folder.assets.length === 0 ? (
                     <p className="portal-hint">No files in this folder yet.</p>
                   ) : (
-                    <ul className="delivery-assets">
-                      {folder.assets.map((asset) => {
-                        const isPending = (asset.r2_object_key ?? '').startsWith('pending/')
-                        return (
-                          <li key={asset.id}>
-                            <span>{asset.filename}</span>
-                            <span>{formatBytes(asset.bytes)}</span>
-                            <div className="delivery-asset-actions">
-                              <button
-                                className="button ghost"
-                                type="button"
-                                disabled={isPending}
-                                onClick={() => {
-                                  void handleOpenAsset(asset.id, 'view')
-                                }}
-                              >
-                                View
-                              </button>
-                              <button
-                                className="button ghost"
-                                type="button"
-                                disabled={isPending}
-                                onClick={() => {
-                                  void handleOpenAsset(asset.id, 'download')
-                                }}
-                              >
-                                Download
-                              </button>
+                    (() => {
+                      const grouped = new Map<string, DeliveryAsset[]>()
+                      const directFiles: DeliveryAsset[] = []
+
+                      for (const asset of folder.assets) {
+                        const parts = assetPathParts(asset.filename)
+                        if (parts.length > 1) {
+                          const folderName = parts[0]
+                          const current = grouped.get(folderName) ?? []
+                          current.push(asset)
+                          grouped.set(folderName, current)
+                        } else {
+                          directFiles.push(asset)
+                        }
+                      }
+
+                      const folderNames = Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b))
+
+                      return (
+                        <>
+                          {folderNames.length > 0 && (
+                            <div className="admin-subfolder-list">
+                              {folderNames.map((folderName) => {
+                                const key = `${folder.deliveryId}:${folderName}`
+                                const files = grouped.get(folderName) ?? []
+                                return (
+                                  <article key={key} className="delivery-card compact">
+                                    <div className="delivery-header">
+                                      <div>
+                                        <p className="delivery-title">{folderName}</p>
+                                        <p className="delivery-expiry">{files.length} files</p>
+                                      </div>
+                                      <button
+                                        className="button ghost"
+                                        type="button"
+                                        onClick={() => {
+                                          setOpenAdminSubfolderKey((current) => (current === key ? '' : key))
+                                        }}
+                                      >
+                                        {openAdminSubfolderKey === key ? 'Hide files' : 'Open folder'}
+                                      </button>
+                                    </div>
+                                    {openAdminSubfolderKey === key && (
+                                      <ul className="delivery-assets">
+                                        {files.map((asset) => {
+                                          const isPending = (asset.r2_object_key ?? '').startsWith('pending/')
+                                          const parts = assetPathParts(asset.filename)
+                                          const shortName = parts.slice(1).join('/') || parts[0]
+                                          return (
+                                            <li key={asset.id}>
+                                              <span>{shortName}</span>
+                                              <span>{formatBytes(asset.bytes)}</span>
+                                              <div className="delivery-asset-actions">
+                                                <button
+                                                  className="button ghost"
+                                                  type="button"
+                                                  disabled={isPending}
+                                                  onClick={() => {
+                                                    void handleOpenAsset(asset.id, 'view')
+                                                  }}
+                                                >
+                                                  View
+                                                </button>
+                                                <button
+                                                  className="button ghost"
+                                                  type="button"
+                                                  disabled={isPending}
+                                                  onClick={() => {
+                                                    void handleOpenAsset(asset.id, 'download')
+                                                  }}
+                                                >
+                                                  Download
+                                                </button>
+                                              </div>
+                                            </li>
+                                          )
+                                        })}
+                                      </ul>
+                                    )}
+                                  </article>
+                                )
+                              })}
                             </div>
-                          </li>
-                        )
-                      })}
-                    </ul>
+                          )}
+
+                          {directFiles.length > 0 && (
+                            <ul className="delivery-assets">
+                              {directFiles.map((asset) => {
+                                const isPending = (asset.r2_object_key ?? '').startsWith('pending/')
+                                return (
+                                  <li key={asset.id}>
+                                    <span>{asset.filename}</span>
+                                    <span>{formatBytes(asset.bytes)}</span>
+                                    <div className="delivery-asset-actions">
+                                      <button
+                                        className="button ghost"
+                                        type="button"
+                                        disabled={isPending}
+                                        onClick={() => {
+                                          void handleOpenAsset(asset.id, 'view')
+                                        }}
+                                      >
+                                        View
+                                      </button>
+                                      <button
+                                        className="button ghost"
+                                        type="button"
+                                        disabled={isPending}
+                                        onClick={() => {
+                                          void handleOpenAsset(asset.id, 'download')
+                                        }}
+                                      >
+                                        Download
+                                      </button>
+                                    </div>
+                                  </li>
+                                )
+                              })}
+                            </ul>
+                          )}
+                        </>
+                      )
+                    })()
                   )}
                 </>
               )}
@@ -1444,7 +1548,9 @@ function App() {
           <nav className="nav">
             {session && role === 'customer' && <a href="#my-pictures">My Pictures</a>}
             {session && role === 'admin' && <a href="#upload">Upload</a>}
-            <a href={session && role === 'admin' ? '#admin-work' : '#work'}>Work</a>
+            <a href={session && role === 'admin' ? '#admin-work' : '#work'}>
+              {session && role === 'admin' ? 'Deliveries' : 'Work'}
+            </a>
             {!(session && role === 'admin') && <a href="#about">About</a>}
             <a href="/book.html">Contact</a>
           </nav>
