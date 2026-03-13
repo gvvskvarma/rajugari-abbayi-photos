@@ -366,6 +366,21 @@
   gap: 8px;
 }
 
+.upload-picker-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.upload-picker-input {
+  display: none;
+}
+
+.upload-selection-count {
+  font-size: 0.8rem;
+  color: rgba(236, 232, 223, 0.78);
+}
+
 main {
   flex: 1;
   width: min(1180px, 100%);

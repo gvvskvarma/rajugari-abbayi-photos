@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import './App.css'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
@@ -590,6 +590,8 @@ function App() {
   const [shareAssets, setShareAssets] = useState<DeliveryAsset[]>([])
   const [shareBusy, setShareBusy] = useState(false)
   const [shareMessage, setShareMessage] = useState('')
+  const uploadFilesInputRef = useRef<HTMLInputElement | null>(null)
+  const uploadFolderInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -1578,19 +1580,44 @@ function App() {
           <label>
             Upload media (photos, videos, or folders)
             <div className="upload-input-group">
+              <div className="upload-picker-row">
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={() => uploadFilesInputRef.current?.click()}
+                >
+                  Select files
+                </button>
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={() => uploadFolderInputRef.current?.click()}
+                >
+                  Select folder
+                </button>
+              </div>
               <input
+                ref={uploadFilesInputRef}
+                className="upload-picker-input"
                 type="file"
                 multiple
                 accept="image/*,video/*"
                 onChange={handleUploadFilesChange}
               />
               <input
+                ref={uploadFolderInputRef}
+                className="upload-picker-input"
                 type="file"
                 multiple
                 onChange={handleUploadFilesChange}
                 // webkitdirectory enables selecting full folders in Chromium/Safari.
                 {...({ webkitdirectory: '' } as Record<string, string>)}
               />
+              <p className="upload-selection-count">
+                {uploadFiles.length === 0
+                  ? 'No files selected yet.'
+                  : `${uploadFiles.length} file${uploadFiles.length === 1 ? '' : 's'} selected`}
+              </p>
             </div>
           </label>
           <button className="button primary" type="submit" disabled={uploadBusy || uploadFiles.length === 0}>
