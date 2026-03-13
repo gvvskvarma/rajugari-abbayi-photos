@@ -224,6 +224,12 @@
   gap: 14px;
 }
 
+.customer-folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
 .delivery-card {
   border-radius: 12px;
   border: 1px solid rgba(236, 232, 223, 0.14);
@@ -231,6 +237,57 @@
   padding: 14px;
   display: grid;
   gap: 12px;
+}
+
+.customer-folder-card {
+  overflow: hidden;
+}
+
+.customer-folder-cover {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border-radius: 10px;
+  border: 1px solid rgba(236, 232, 223, 0.2);
+  overflow: hidden;
+  background: rgba(236, 232, 223, 0.08);
+  padding: 0;
+  cursor: pointer;
+}
+
+.customer-folder-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.customer-folder-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(236, 232, 223, 0.7);
+  font-size: 0.9rem;
+}
+
+.customer-folder-overlay {
+  position: absolute;
+  inset: auto 0 0 0;
+  background: linear-gradient(to top, rgba(6, 8, 12, 0.92), rgba(6, 8, 12, 0.08));
+  padding: 14px 12px 10px;
+  text-align: left;
+}
+
+.customer-folder-overlay p {
+  margin: 0;
+  font-weight: 700;
+}
+
+.customer-folder-overlay span {
+  font-size: 0.78rem;
+  color: rgba(236, 232, 223, 0.8);
 }
 
 .delivery-header {

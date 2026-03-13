@@ -185,6 +185,17 @@ type DeliveryCard = {
   assets: DeliveryAsset[]
 }
 
+type CustomerFolderCard = {
+  id: string
+  deliveryId: string
+  folderName: string
+  displayName: string
+  expiresAt: string | null
+  accessMode: 'owner' | 'viewer' | 'admin'
+  assets: DeliveryAsset[]
+  coverAssetId: string | null
+}
+
 type AdminProject = {
   id: string
   name: string
@@ -201,6 +212,14 @@ type AdminFolder = {
   title: string
   createdAt: string
   assets: DeliveryAsset[]
+}
+
+type AdminSubfolderCard = {
+  id: string
+  folderName: string
+  displayName: string
+  assets: DeliveryAsset[]
+  coverAssetId: string | null
 }
 
 const landscapePaths = [
@@ -320,6 +339,117 @@ const randomToken = () => {
 }
 
 const assetPathParts = (name: string) => name.split('/').filter(Boolean)
+const imageFilePattern = /\.(avif|gif|heic|heif|jpe?g|png|webp)$/i
+
+const isImageAsset = (asset: DeliveryAsset) => {
+  if ((asset.mime_type ?? '').toLowerCase().startsWith('image/')) return true
+  return imageFilePattern.test(asset.filename)
+}
+
+const toDisplayFolderName = (folderName: string) => {
+  if (!folderName.trim()) return 'Untitled folder'
+  return folderName
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+const buildCustomerFolderCards = (deliveries: DeliveryCard[]) => {
+  const cards: CustomerFolderCard[] = []
+
+  for (const delivery of deliveries) {
+    const grouped = new Map<string, DeliveryAsset[]>()
+    const directFiles: DeliveryAsset[] = []
+
+    for (const asset of delivery.assets) {
+      const parts = assetPathParts(asset.filename)
+      if (parts.length > 1) {
+        const folderName = parts[0]
+        const current = grouped.get(folderName) ?? []
+        current.push(asset)
+        grouped.set(folderName, current)
+      } else {
+        directFiles.push(asset)
+      }
+    }
+
+    const folderNames = Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b))
+    for (const folderName of folderNames) {
+      const assets = grouped.get(folderName) ?? []
+      const cover = assets.find(isImageAsset) ?? assets[0] ?? null
+      cards.push({
+        id: `${delivery.deliveryId}:${folderName}`,
+        deliveryId: delivery.deliveryId,
+        folderName,
+        displayName: toDisplayFolderName(folderName),
+        expiresAt: delivery.expiresAt,
+        accessMode: delivery.accessMode ?? 'viewer',
+        assets,
+        coverAssetId: cover?.id ?? null,
+      })
+    }
+
+    if (directFiles.length > 0) {
+      const cover = directFiles.find(isImageAsset) ?? directFiles[0] ?? null
+      cards.push({
+        id: `${delivery.deliveryId}:__root__`,
+        deliveryId: delivery.deliveryId,
+        folderName: '__root__',
+        displayName: `Delivery ${delivery.deliveryId.slice(0, 8)}`,
+        expiresAt: delivery.expiresAt,
+        accessMode: delivery.accessMode ?? 'viewer',
+        assets: directFiles,
+        coverAssetId: cover?.id ?? null,
+      })
+    }
+  }
+
+  return cards
+}
+
+const buildAdminSubfolderCards = (folder: AdminFolder) => {
+  const grouped = new Map<string, DeliveryAsset[]>()
+  const directFiles: DeliveryAsset[] = []
+
+  for (const asset of folder.assets) {
+    const parts = assetPathParts(asset.filename)
+    if (parts.length > 1) {
+      const folderName = parts[0]
+      const current = grouped.get(folderName) ?? []
+      current.push(asset)
+      grouped.set(folderName, current)
+    } else {
+      directFiles.push(asset)
+    }
+  }
+
+  const cards: AdminSubfolderCard[] = Array.from(grouped.keys())
+    .sort((a, b) => a.localeCompare(b))
+    .map((folderName) => {
+      const assets = grouped.get(folderName) ?? []
+      const cover = assets.find(isImageAsset) ?? assets[0] ?? null
+      return {
+        id: `${folder.deliveryId}:${folderName}`,
+        folderName,
+        displayName: toDisplayFolderName(folderName),
+        assets,
+        coverAssetId: cover?.id ?? null,
+      }
+    })
+
+  if (directFiles.length > 0) {
+    const cover = directFiles.find(isImageAsset) ?? directFiles[0] ?? null
+    cards.push({
+      id: `${folder.deliveryId}:__root__`,
+      folderName: '__root__',
+      displayName: 'Delivery files',
+      assets: directFiles,
+      coverAssetId: cover?.id ?? null,
+    })
+  }
+
+  return cards
+}
 
 type RotatingGalleryProps = {
   title: string
@@ -438,6 +568,8 @@ function App() {
   const [shareToken, setShareToken] = useState(readShareTokenFromHash())
 
   const [myDeliveries, setMyDeliveries] = useState<DeliveryCard[]>([])
+  const [customerCoverUrls, setCustomerCoverUrls] = useState<Record<string, string>>({})
+  const [openCustomerFolderKey, setOpenCustomerFolderKey] = useState('')
   const [customerError, setCustomerError] = useState('')
   const [customerBusy, setCustomerBusy] = useState(false)
   const [newShareLinks, setNewShareLinks] = useState<Record<string, string>>({})
@@ -449,6 +581,7 @@ function App() {
   const [uploadBusy, setUploadBusy] = useState(false)
   const [uploadMessage, setUploadMessage] = useState('')
   const [adminFolders, setAdminFolders] = useState<AdminFolder[]>([])
+  const [adminCoverUrls, setAdminCoverUrls] = useState<Record<string, string>>({})
   const [openAdminFolderId, setOpenAdminFolderId] = useState('')
   const [openAdminSubfolderKey, setOpenAdminSubfolderKey] = useState('')
   const [adminWorkBusy, setAdminWorkBusy] = useState(false)
@@ -536,6 +669,16 @@ function App() {
     return toFirstName(profileDisplayName) || toFirstName(session.user.email) || 'LOGIN'
   }, [profileDisplayName, session])
 
+  const customerFolderCards = useMemo(() => buildCustomerFolderCards(myDeliveries), [myDeliveries])
+  const adminSubfolderCovers = useMemo(
+    () =>
+      adminFolders
+        .flatMap((folder) => buildAdminSubfolderCards(folder))
+        .map((card) => ({ key: card.id, assetId: card.coverAssetId }))
+        .filter((entry): entry is { key: string; assetId: string } => Boolean(entry.assetId)),
+    [adminFolders]
+  )
+
   const getAccessToken = async () => {
     if (!supabase) return ''
     const {
@@ -597,6 +740,103 @@ function App() {
 
     void loadCustomerData()
   }, [session?.user.email, view])
+
+  useEffect(() => {
+    if (!supabase || view !== 'my-pictures' || customerFolderCards.length === 0) {
+      setCustomerCoverUrls({})
+      return
+    }
+
+    let canceled = false
+
+    const loadCoverImages = async () => {
+      try {
+        const token = await getAccessToken()
+        if (!token || canceled) return
+
+        const entries = await Promise.all(
+          customerFolderCards.map(async (card) => {
+            if (!card.coverAssetId) return [card.id, ''] as const
+            try {
+              const payload = await workerRequest<{ signedUrl: string }>(
+                '/api/v1/media/signed-url',
+                token,
+                {
+                  method: 'POST',
+                  body: { assetId: card.coverAssetId, mode: 'view' },
+                }
+              )
+              return [card.id, payload.signedUrl] as const
+            } catch {
+              return [card.id, ''] as const
+            }
+          })
+        )
+
+        if (!canceled) {
+          setCustomerCoverUrls(
+            Object.fromEntries(entries.filter((entry): entry is readonly [string, string] => Boolean(entry[1])))
+          )
+        }
+      } catch {
+        if (!canceled) setCustomerCoverUrls({})
+      }
+    }
+
+    void loadCoverImages()
+
+    return () => {
+      canceled = true
+    }
+  }, [customerFolderCards, session?.user.id, view])
+
+  useEffect(() => {
+    if (!supabase || role !== 'admin' || view !== 'admin-work' || adminSubfolderCovers.length === 0) {
+      setAdminCoverUrls({})
+      return
+    }
+
+    let canceled = false
+
+    const loadAdminCovers = async () => {
+      try {
+        const token = await getAccessToken()
+        if (!token || canceled) return
+
+        const entries = await Promise.all(
+          adminSubfolderCovers.map(async (entry) => {
+            try {
+              const payload = await workerRequest<{ signedUrl: string }>(
+                '/api/v1/media/signed-url',
+                token,
+                {
+                  method: 'POST',
+                  body: { assetId: entry.assetId, mode: 'view' },
+                }
+              )
+              return [entry.key, payload.signedUrl] as const
+            } catch {
+              return [entry.key, ''] as const
+            }
+          })
+        )
+
+        if (!canceled) {
+          setAdminCoverUrls(
+            Object.fromEntries(entries.filter((item): item is readonly [string, string] => Boolean(item[1])))
+          )
+        }
+      } catch {
+        if (!canceled) setAdminCoverUrls({})
+      }
+    }
+
+    void loadAdminCovers()
+
+    return () => {
+      canceled = true
+    }
+  }, [adminSubfolderCovers, role, session?.user.id, view])
 
   useEffect(() => {
     if (!supabase || !session?.user.id || role !== 'admin' || view !== 'admin-work') return
@@ -746,6 +986,9 @@ function App() {
     await supabase.auth.signOut()
     setAuthMenuOpen(false)
     setMyDeliveries([])
+    setCustomerCoverUrls({})
+    setAdminCoverUrls({})
+    setOpenCustomerFolderKey('')
     setNewShareLinks({})
     window.location.hash = '#home'
   }
@@ -1180,70 +1423,108 @@ function App() {
           <p className="portal-hint">No active deliveries found for this email.</p>
         )}
 
-        <div className="delivery-list">
-          {myDeliveries.map((delivery) => (
-            <article key={delivery.deliveryId} className="delivery-card">
+        <div className="customer-folder-grid">
+          {customerFolderCards.map((card) => (
+            <article key={card.id} className="delivery-card customer-folder-card">
+              <button
+                className="customer-folder-cover"
+                type="button"
+                onClick={() => {
+                  setOpenCustomerFolderKey((current) => (current === card.id ? '' : card.id))
+                }}
+              >
+                {customerCoverUrls[card.id] ? (
+                  <img src={customerCoverUrls[card.id]} alt={card.displayName} loading="lazy" decoding="async" />
+                ) : (
+                  <div className="customer-folder-placeholder">No preview</div>
+                )}
+                <div className="customer-folder-overlay">
+                  <p>{card.displayName}</p>
+                  <span>{card.assets.length} files</span>
+                </div>
+              </button>
+
               <div className="delivery-header">
                 <div>
-                  <p className="delivery-title">Delivery {delivery.deliveryId.slice(0, 8)}</p>
-                  <p className="delivery-expiry">{daysRemainingText(delivery.expiresAt)}</p>
+                  <p className="delivery-title">{card.displayName}</p>
+                  <p className="delivery-expiry">{daysRemainingText(card.expiresAt)}</p>
                 </div>
-                <button
-                  className="button ghost"
-                  type="button"
-                  disabled={delivery.accessMode === 'viewer'}
-                  onClick={() => {
-                    void handleCreateShareLink(delivery.deliveryId)
-                  }}
-                >
-                  Create view-only link
-                </button>
-              </div>
-
-              {newShareLinks[delivery.deliveryId] && (
-                <div className="share-link-row">
-                  <input className="share-link-input" value={newShareLinks[delivery.deliveryId]} readOnly />
+                <div className="delivery-asset-actions">
                   <button
                     className="button ghost"
                     type="button"
                     onClick={() => {
-                      void handleCopyShareLink(delivery.deliveryId)
+                      setOpenCustomerFolderKey((current) => (current === card.id ? '' : card.id))
                     }}
                   >
-                    {shareCopyState[delivery.deliveryId] || 'Copy'}
+                    {openCustomerFolderKey === card.id ? 'Hide files' : 'Open folder'}
+                  </button>
+                  <button
+                    className="button ghost"
+                    type="button"
+                    disabled={card.accessMode === 'viewer'}
+                    onClick={() => {
+                      void handleCreateShareLink(card.deliveryId)
+                    }}
+                  >
+                    Create view-only link
+                  </button>
+                </div>
+              </div>
+
+              {newShareLinks[card.deliveryId] && (
+                <div className="share-link-row">
+                  <input className="share-link-input" value={newShareLinks[card.deliveryId]} readOnly />
+                  <button
+                    className="button ghost"
+                    type="button"
+                    onClick={() => {
+                      void handleCopyShareLink(card.deliveryId)
+                    }}
+                  >
+                    {shareCopyState[card.deliveryId] || 'Copy'}
                   </button>
                 </div>
               )}
 
-              <ul className="delivery-assets">
-                {delivery.assets.map((asset) => (
-                  <li key={asset.id}>
-                    <span>{asset.filename}</span>
-                    <span>{formatBytes(asset.bytes)}</span>
-                    <div className="delivery-asset-actions">
-                      <button
-                        className="button ghost"
-                        type="button"
-                        onClick={() => {
-                          void handleOpenAsset(asset.id, 'view')
-                        }}
-                      >
-                        View
-                      </button>
-                      <button
-                        className="button ghost"
-                        type="button"
-                        disabled={!asset.canDownload}
-                        onClick={() => {
-                          void handleOpenAsset(asset.id, 'download')
-                        }}
-                      >
-                        Download
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              {openCustomerFolderKey === card.id && (
+                <ul className="delivery-assets">
+                  {card.assets.map((asset) => {
+                    const parts = assetPathParts(asset.filename)
+                    const trimmedName =
+                      card.folderName !== '__root__' && parts[0] === card.folderName
+                        ? parts.slice(1).join('/') || parts[0]
+                        : asset.filename
+                    return (
+                      <li key={asset.id}>
+                        <span>{trimmedName}</span>
+                        <span>{formatBytes(asset.bytes)}</span>
+                        <div className="delivery-asset-actions">
+                          <button
+                            className="button ghost"
+                            type="button"
+                            onClick={() => {
+                              void handleOpenAsset(asset.id, 'view')
+                            }}
+                          >
+                            View
+                          </button>
+                          <button
+                            className="button ghost"
+                            type="button"
+                            disabled={!asset.canDownload}
+                            onClick={() => {
+                              void handleOpenAsset(asset.id, 'download')
+                            }}
+                          >
+                            Download
+                          </button>
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
             </article>
           ))}
         </div>
@@ -1363,98 +1644,58 @@ function App() {
                   {folder.assets.length === 0 ? (
                     <p className="portal-hint">No files in this folder yet.</p>
                   ) : (
-                    (() => {
-                      const grouped = new Map<string, DeliveryAsset[]>()
-                      const directFiles: DeliveryAsset[] = []
-
-                      for (const asset of folder.assets) {
-                        const parts = assetPathParts(asset.filename)
-                        if (parts.length > 1) {
-                          const folderName = parts[0]
-                          const current = grouped.get(folderName) ?? []
-                          current.push(asset)
-                          grouped.set(folderName, current)
-                        } else {
-                          directFiles.push(asset)
-                        }
-                      }
-
-                      const folderNames = Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b))
-
-                      return (
-                        <>
-                          {folderNames.length > 0 && (
-                            <div className="admin-subfolder-list">
-                              {folderNames.map((folderName) => {
-                                const key = `${folder.deliveryId}:${folderName}`
-                                const files = grouped.get(folderName) ?? []
-                                return (
-                                  <article key={key} className="delivery-card compact">
-                                    <div className="delivery-header">
-                                      <div>
-                                        <p className="delivery-title">{folderName}</p>
-                                        <p className="delivery-expiry">{files.length} files</p>
-                                      </div>
-                                      <button
-                                        className="button ghost"
-                                        type="button"
-                                        onClick={() => {
-                                          setOpenAdminSubfolderKey((current) => (current === key ? '' : key))
-                                        }}
-                                      >
-                                        {openAdminSubfolderKey === key ? 'Hide files' : 'Open folder'}
-                                      </button>
-                                    </div>
-                                    {openAdminSubfolderKey === key && (
-                                      <ul className="delivery-assets">
-                                        {files.map((asset) => {
-                                          const isPending = (asset.r2_object_key ?? '').startsWith('pending/')
-                                          const parts = assetPathParts(asset.filename)
-                                          const shortName = parts.slice(1).join('/') || parts[0]
-                                          return (
-                                            <li key={asset.id}>
-                                              <span>{shortName}</span>
-                                              <span>{formatBytes(asset.bytes)}</span>
-                                              <div className="delivery-asset-actions">
-                                                <button
-                                                  className="button ghost"
-                                                  type="button"
-                                                  disabled={isPending}
-                                                  onClick={() => {
-                                                    void handleOpenAsset(asset.id, 'view')
-                                                  }}
-                                                >
-                                                  View
-                                                </button>
-                                                <button
-                                                  className="button ghost"
-                                                  type="button"
-                                                  disabled={isPending}
-                                                  onClick={() => {
-                                                    void handleOpenAsset(asset.id, 'download')
-                                                  }}
-                                                >
-                                                  Download
-                                                </button>
-                                              </div>
-                                            </li>
-                                          )
-                                        })}
-                                      </ul>
-                                    )}
-                                  </article>
-                                )
-                              })}
+                    <div className="customer-folder-grid">
+                      {buildAdminSubfolderCards(folder).map((card) => (
+                        <article key={card.id} className="delivery-card customer-folder-card">
+                          <button
+                            className="customer-folder-cover"
+                            type="button"
+                            onClick={() => {
+                              setOpenAdminSubfolderKey((current) => (current === card.id ? '' : card.id))
+                            }}
+                          >
+                            {adminCoverUrls[card.id] ? (
+                              <img
+                                src={adminCoverUrls[card.id]}
+                                alt={card.displayName}
+                                loading="lazy"
+                                decoding="async"
+                              />
+                            ) : (
+                              <div className="customer-folder-placeholder">No preview</div>
+                            )}
+                            <div className="customer-folder-overlay">
+                              <p>{card.displayName}</p>
+                              <span>{card.assets.length} files</span>
                             </div>
-                          )}
-
-                          {directFiles.length > 0 && (
+                          </button>
+                          <div className="delivery-header">
+                            <div>
+                              <p className="delivery-title">{card.displayName}</p>
+                              <p className="delivery-expiry">{card.assets.length} files</p>
+                            </div>
+                            <button
+                              className="button ghost"
+                              type="button"
+                              onClick={() => {
+                                setOpenAdminSubfolderKey((current) => (current === card.id ? '' : card.id))
+                              }}
+                            >
+                              {openAdminSubfolderKey === card.id ? 'Hide files' : 'Open folder'}
+                            </button>
+                          </div>
+                          {openAdminSubfolderKey === card.id && (
                             <ul className="delivery-assets">
-                              {directFiles.map((asset) => {
+                              {card.assets.map((asset) => {
                                 const isPending = (asset.r2_object_key ?? '').startsWith('pending/')
+                                const parts = assetPathParts(asset.filename)
+                                const shortName =
+                                  card.folderName !== '__root__' && parts[0] === card.folderName
+                                    ? parts.slice(1).join('/') || parts[0]
+                                    : asset.filename
                                 return (
                                   <li key={asset.id}>
-                                    <span>{asset.filename}</span>
+                                    <span>{shortName}</span>
                                     <span>{formatBytes(asset.bytes)}</span>
                                     <div className="delivery-asset-actions">
                                       <button
@@ -1483,9 +1724,9 @@ function App() {
                               })}
                             </ul>
                           )}
-                        </>
-                      )
-                    })()
+                        </article>
+                      ))}
+                    </div>
                   )}
                 </>
               )}
