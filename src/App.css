@@ -366,6 +366,28 @@
   gap: 8px;
 }
 
+.upload-picker-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.upload-picker-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(236, 232, 223, 0.22);
+  background: rgba(16, 19, 27, 0.96);
+  z-index: 5;
+}
+
+.upload-picker-menu .button {
+  min-width: 78px;
+}
+
 .upload-picker-row {
   display: flex;
   gap: 8px;

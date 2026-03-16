@@ -578,6 +578,7 @@ function App() {
   const [uploadEmail, setUploadEmail] = useState('')
   const [uploadTitle, setUploadTitle] = useState('Client Delivery')
   const [uploadFiles, setUploadFiles] = useState<File[]>([])
+  const [uploadPickerOpen, setUploadPickerOpen] = useState(false)
   const [uploadBusy, setUploadBusy] = useState(false)
   const [uploadMessage, setUploadMessage] = useState('')
   const [adminFolders, setAdminFolders] = useState<AdminFolder[]>([])
@@ -1036,6 +1037,7 @@ function App() {
   const handleUploadFilesChange = (event: ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(event.target.files ?? [])
     setUploadFiles((current) => [...current, ...selected])
+    setUploadPickerOpen(false)
     event.target.value = ''
   }
 
@@ -1631,21 +1633,34 @@ function App() {
           <label>
             Upload media (photos, videos, or folders)
             <div className="upload-input-group">
-              <div className="upload-picker-row">
+              <div className="upload-picker-wrap">
                 <button
                   className="button ghost"
                   type="button"
-                  onClick={() => uploadFilesInputRef.current?.click()}
+                  onClick={() => {
+                    setUploadPickerOpen((current) => !current)
+                  }}
                 >
-                  Select files
+                  Select Files/Folders
                 </button>
-                <button
-                  className="button ghost"
-                  type="button"
-                  onClick={() => uploadFolderInputRef.current?.click()}
-                >
-                  Select folder
-                </button>
+                {uploadPickerOpen && (
+                  <div className="upload-picker-menu">
+                    <button
+                      className="button ghost"
+                      type="button"
+                      onClick={() => uploadFilesInputRef.current?.click()}
+                    >
+                      Files
+                    </button>
+                    <button
+                      className="button ghost"
+                      type="button"
+                      onClick={() => uploadFolderInputRef.current?.click()}
+                    >
+                      Folder
+                    </button>
+                  </div>
+                )}
               </div>
               <input
                 ref={uploadFilesInputRef}
