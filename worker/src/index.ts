@@ -61,6 +61,12 @@ const isMissingUploadSessionsTableError = (error: unknown) => {
   return text.includes('upload_sessions') && (text.includes('pgrst205') || text.includes('could not find the table'))
 }
 
+const isMissingDeliveryAssetsCanDownloadColumnError = (error: unknown) => {
+  if (!(error instanceof Error)) return false
+  const text = error.message.toLowerCase()
+  return text.includes('delivery_assets') && text.includes('can_download') && text.includes('pgrst204')
+}
+
 app.options('*', (c) => {
   const origin = resolveAllowedOrigin(c.env, c.req.header('Origin'))
   return c.body(null, 204, buildBaseHeaders(origin))
@@ -313,14 +319,24 @@ const getDeliveryAssetRules = async (
   env: Env,
   deliveryId: string
 ): Promise<Map<string, DeliveryAssetRule>> => {
-  const rows = await supabaseRequest<
-    Array<{ asset_id: string; can_view: boolean; can_download: boolean }>
-  >(
-    env,
-    `delivery_assets?delivery_id=eq.${encodeURIComponent(
-      deliveryId
-    )}&select=asset_id,can_view,can_download`
-  )
+  let rows: Array<{ asset_id: string; can_view: boolean; can_download: boolean }>
+  try {
+    rows = await supabaseRequest<
+      Array<{ asset_id: string; can_view: boolean; can_download: boolean }>
+    >(
+      env,
+      `delivery_assets?delivery_id=eq.${encodeURIComponent(
+        deliveryId
+      )}&select=asset_id,can_view,can_download`
+    )
+  } catch (error) {
+    if (!isMissingDeliveryAssetsCanDownloadColumnError(error)) throw error
+    const fallbackRows = await supabaseRequest<Array<{ asset_id: string; can_view: boolean }>>(
+      env,
+      `delivery_assets?delivery_id=eq.${encodeURIComponent(deliveryId)}&select=asset_id,can_view`
+    )
+    rows = fallbackRows.map((row) => ({ ...row, can_download: true }))
+  }
 
   return new Map(
     rows.map((row) => [
@@ -846,21 +862,39 @@ app.post('/api/v1/upload/complete', async (c) => {
     const assetId = insertedAssets[0]?.id
     if (!assetId) return jsonError('Asset insert failed', 500)
 
-    await supabaseRequest(
-      c.env,
-      'delivery_assets',
-      {
-        method: 'POST',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({
-          delivery_id: body.deliveryId,
-          asset_id: assetId,
-          can_view: true,
-          can_download: true,
-        }),
-      },
-      true
-    )
+    try {
+      await supabaseRequest(
+        c.env,
+        'delivery_assets',
+        {
+          method: 'POST',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            delivery_id: body.deliveryId,
+            asset_id: assetId,
+            can_view: true,
+            can_download: true,
+          }),
+        },
+        true
+      )
+    } catch (error) {
+      if (!isMissingDeliveryAssetsCanDownloadColumnError(error)) throw error
+      await supabaseRequest(
+        c.env,
+        'delivery_assets',
+        {
+          method: 'POST',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            delivery_id: body.deliveryId,
+            asset_id: assetId,
+            can_view: true,
+          }),
+        },
+        true
+      )
+    }
 
     if (session) {
       await supabaseRequest(
@@ -914,14 +948,24 @@ app.post('/api/v1/media/signed-url', async (c) => {
       return jsonError('This file was never uploaded to storage. Re-upload it from Admin Upload.', 410)
     }
 
-    const deliveryAssetRows = await supabaseRequest<
-      Array<{ delivery_id: string; can_view: boolean; can_download: boolean }>
-    >(
-      c.env,
-      `delivery_assets?asset_id=eq.${encodeURIComponent(
-        body.assetId
-      )}&select=delivery_id,can_view,can_download&limit=1`
-    )
+    let deliveryAssetRows: Array<{ delivery_id: string; can_view: boolean; can_download: boolean }>
+    try {
+      deliveryAssetRows = await supabaseRequest<
+        Array<{ delivery_id: string; can_view: boolean; can_download: boolean }>
+      >(
+        c.env,
+        `delivery_assets?asset_id=eq.${encodeURIComponent(
+          body.assetId
+        )}&select=delivery_id,can_view,can_download&limit=1`
+      )
+    } catch (error) {
+      if (!isMissingDeliveryAssetsCanDownloadColumnError(error)) throw error
+      const fallbackRows = await supabaseRequest<Array<{ delivery_id: string; can_view: boolean }>>(
+        c.env,
+        `delivery_assets?asset_id=eq.${encodeURIComponent(body.assetId)}&select=delivery_id,can_view&limit=1`
+      )
+      deliveryAssetRows = fallbackRows.map((row) => ({ ...row, can_download: true }))
+    }
     const deliveryAsset = deliveryAssetRows[0]
     const deliveryId = asset.delivery_id ?? deliveryAsset?.delivery_id
     if (!deliveryId || !deliveryAsset) return jsonError('Asset delivery mapping missing', 403)
