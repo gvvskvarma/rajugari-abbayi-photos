@@ -1096,13 +1096,25 @@ function App() {
   }
 
   const uploadFileToSignedUrl = async (uploadUrl: string, file: File) => {
-    const response = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: {
-        'content-type': file.type || 'application/octet-stream',
-      },
-      body: file,
-    })
+    let response: Response
+    try {
+      response = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'content-type': file.type || 'application/octet-stream',
+        },
+        body: file,
+      })
+    } catch (error) {
+      const isNetworkError =
+        error instanceof TypeError || (error instanceof Error && error.message.toLowerCase().includes('fetch'))
+      if (isNetworkError) {
+        throw new Error(
+          'Upload blocked by R2 CORS policy. In Cloudflare R2 bucket CORS, allow origin https://rajugariabbayishots.vercel.app with methods PUT, GET, HEAD and headers Content-Type.'
+        )
+      }
+      throw error
+    }
     if (!response.ok) {
       throw new Error(`Upload failed for ${file.name}`)
     }
