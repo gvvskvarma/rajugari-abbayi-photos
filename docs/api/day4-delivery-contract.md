@@ -6,7 +6,7 @@ Day 4 introduces private gallery retrieval, per-file access controls, expiring s
 
 - Auth: Supabase JWT (`Authorization: Bearer <token>`) for account-scoped gallery access
 - Delivery-level access: `delivery_recipients` + expiry checks
-- File-level access: `delivery_assets.can_view`; `can_download` is supported when present, but the worker falls back to delivery-level download rules if the column is absent
+- File-level access: the worker now derives visibility from `delivery_assets` membership and delivery access. Older deployments may still use `can_view` / `can_download`, but the live upload flow no longer depends on those columns.
 - Download logging: every successful `download` signed-url issuance writes `download_events`
 
 ## Endpoints
@@ -82,9 +82,9 @@ Migration: `supabase/migrations/20260311_day4_delivery_security.sql`
 
 Adds:
 - `assets.delivery_id` (if missing)
-- `delivery_assets.can_view` + `delivery_assets.can_download`
+- `delivery_assets` membership rows for asset-to-delivery linkage
 - backfill from `assets.delivery_id` into `delivery_assets`
 - supporting indexes
 
 Compatibility note:
-- Live deployments without `delivery_assets.can_download` still work; the API derives `canDownload` from delivery access until the column is available.
+- Live deployments without `delivery_assets.can_view` or `delivery_assets.can_download` still work; the API derives `canView` and `canDownload` from delivery access until those columns are added later.
