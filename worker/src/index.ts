@@ -55,18 +55,6 @@ const jsonError = (message: string, status = 400, origin = '*') =>
     headers: buildBaseHeaders(origin),
   })
 
-const isMissingUploadSessionsTableError = (error: unknown) => {
-  if (!(error instanceof Error)) return false
-  const text = error.message.toLowerCase()
-  return text.includes('upload_sessions') && (text.includes('pgrst205') || text.includes('could not find the table'))
-}
-
-const isMissingDeliveryAssetsColumnError = (error: unknown, column: 'can_view' | 'can_download') => {
-  if (!(error instanceof Error)) return false
-  const text = error.message.toLowerCase()
-  return text.includes('delivery_assets') && text.includes(column) && text.includes('pgrst204')
-}
-
 app.options('*', (c) => {
   const origin = resolveAllowedOrigin(c.env, c.req.header('Origin'))
   return c.body(null, 204, buildBaseHeaders(origin))
@@ -153,7 +141,7 @@ const getUserFromBearer = async (env: Env, authHeader?: string): Promise<User> =
   const email = (authUser.email ?? '').toLowerCase()
   if (!email) throw new Error('Email not available in session')
 
-  const profiles = await supabaseRequest<Array<{ role: 'admin' | 'client' }>>(
+  const profiles = await supabaseRequest<Array<{ role: Role }>>(
     env,
     `profiles?id=eq.${encodeURIComponent(authUser.id)}&select=role&limit=1`
   )
@@ -319,41 +307,14 @@ const getDeliveryAssetRules = async (
   env: Env,
   deliveryId: string
 ): Promise<Map<string, DeliveryAssetRule>> => {
-  let rows: Array<{ asset_id: string; can_view: boolean; can_download: boolean }>
-  try {
-    rows = await supabaseRequest<
-      Array<{ asset_id: string; can_view: boolean; can_download: boolean }>
-    >(
-      env,
-      `delivery_assets?delivery_id=eq.${encodeURIComponent(
-        deliveryId
-      )}&select=asset_id,can_view,can_download`
-    )
-  } catch (error) {
-    if (!isMissingDeliveryAssetsColumnError(error, 'can_download')) {
-      if (!isMissingDeliveryAssetsColumnError(error, 'can_view')) throw error
-      const fallbackRows = await supabaseRequest<Array<{ asset_id: string }>>(
-        env,
-        `delivery_assets?delivery_id=eq.${encodeURIComponent(deliveryId)}&select=asset_id`
-      )
-      rows = fallbackRows.map((row) => ({ ...row, can_view: true, can_download: true }))
-    } else {
-      try {
-        const fallbackRows = await supabaseRequest<Array<{ asset_id: string; can_view: boolean }>>(
-          env,
-          `delivery_assets?delivery_id=eq.${encodeURIComponent(deliveryId)}&select=asset_id,can_view`
-        )
-        rows = fallbackRows.map((row) => ({ ...row, can_download: true }))
-      } catch (fallbackError) {
-        if (!isMissingDeliveryAssetsColumnError(fallbackError, 'can_view')) throw fallbackError
-        const legacyRows = await supabaseRequest<Array<{ asset_id: string }>>(
-          env,
-          `delivery_assets?delivery_id=eq.${encodeURIComponent(deliveryId)}&select=asset_id`
-        )
-        rows = legacyRows.map((row) => ({ ...row, can_view: true, can_download: true }))
-      }
-    }
-  }
+  const rows = await supabaseRequest<
+    Array<{ asset_id: string; can_view: boolean; can_download: boolean }>
+  >(
+    env,
+    `delivery_assets?delivery_id=eq.${encodeURIComponent(
+      deliveryId
+    )}&select=asset_id,can_view,can_download`
+  )
 
   return new Map(
     rows.map((row) => [
@@ -389,6 +350,22 @@ const ensureAdmin = (user: User) => {
   if (user.role !== 'admin') {
     throw new Error('Admin access required')
   }
+}
+
+const ensureAdminOwnedAsset = async (env: Env, user: User, assetId: string) => {
+  ensureAdmin(user)
+
+  const assets = await supabaseRequest<Array<{ id: string; r2_object_key: string }>>(
+    env,
+    `assets?id=eq.${encodeURIComponent(assetId)}&owner_user_id=eq.${encodeURIComponent(user.id)}&select=id,r2_object_key&limit=1`
+  )
+
+  const asset = assets[0]
+  if (!asset) {
+    throw new Error('Asset not found or not owned by admin')
+  }
+
+  return asset
 }
 
 const parseNullableText = (value: unknown): string | null => {
@@ -736,33 +713,27 @@ const handleRequestUploadUrl = async (c: Context<{ Bindings: Env }>) => {
     const expiresAt = new Date(Date.now() + uploadUrlExpirySeconds * 1000).toISOString()
     const uploadUrl = await buildR2SignedUrl(c.env, 'PUT', objectKey, uploadUrlExpirySeconds, 'view')
 
-    try {
-      await supabaseRequest(
-        c.env,
-        'upload_sessions',
-        {
-          method: 'POST',
-          headers: { Prefer: 'return=minimal' },
-          body: JSON.stringify({
-            owner_user_id: user.id,
-            delivery_id: body.deliveryId,
-            project_id: projectId,
-            upload_token: uploadToken,
-            original_filename: safeFileName,
-            mime_type: body.contentType,
-            expected_bytes: Math.max(1, Math.trunc(body.fileSize)),
-            r2_object_key: objectKey,
-            status: 'requested',
-            expires_at: expiresAt,
-          }),
-        },
-        true
-      )
-    } catch (error) {
-      if (!isMissingUploadSessionsTableError(error)) {
-        throw error
-      }
-    }
+    await supabaseRequest(
+      c.env,
+      'upload_sessions',
+      {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          owner_user_id: user.id,
+          delivery_id: body.deliveryId,
+          project_id: projectId,
+          upload_token: uploadToken,
+          original_filename: safeFileName,
+          mime_type: body.contentType,
+          expected_bytes: Math.max(1, Math.trunc(body.fileSize)),
+          r2_object_key: objectKey,
+          status: 'requested',
+          expires_at: expiresAt,
+        }),
+      },
+      true
+    )
 
     return c.json(
       {
@@ -808,44 +779,27 @@ app.post('/api/v1/upload/complete', async (c) => {
 
     await ensureAdminAndOwnedDelivery(c.env, user, body.deliveryId)
 
-    let session:
-      | {
-          id: string
-          status: 'requested' | 'uploaded' | 'finalized' | 'failed'
-          expires_at: string
-          expected_bytes: number
-        }
-      | null = null
-
-    try {
-      const sessions = await supabaseRequest<
-        Array<{
-          id: string
-          status: 'requested' | 'uploaded' | 'finalized' | 'failed'
-          expires_at: string
-          expected_bytes: number
-        }>
-      >(
-        c.env,
-        `upload_sessions?upload_token=eq.${encodeURIComponent(
-          body.uploadToken
-        )}&owner_user_id=eq.${encodeURIComponent(user.id)}&delivery_id=eq.${encodeURIComponent(
-          body.deliveryId
-        )}&r2_object_key=eq.${encodeURIComponent(body.objectKey)}&select=id,status,expires_at,expected_bytes&limit=1`
-      )
-      session = sessions[0] ?? null
-    } catch (error) {
-      if (!isMissingUploadSessionsTableError(error)) {
-        throw error
-      }
-    }
-
-    if (session) {
-      if (new Date(session.expires_at).getTime() <= Date.now()) return jsonError('Upload session expired', 410)
-      if (session.status === 'finalized') return jsonError('Upload session already finalized', 409)
-      if (Math.abs(session.expected_bytes - body.bytes) > Math.max(1024, session.expected_bytes * 0.02)) {
-        return jsonError('Uploaded byte count does not match requested file size', 400)
-      }
+    const sessions = await supabaseRequest<
+      Array<{
+        id: string
+        status: 'requested' | 'uploaded' | 'finalized' | 'failed'
+        expires_at: string
+        expected_bytes: number
+      }>
+    >(
+      c.env,
+      `upload_sessions?upload_token=eq.${encodeURIComponent(
+        body.uploadToken
+      )}&owner_user_id=eq.${encodeURIComponent(user.id)}&delivery_id=eq.${encodeURIComponent(
+        body.deliveryId
+      )}&r2_object_key=eq.${encodeURIComponent(body.objectKey)}&select=id,status,expires_at,expected_bytes&limit=1`
+    )
+    const session = sessions[0]
+    if (!session) return jsonError('Upload session not found', 404)
+    if (new Date(session.expires_at).getTime() <= Date.now()) return jsonError('Upload session expired', 410)
+    if (session.status === 'finalized') return jsonError('Upload session already finalized', 409)
+    if (Math.abs(session.expected_bytes - body.bytes) > Math.max(1024, session.expected_bytes * 0.02)) {
+      return jsonError('Uploaded byte count does not match requested file size', 400)
     }
 
     const deliveries = await supabaseRequest<Array<{ project_id: string }>>(
@@ -879,101 +833,74 @@ app.post('/api/v1/upload/complete', async (c) => {
     const assetId = insertedAssets[0]?.id
     if (!assetId) return jsonError('Asset insert failed', 500)
 
-    try {
-      await supabaseRequest(
-        c.env,
-        'delivery_assets',
-        {
-          method: 'POST',
-          headers: { Prefer: 'return=minimal' },
-          body: JSON.stringify({
-            delivery_id: body.deliveryId,
-            asset_id: assetId,
-            can_view: true,
-            can_download: true,
-          }),
-        },
-        true
-      )
-    } catch (error) {
-      if (!isMissingDeliveryAssetsColumnError(error, 'can_download')) {
-        if (!isMissingDeliveryAssetsColumnError(error, 'can_view')) throw error
-        await supabaseRequest(
-          c.env,
-          'delivery_assets',
-          {
-            method: 'POST',
-            headers: { Prefer: 'return=minimal' },
-            body: JSON.stringify({
-              delivery_id: body.deliveryId,
-              asset_id: assetId,
-            }),
-          },
-          true
-        )
-      } else {
-        try {
-          await supabaseRequest(
-            c.env,
-            'delivery_assets',
-            {
-              method: 'POST',
-              headers: { Prefer: 'return=minimal' },
-              body: JSON.stringify({
-                delivery_id: body.deliveryId,
-                asset_id: assetId,
-                can_view: true,
-              }),
-            },
-            true
-          )
-        } catch (fallbackError) {
-          if (!isMissingDeliveryAssetsColumnError(fallbackError, 'can_view')) throw fallbackError
-          await supabaseRequest(
-            c.env,
-            'delivery_assets',
-            {
-              method: 'POST',
-              headers: { Prefer: 'return=minimal' },
-              body: JSON.stringify({
-                delivery_id: body.deliveryId,
-                asset_id: assetId,
-              }),
-            },
-            true
-          )
-        }
-      }
-    }
+    await supabaseRequest(
+      c.env,
+      'delivery_assets',
+      {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          delivery_id: body.deliveryId,
+          asset_id: assetId,
+          can_view: true,
+          can_download: true,
+        }),
+      },
+      true
+    )
 
-    if (session) {
-      await supabaseRequest(
-        c.env,
-        `upload_sessions?id=eq.${encodeURIComponent(session.id)}`,
-        {
-          method: 'PATCH',
-          headers: { Prefer: 'return=minimal' },
-          body: JSON.stringify({
-            status: 'finalized',
-            completed_at: new Date().toISOString(),
-            attempts: 1,
-          }),
-        },
-        true
-      )
-    }
+    await supabaseRequest(
+      c.env,
+      `upload_sessions?id=eq.${encodeURIComponent(session.id)}`,
+      {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          status: 'finalized',
+          completed_at: new Date().toISOString(),
+          attempts: 1,
+        }),
+      },
+      true
+    )
 
     return c.json(
       {
         ok: true,
         assetId,
-        uploadSessionId: session?.id ?? null,
+        uploadSessionId: session.id,
       },
       200,
       responseHeaders(c)
     )
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Upload finalize failed', 400)
+  }
+})
+
+app.delete('/api/v1/admin/assets/:assetId', async (c) => {
+  try {
+    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
+    const assetId = c.req.param('assetId')
+    if (!assetId) return jsonError('assetId is required', 400)
+
+    const asset = await ensureAdminOwnedAsset(c.env, user, assetId)
+    if (!asset.r2_object_key.startsWith('pending/')) {
+      await c.env.R2_MEDIA_BUCKET.delete(asset.r2_object_key)
+    }
+
+    await supabaseRequest(
+      c.env,
+      `assets?id=eq.${encodeURIComponent(assetId)}&owner_user_id=eq.${encodeURIComponent(user.id)}`,
+      {
+        method: 'DELETE',
+      },
+      true
+    )
+
+    return c.json({ ok: true, assetId }, 200, responseHeaders(c))
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Asset delete failed', 400)
   }
 })
 
@@ -998,41 +925,14 @@ app.post('/api/v1/media/signed-url', async (c) => {
       return jsonError('This file was never uploaded to storage. Re-upload it from Admin Upload.', 410)
     }
 
-    let deliveryAssetRows: Array<{ delivery_id: string; can_view: boolean; can_download: boolean }>
-    try {
-      deliveryAssetRows = await supabaseRequest<
-        Array<{ delivery_id: string; can_view: boolean; can_download: boolean }>
-      >(
-        c.env,
-        `delivery_assets?asset_id=eq.${encodeURIComponent(
-          body.assetId
-        )}&select=delivery_id,can_view,can_download&limit=1`
-      )
-    } catch (error) {
-      if (!isMissingDeliveryAssetsColumnError(error, 'can_download')) {
-        if (!isMissingDeliveryAssetsColumnError(error, 'can_view')) throw error
-        const fallbackRows = await supabaseRequest<Array<{ delivery_id: string }>>(
-          c.env,
-          `delivery_assets?asset_id=eq.${encodeURIComponent(body.assetId)}&select=delivery_id&limit=1`
-        )
-        deliveryAssetRows = fallbackRows.map((row) => ({ ...row, can_view: true, can_download: true }))
-      } else {
-        try {
-          const fallbackRows = await supabaseRequest<Array<{ delivery_id: string; can_view: boolean }>>(
-            c.env,
-            `delivery_assets?asset_id=eq.${encodeURIComponent(body.assetId)}&select=delivery_id,can_view&limit=1`
-          )
-          deliveryAssetRows = fallbackRows.map((row) => ({ ...row, can_download: true }))
-        } catch (fallbackError) {
-          if (!isMissingDeliveryAssetsColumnError(fallbackError, 'can_view')) throw fallbackError
-          const legacyRows = await supabaseRequest<Array<{ delivery_id: string }>>(
-            c.env,
-            `delivery_assets?asset_id=eq.${encodeURIComponent(body.assetId)}&select=delivery_id&limit=1`
-          )
-          deliveryAssetRows = legacyRows.map((row) => ({ ...row, can_view: true, can_download: true }))
-        }
-      }
-    }
+    const deliveryAssetRows = await supabaseRequest<
+      Array<{ delivery_id: string; can_view: boolean; can_download: boolean }>
+    >(
+      c.env,
+      `delivery_assets?asset_id=eq.${encodeURIComponent(
+        body.assetId
+      )}&select=delivery_id,can_view,can_download&limit=1`
+    )
     const deliveryAsset = deliveryAssetRows[0]
     const deliveryId = asset.delivery_id ?? deliveryAsset?.delivery_id
     if (!deliveryId || !deliveryAsset) return jsonError('Asset delivery mapping missing', 403)

@@ -83,7 +83,7 @@ begin
         from public.admin_allowlist a
         where lower(a.email) = lower(new.email)
       ) then 'admin'::public.app_role
-      else 'client'::public.app_role
+      else 'customer'::public.app_role
     end,
     split_part(coalesce(new.email, ''), '@', 1)
   )

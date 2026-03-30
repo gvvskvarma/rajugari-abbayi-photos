@@ -163,7 +163,7 @@ Create body:
 ### Download events
 
 - `POST /api/v1/deliveries/:deliveryId/download-events`
-- Auth: required for admin routes; Day 4 adds token-based client download flow.
+- Auth: required for admin routes; Day 4 adds token-based customer download flow.
 
 Body:
 

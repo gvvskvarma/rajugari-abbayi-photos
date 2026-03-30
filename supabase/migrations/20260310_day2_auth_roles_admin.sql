@@ -26,7 +26,7 @@ security definer
 set search_path = public
 as $$
 declare
-  computed_role public.app_role := 'client';
+  computed_role public.app_role := 'customer';
 begin
   if exists (
     select 1

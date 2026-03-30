@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import './App.css'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
@@ -163,7 +163,7 @@ type GalleryShot = {
 }
 
 type Role = 'admin' | 'customer'
-type AppView = 'home' | 'my-pictures' | 'upload' | 'share' | 'admin-work'
+type AppView = 'home' | 'my-pictures' | 'upload' | 'share' | 'admin-clients' | 'admin-client'
 
 type DeliveryAsset = {
   id: string
@@ -185,41 +185,45 @@ type DeliveryCard = {
   assets: DeliveryAsset[]
 }
 
-type CustomerFolderCard = {
+type AdminClient = {
   id: string
-  deliveryId: string
-  folderName: string
-  displayName: string
-  expiresAt: string | null
-  accessMode: 'owner' | 'viewer' | 'admin'
-  assets: DeliveryAsset[]
-  coverAssetId: string | null
+  full_name: string
+  email: string
+  phone: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
 }
 
 type AdminProject = {
   id: string
+  client_id: string
   name: string
+  description: string | null
+  shoot_date: string | null
+  location: string | null
+  status: string
+  created_at: string
+  updated_at: string
 }
 
-type AdminDeliveryRow = {
+type AdminAsset = {
   id: string
   project_id: string
+  delivery_id: string | null
+  filename: string
+  mime_type: string
+  bytes: number
+  r2_object_key: string
   created_at: string
 }
 
-type AdminFolder = {
-  deliveryId: string
-  title: string
-  createdAt: string
-  assets: DeliveryAsset[]
-}
-
-type AdminSubfolderCard = {
-  id: string
-  folderName: string
-  displayName: string
-  assets: DeliveryAsset[]
-  coverAssetId: string | null
+type AdminClientSummary = AdminClient & {
+  projects: AdminProject[]
+  assets: AdminAsset[]
+  projectCount: number
+  assetCount: number
+  latestUpdatedAt: string
 }
 
 const landscapePaths = [
@@ -307,8 +311,15 @@ const readViewFromHash = () => {
   if (hash.startsWith('#share/')) return 'share'
   if (hash === '#my-pictures') return 'my-pictures'
   if (hash === '#upload') return 'upload'
-  if (hash === '#admin-work') return 'admin-work'
+  if (hash.startsWith('#admin-clients/')) return 'admin-client'
+  if (hash === '#admin-clients' || hash === '#admin-work') return 'admin-clients'
   return 'home'
+}
+
+const readAdminClientIdFromHash = () => {
+  const hash = window.location.hash || ''
+  if (!hash.startsWith('#admin-clients/')) return ''
+  return hash.replace('#admin-clients/', '').split('/')[0]?.trim() ?? ''
 }
 
 const readShareTokenFromHash = () => {
@@ -336,119 +347,6 @@ const randomToken = () => {
   const buffer = new Uint8Array(24)
   crypto.getRandomValues(buffer)
   return Array.from(buffer, (b) => b.toString(16).padStart(2, '0')).join('')
-}
-
-const assetPathParts = (name: string) => name.split('/').filter(Boolean)
-const imageFilePattern = /\.(avif|gif|heic|heif|jpe?g|png|webp)$/i
-
-const isImageAsset = (asset: DeliveryAsset) => {
-  if ((asset.mime_type ?? '').toLowerCase().startsWith('image/')) return true
-  return imageFilePattern.test(asset.filename)
-}
-
-const toDisplayFolderName = (folderName: string) => {
-  if (!folderName.trim()) return 'Untitled folder'
-  return folderName
-    .replace(/[_-]+/g, ' ')
-    .trim()
-    .replace(/\s+/g, ' ')
-}
-
-const buildCustomerFolderCards = (deliveries: DeliveryCard[]) => {
-  const cards: CustomerFolderCard[] = []
-
-  for (const delivery of deliveries) {
-    const grouped = new Map<string, DeliveryAsset[]>()
-    const directFiles: DeliveryAsset[] = []
-
-    for (const asset of delivery.assets) {
-      const parts = assetPathParts(asset.filename)
-      if (parts.length > 1) {
-        const folderName = parts[0]
-        const current = grouped.get(folderName) ?? []
-        current.push(asset)
-        grouped.set(folderName, current)
-      } else {
-        directFiles.push(asset)
-      }
-    }
-
-    const folderNames = Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b))
-    for (const folderName of folderNames) {
-      const assets = grouped.get(folderName) ?? []
-      const cover = assets.find(isImageAsset) ?? assets[0] ?? null
-      cards.push({
-        id: `${delivery.deliveryId}:${folderName}`,
-        deliveryId: delivery.deliveryId,
-        folderName,
-        displayName: toDisplayFolderName(folderName),
-        expiresAt: delivery.expiresAt,
-        accessMode: delivery.accessMode ?? 'viewer',
-        assets,
-        coverAssetId: cover?.id ?? null,
-      })
-    }
-
-    if (directFiles.length > 0) {
-      const cover = directFiles.find(isImageAsset) ?? directFiles[0] ?? null
-      cards.push({
-        id: `${delivery.deliveryId}:__root__`,
-        deliveryId: delivery.deliveryId,
-        folderName: '__root__',
-        displayName: `Delivery ${delivery.deliveryId.slice(0, 8)}`,
-        expiresAt: delivery.expiresAt,
-        accessMode: delivery.accessMode ?? 'viewer',
-        assets: directFiles,
-        coverAssetId: cover?.id ?? null,
-      })
-    }
-  }
-
-  return cards
-}
-
-const buildAdminSubfolderCards = (folder: AdminFolder) => {
-  const grouped = new Map<string, DeliveryAsset[]>()
-  const directFiles: DeliveryAsset[] = []
-
-  for (const asset of folder.assets) {
-    const parts = assetPathParts(asset.filename)
-    if (parts.length > 1) {
-      const folderName = parts[0]
-      const current = grouped.get(folderName) ?? []
-      current.push(asset)
-      grouped.set(folderName, current)
-    } else {
-      directFiles.push(asset)
-    }
-  }
-
-  const cards: AdminSubfolderCard[] = Array.from(grouped.keys())
-    .sort((a, b) => a.localeCompare(b))
-    .map((folderName) => {
-      const assets = grouped.get(folderName) ?? []
-      const cover = assets.find(isImageAsset) ?? assets[0] ?? null
-      return {
-        id: `${folder.deliveryId}:${folderName}`,
-        folderName,
-        displayName: toDisplayFolderName(folderName),
-        assets,
-        coverAssetId: cover?.id ?? null,
-      }
-    })
-
-  if (directFiles.length > 0) {
-    const cover = directFiles.find(isImageAsset) ?? directFiles[0] ?? null
-    cards.push({
-      id: `${folder.deliveryId}:__root__`,
-      folderName: '__root__',
-      displayName: 'Delivery files',
-      assets: directFiles,
-      coverAssetId: cover?.id ?? null,
-    })
-  }
-
-  return cards
 }
 
 type RotatingGalleryProps = {
@@ -568,29 +466,101 @@ function App() {
   const [shareToken, setShareToken] = useState(readShareTokenFromHash())
 
   const [myDeliveries, setMyDeliveries] = useState<DeliveryCard[]>([])
-  const [customerCoverUrls, setCustomerCoverUrls] = useState<Record<string, string>>({})
-  const [openCustomerFolderKey, setOpenCustomerFolderKey] = useState('')
   const [customerError, setCustomerError] = useState('')
   const [customerBusy, setCustomerBusy] = useState(false)
   const [newShareLinks, setNewShareLinks] = useState<Record<string, string>>({})
   const [shareCopyState, setShareCopyState] = useState<Record<string, string>>({})
 
+  const [uploadClientId, setUploadClientId] = useState('')
   const [uploadEmail, setUploadEmail] = useState('')
   const [uploadTitle, setUploadTitle] = useState('Client Delivery')
   const [uploadFiles, setUploadFiles] = useState<File[]>([])
   const [uploadBusy, setUploadBusy] = useState(false)
   const [uploadMessage, setUploadMessage] = useState('')
-  const [adminFolders, setAdminFolders] = useState<AdminFolder[]>([])
-  const [adminCoverUrls, setAdminCoverUrls] = useState<Record<string, string>>({})
-  const [openAdminFolderId, setOpenAdminFolderId] = useState('')
-  const [openAdminSubfolderKey, setOpenAdminSubfolderKey] = useState('')
-  const [adminWorkBusy, setAdminWorkBusy] = useState(false)
-  const [adminWorkError, setAdminWorkError] = useState('')
+  const [adminClients, setAdminClients] = useState<AdminClientSummary[]>([])
+  const [selectedAdminClientId, setSelectedAdminClientId] = useState(readAdminClientIdFromHash())
+  const [adminClientSearch, setAdminClientSearch] = useState('')
+  const [adminAssetEditingId, setAdminAssetEditingId] = useState('')
+  const [adminAssetDraftName, setAdminAssetDraftName] = useState('')
+  const [adminBusy, setAdminBusy] = useState(false)
+  const [adminError, setAdminError] = useState('')
 
   const [shareAssets, setShareAssets] = useState<DeliveryAsset[]>([])
   const [shareBusy, setShareBusy] = useState(false)
   const [shareMessage, setShareMessage] = useState('')
-  const uploadInputRef = useRef<HTMLInputElement | null>(null)
+
+  const loadAdminData = async () => {
+    if (!supabase || !session?.user.id || role !== 'admin') return
+
+    setAdminBusy(true)
+    setAdminError('')
+
+    try {
+      const [clientsResult, projectsResult, assetsResult] = await Promise.all([
+        supabase
+          .from('clients')
+          .select('id, full_name, email, phone, notes, created_at, updated_at')
+          .eq('owner_user_id', session.user.id)
+          .order('updated_at', { ascending: false }),
+        supabase
+          .from('projects')
+          .select('id, client_id, name, description, shoot_date, location, status, created_at, updated_at')
+          .eq('owner_user_id', session.user.id)
+          .order('updated_at', { ascending: false }),
+        supabase
+          .from('assets')
+          .select('id, project_id, delivery_id, filename, mime_type, bytes, r2_object_key, created_at')
+          .eq('owner_user_id', session.user.id)
+          .order('created_at', { ascending: false }),
+      ])
+
+      if (clientsResult.error) throw clientsResult.error
+      if (projectsResult.error) throw projectsResult.error
+      if (assetsResult.error) throw assetsResult.error
+
+      const clients = (clientsResult.data ?? []) as AdminClient[]
+      const projects = (projectsResult.data ?? []) as AdminProject[]
+      const assets = (assetsResult.data ?? []) as AdminAsset[]
+
+      const projectsByClient = new Map<string, AdminProject[]>()
+      for (const project of projects) {
+        const current = projectsByClient.get(project.client_id) ?? []
+        current.push(project)
+        projectsByClient.set(project.client_id, current)
+      }
+
+      const assetsByProject = new Map<string, AdminAsset[]>()
+      for (const asset of assets) {
+        const current = assetsByProject.get(asset.project_id) ?? []
+        current.push(asset)
+        assetsByProject.set(asset.project_id, current)
+      }
+
+      const summaries: AdminClientSummary[] = clients.map((clientRow) => {
+        const clientProjects = projectsByClient.get(clientRow.id) ?? []
+        const clientAssets = clientProjects.flatMap((project) => assetsByProject.get(project.id) ?? [])
+        const latestUpdatedAt =
+          [clientRow.updated_at, ...clientProjects.map((project) => project.updated_at), ...clientAssets.map((asset) => asset.created_at)]
+            .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] ?? clientRow.updated_at
+
+        return {
+          ...clientRow,
+          projects: clientProjects,
+          assets: clientAssets,
+          projectCount: clientProjects.length,
+          assetCount: clientAssets.length,
+          latestUpdatedAt,
+        }
+      })
+
+      setAdminClients(summaries)
+      setSelectedAdminClientId((current) => current || summaries[0]?.id || '')
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'Failed to load admin data')
+    } finally {
+      setAdminBusy(false)
+    }
+  }
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -603,6 +573,7 @@ function App() {
     const onHashChange = () => {
       setView(readViewFromHash())
       setShareToken(readShareTokenFromHash())
+      setSelectedAdminClientId(readAdminClientIdFromHash())
     }
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
@@ -670,53 +641,34 @@ function App() {
     return toFirstName(profileDisplayName) || toFirstName(session.user.email) || 'LOGIN'
   }, [profileDisplayName, session])
 
-  const customerFolderCards = useMemo(() => buildCustomerFolderCards(myDeliveries), [myDeliveries])
-  const adminSubfolderCovers = useMemo(
-    () =>
-      adminFolders
-        .flatMap((folder) => buildAdminSubfolderCards(folder))
-        .map((card) => ({ key: card.id, assetId: card.coverAssetId }))
-        .filter((entry): entry is { key: string; assetId: string } => Boolean(entry.assetId)),
-    [adminFolders]
-  )
-  const uploadSelectionSummary = useMemo(() => {
-    if (uploadFiles.length === 0) return 'No files selected yet.'
+  const filteredAdminClients = adminClients.filter((client) => {
+    const query = adminClientSearch.trim().toLowerCase()
+    if (!query) return true
+    return [client.full_name, client.email, client.notes ?? '', client.projects.map((project) => project.name).join(' ')]
+      .join(' ')
+      .toLowerCase()
+      .includes(query)
+  })
 
-    const folders = new Map<string, number>()
-    let directFiles = 0
+  const selectedAdminClient =
+    adminClients.find((client) => client.id === selectedAdminClientId) ?? null
 
-    for (const file of uploadFiles) {
-      const relative = (file.webkitRelativePath ?? '').trim()
-      if (!relative) {
-        directFiles += 1
-        continue
-      }
-      const topFolder = relative.split('/').filter(Boolean)[0]
-      if (!topFolder) {
-        directFiles += 1
-        continue
-      }
-      folders.set(topFolder, (folders.get(topFolder) ?? 0) + 1)
-    }
+  const openAdminClients = () => {
+    window.location.hash = '#admin-clients'
+    setView('admin-clients')
+  }
 
-    const folderCount = folders.size
-    const folderFiles = Array.from(folders.values()).reduce((sum, count) => sum + count, 0)
-    const parts: string[] = []
+  const openAdminClient = (clientId: string) => {
+    setSelectedAdminClientId(clientId)
+    window.location.hash = `#admin-clients/${clientId}`
+  }
 
-    if (folderCount > 0) {
-      parts.push(`${folderCount} folder${folderCount === 1 ? '' : 's'} (${folderFiles} files)`)
-      const folderPreview = Array.from(folders.keys()).sort((a, b) => a.localeCompare(b)).slice(0, 3)
-      if (folderPreview.length > 0) {
-        parts.push(folderPreview.join(', '))
-      }
-    }
-
-    if (directFiles > 0) {
-      parts.push(`${directFiles} direct file${directFiles === 1 ? '' : 's'}`)
-    }
-
-    return parts.join(' | ')
-  }, [uploadFiles])
+  const openUploadForClient = (client: AdminClientSummary) => {
+    setUploadClientId(client.id)
+    setUploadEmail(client.email)
+    setUploadTitle(client.full_name)
+    window.location.hash = '#upload'
+  }
 
   const getAccessToken = async () => {
     if (!supabase) return ''
@@ -730,7 +682,7 @@ function App() {
     path: string,
     token: string,
     options?: {
-      method?: 'GET' | 'POST'
+      method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
       body?: unknown
     }
   ): Promise<T> => {
@@ -781,163 +733,9 @@ function App() {
   }, [session?.user.email, view])
 
   useEffect(() => {
-    if (!supabase || view !== 'my-pictures' || customerFolderCards.length === 0) {
-      setCustomerCoverUrls({})
-      return
-    }
-
-    let canceled = false
-
-    const loadCoverImages = async () => {
-      try {
-        const token = await getAccessToken()
-        if (!token || canceled) return
-
-        const entries = await Promise.all(
-          customerFolderCards.map(async (card) => {
-            if (!card.coverAssetId) return [card.id, ''] as const
-            try {
-              const payload = await workerRequest<{ signedUrl: string }>(
-                '/api/v1/media/signed-url',
-                token,
-                {
-                  method: 'POST',
-                  body: { assetId: card.coverAssetId, mode: 'view' },
-                }
-              )
-              return [card.id, payload.signedUrl] as const
-            } catch {
-              return [card.id, ''] as const
-            }
-          })
-        )
-
-        if (!canceled) {
-          setCustomerCoverUrls(
-            Object.fromEntries(entries.filter((entry): entry is readonly [string, string] => Boolean(entry[1])))
-          )
-        }
-      } catch {
-        if (!canceled) setCustomerCoverUrls({})
-      }
-    }
-
-    void loadCoverImages()
-
-    return () => {
-      canceled = true
-    }
-  }, [customerFolderCards, session?.user.id, view])
-
-  useEffect(() => {
-    if (!supabase || role !== 'admin' || view !== 'admin-work' || adminSubfolderCovers.length === 0) {
-      setAdminCoverUrls({})
-      return
-    }
-
-    let canceled = false
-
-    const loadAdminCovers = async () => {
-      try {
-        const token = await getAccessToken()
-        if (!token || canceled) return
-
-        const entries = await Promise.all(
-          adminSubfolderCovers.map(async (entry) => {
-            try {
-              const payload = await workerRequest<{ signedUrl: string }>(
-                '/api/v1/media/signed-url',
-                token,
-                {
-                  method: 'POST',
-                  body: { assetId: entry.assetId, mode: 'view' },
-                }
-              )
-              return [entry.key, payload.signedUrl] as const
-            } catch {
-              return [entry.key, ''] as const
-            }
-          })
-        )
-
-        if (!canceled) {
-          setAdminCoverUrls(
-            Object.fromEntries(entries.filter((item): item is readonly [string, string] => Boolean(item[1])))
-          )
-        }
-      } catch {
-        if (!canceled) setAdminCoverUrls({})
-      }
-    }
-
-    void loadAdminCovers()
-
-    return () => {
-      canceled = true
-    }
-  }, [adminSubfolderCovers, role, session?.user.id, view])
-
-  useEffect(() => {
-    if (!supabase || !session?.user.id || role !== 'admin' || view !== 'admin-work') return
-    const client = supabase
-
-    const loadAdminFolders = async () => {
-      setAdminWorkBusy(true)
-      setAdminWorkError('')
-      try {
-        const [projectsResult, deliveriesResult, assetsResult] = await Promise.all([
-          client
-            .from('projects')
-            .select('id, name')
-            .eq('owner_user_id', session.user.id),
-          client
-            .from('deliveries')
-            .select('id, project_id, created_at')
-            .eq('owner_user_id', session.user.id)
-            .order('created_at', { ascending: false }),
-          client
-            .from('assets')
-            .select('id, delivery_id, filename, mime_type, bytes, created_at, r2_object_key')
-            .eq('owner_user_id', session.user.id)
-            .not('delivery_id', 'is', null)
-            .order('created_at', { ascending: false }),
-        ])
-
-        if (projectsResult.error) throw projectsResult.error
-        if (deliveriesResult.error) throw deliveriesResult.error
-        if (assetsResult.error) throw assetsResult.error
-
-        const projects = (projectsResult.data ?? []) as AdminProject[]
-        const deliveries = (deliveriesResult.data ?? []) as AdminDeliveryRow[]
-        const assets = (assetsResult.data ?? []) as DeliveryAsset[]
-
-        const projectById = new Map(projects.map((project) => [project.id, project.name]))
-        const assetsByDelivery = new Map<string, DeliveryAsset[]>()
-        for (const asset of assets) {
-          const key = asset.delivery_id
-          if (!key) continue
-          const current = assetsByDelivery.get(key) ?? []
-          current.push(asset)
-          assetsByDelivery.set(key, current)
-        }
-
-        const folders: AdminFolder[] = deliveries.map((delivery) => ({
-          deliveryId: delivery.id,
-          title: projectById.get(delivery.project_id) ?? `Delivery ${delivery.id.slice(0, 8)}`,
-          createdAt: delivery.created_at,
-          assets: assetsByDelivery.get(delivery.id) ?? [],
-        }))
-
-        setAdminFolders(folders)
-        setOpenAdminFolderId((current) => current || folders[0]?.deliveryId || '')
-      } catch (error) {
-        setAdminWorkError(error instanceof Error ? error.message : 'Failed to load admin folders')
-      } finally {
-        setAdminWorkBusy(false)
-      }
-    }
-
-    void loadAdminFolders()
+    if (!supabase || !session?.user.id || role !== 'admin') return
+    if (view !== 'upload' && view !== 'admin-clients' && view !== 'admin-client') return
+    void loadAdminData()
   }, [role, session?.user.id, view])
 
   useEffect(() => {
@@ -1025,9 +823,6 @@ function App() {
     await supabase.auth.signOut()
     setAuthMenuOpen(false)
     setMyDeliveries([])
-    setCustomerCoverUrls({})
-    setAdminCoverUrls({})
-    setOpenCustomerFolderKey('')
     setNewShareLinks({})
     window.location.hash = '#home'
   }
@@ -1035,7 +830,6 @@ function App() {
   const handleUploadFilesChange = (event: ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(event.target.files ?? [])
     setUploadFiles((current) => [...current, ...selected])
-    event.target.value = ''
   }
 
   const handleCreateShareLink = async (deliveryId: string) => {
@@ -1074,10 +868,11 @@ function App() {
 
   const handleOpenAsset = async (assetId: string, mode: 'view' | 'download') => {
     if (!supabase) return
+    const reportError = role === 'admin' ? setAdminError : setCustomerError
     try {
       const token = await getAccessToken()
       if (!token) {
-        setCustomerError('Login session expired. Please log in again.')
+        reportError('Login session expired. Please log in again.')
         return
       }
       const payload = await workerRequest<{ signedUrl: string }>(
@@ -1090,30 +885,70 @@ function App() {
       )
       window.open(payload.signedUrl, '_blank', 'noopener,noreferrer')
     } catch (error) {
-      setCustomerError(error instanceof Error ? error.message : 'Unable to open file')
+      reportError(error instanceof Error ? error.message : 'Unable to open file')
+    }
+  }
+
+  const handleRenameAdminAsset = async (assetId: string, nextName: string) => {
+    if (!supabase || !session?.user.id || role !== 'admin') return
+    const trimmedName = nextName.trim()
+    if (!trimmedName) return
+
+    const { error } = await supabase
+      .from('assets')
+      .update({ filename: trimmedName })
+      .eq('id', assetId)
+      .eq('owner_user_id', session.user.id)
+
+    if (error) {
+      setAdminError(error.message)
+      return
+    }
+
+    setAdminClients((current) =>
+      current.map((client) => ({
+        ...client,
+        assets: client.assets.map((asset) => (asset.id === assetId ? { ...asset, filename: trimmedName } : asset)),
+      }))
+    )
+    setAdminAssetEditingId('')
+    setAdminAssetDraftName('')
+  }
+
+  const handleDeleteAdminAsset = async (assetId: string) => {
+    if (!supabase || !session?.user.id || role !== 'admin') return
+    if (!window.confirm('Delete this file permanently? This cannot be undone.')) return
+
+    try {
+      const token = await getAccessToken()
+      if (!token) {
+        setAdminError('Login session expired. Please log in again.')
+        return
+      }
+
+      await workerRequest<{ ok: boolean }>(`/api/v1/admin/assets/${assetId}`, token, { method: 'DELETE' })
+      setAdminClients((current) =>
+        current.map((client) => ({
+          ...client,
+          assets: client.assets.filter((asset) => asset.id !== assetId),
+          assetCount: client.assets.filter((asset) => asset.id !== assetId).length,
+        }))
+      )
+      setAdminAssetEditingId('')
+      setAdminAssetDraftName('')
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'Unable to delete file')
     }
   }
 
   const uploadFileToSignedUrl = async (uploadUrl: string, file: File) => {
-    let response: Response
-    try {
-      response = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: {
-          'content-type': file.type || 'application/octet-stream',
-        },
-        body: file,
-      })
-    } catch (error) {
-      const isNetworkError =
-        error instanceof TypeError || (error instanceof Error && error.message.toLowerCase().includes('fetch'))
-      if (isNetworkError) {
-        throw new Error(
-          'Upload blocked by R2 CORS policy. In Cloudflare R2 bucket CORS, allow origin https://rajugariabbayishots.vercel.app with methods PUT, GET, HEAD and headers Content-Type.'
-        )
-      }
-      throw error
-    }
+    const response = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'content-type': file.type || 'application/octet-stream',
+      },
+      body: file,
+    })
     if (!response.ok) {
       throw new Error(`Upload failed for ${file.name}`)
     }
@@ -1123,7 +958,8 @@ function App() {
     event.preventDefault()
     if (!supabase || !session?.user.id) return
 
-    const targetEmail = uploadEmail.trim().toLowerCase()
+    const selectedClient = adminClients.find((client) => client.id === uploadClientId)
+    const targetEmail = (selectedClient?.email ?? uploadEmail).trim().toLowerCase()
     if (!targetEmail || uploadFiles.length === 0) {
       setUploadMessage('Enter client email and add at least one photo/video.')
       return
@@ -1132,40 +968,42 @@ function App() {
     setUploadBusy(true)
     setUploadMessage('')
 
-    let clientId = ''
-    const existingClient = await supabase
-      .from('clients')
-      .select('id')
-      .eq('email', targetEmail)
-      .eq('owner_user_id', session.user.id)
-      .maybeSingle()
-
-    if (existingClient.error) {
-      setUploadMessage(existingClient.error.message)
-      setUploadBusy(false)
-      return
-    }
-
-    if (existingClient.data?.id) {
-      clientId = existingClient.data.id
-    } else {
-      const insertedClient = await supabase
+    let clientId = selectedClient?.id ?? ''
+    if (!clientId) {
+      const existingClient = await supabase
         .from('clients')
-        .insert({
-          owner_user_id: session.user.id,
-          full_name: targetEmail.split('@')[0] || 'Client',
-          email: targetEmail,
-        })
         .select('id')
-        .single()
+        .eq('email', targetEmail)
+        .eq('owner_user_id', session.user.id)
+        .maybeSingle()
 
-      if (insertedClient.error || !insertedClient.data) {
-        setUploadMessage(insertedClient.error?.message ?? 'Unable to create client.')
+      if (existingClient.error) {
+        setUploadMessage(existingClient.error.message)
         setUploadBusy(false)
         return
       }
 
-      clientId = insertedClient.data.id
+      if (existingClient.data?.id) {
+        clientId = existingClient.data.id
+      } else {
+        const insertedClient = await supabase
+          .from('clients')
+          .insert({
+            owner_user_id: session.user.id,
+            full_name: targetEmail.split('@')[0] || 'Client',
+            email: targetEmail,
+          })
+          .select('id')
+          .single()
+
+        if (insertedClient.error || !insertedClient.data) {
+          setUploadMessage(insertedClient.error?.message ?? 'Unable to create client.')
+          setUploadBusy(false)
+          return
+        }
+
+        clientId = insertedClient.data.id
+      }
     }
 
     const insertedProject = await supabase
@@ -1270,10 +1108,14 @@ function App() {
     }
 
     setUploadMessage(
-      `Delivery created for ${targetEmail}. Client link: ${window.location.origin}/#my-pictures`
+      `Upload complete for ${targetEmail}. Opening the client folder now.`
     )
     setUploadFiles([])
     setUploadEmail('')
+    setUploadClientId(clientId)
+    setSelectedAdminClientId(clientId)
+    window.location.hash = `#admin-clients/${clientId}`
+    void loadAdminData()
     setUploadBusy(false)
   }
 
@@ -1475,108 +1317,70 @@ function App() {
           <p className="portal-hint">No active deliveries found for this email.</p>
         )}
 
-        <div className="customer-folder-grid">
-          {customerFolderCards.map((card) => (
-            <article key={card.id} className="delivery-card customer-folder-card">
-              <button
-                className="customer-folder-cover"
-                type="button"
-                onClick={() => {
-                  setOpenCustomerFolderKey((current) => (current === card.id ? '' : card.id))
-                }}
-              >
-                {customerCoverUrls[card.id] ? (
-                  <img src={customerCoverUrls[card.id]} alt={card.displayName} loading="lazy" decoding="async" />
-                ) : (
-                  <div className="customer-folder-placeholder">No preview</div>
-                )}
-                <div className="customer-folder-overlay">
-                  <p>{card.displayName}</p>
-                  <span>{card.assets.length} files</span>
-                </div>
-              </button>
-
+        <div className="delivery-list">
+          {myDeliveries.map((delivery) => (
+            <article key={delivery.deliveryId} className="delivery-card">
               <div className="delivery-header">
                 <div>
-                  <p className="delivery-title">{card.displayName}</p>
-                  <p className="delivery-expiry">{daysRemainingText(card.expiresAt)}</p>
+                  <p className="delivery-title">Delivery {delivery.deliveryId.slice(0, 8)}</p>
+                  <p className="delivery-expiry">{daysRemainingText(delivery.expiresAt)}</p>
                 </div>
-                <div className="delivery-asset-actions">
-                  <button
-                    className="button ghost"
-                    type="button"
-                    onClick={() => {
-                      setOpenCustomerFolderKey((current) => (current === card.id ? '' : card.id))
-                    }}
-                  >
-                    {openCustomerFolderKey === card.id ? 'Hide files' : 'Open folder'}
-                  </button>
-                  <button
-                    className="button ghost"
-                    type="button"
-                    disabled={card.accessMode === 'viewer'}
-                    onClick={() => {
-                      void handleCreateShareLink(card.deliveryId)
-                    }}
-                  >
-                    Create view-only link
-                  </button>
-                </div>
+                <button
+                  className="button ghost"
+                  type="button"
+                  disabled={delivery.accessMode === 'viewer'}
+                  onClick={() => {
+                    void handleCreateShareLink(delivery.deliveryId)
+                  }}
+                >
+                  Create view-only link
+                </button>
               </div>
 
-              {newShareLinks[card.deliveryId] && (
+              {newShareLinks[delivery.deliveryId] && (
                 <div className="share-link-row">
-                  <input className="share-link-input" value={newShareLinks[card.deliveryId]} readOnly />
+                  <input className="share-link-input" value={newShareLinks[delivery.deliveryId]} readOnly />
                   <button
                     className="button ghost"
                     type="button"
                     onClick={() => {
-                      void handleCopyShareLink(card.deliveryId)
+                      void handleCopyShareLink(delivery.deliveryId)
                     }}
                   >
-                    {shareCopyState[card.deliveryId] || 'Copy'}
+                    {shareCopyState[delivery.deliveryId] || 'Copy'}
                   </button>
                 </div>
               )}
 
-              {openCustomerFolderKey === card.id && (
-                <ul className="delivery-assets">
-                  {card.assets.map((asset) => {
-                    const parts = assetPathParts(asset.filename)
-                    const trimmedName =
-                      card.folderName !== '__root__' && parts[0] === card.folderName
-                        ? parts.slice(1).join('/') || parts[0]
-                        : asset.filename
-                    return (
-                      <li key={asset.id}>
-                        <span>{trimmedName}</span>
-                        <span>{formatBytes(asset.bytes)}</span>
-                        <div className="delivery-asset-actions">
-                          <button
-                            className="button ghost"
-                            type="button"
-                            onClick={() => {
-                              void handleOpenAsset(asset.id, 'view')
-                            }}
-                          >
-                            View
-                          </button>
-                          <button
-                            className="button ghost"
-                            type="button"
-                            disabled={!asset.canDownload}
-                            onClick={() => {
-                              void handleOpenAsset(asset.id, 'download')
-                            }}
-                          >
-                            Download
-                          </button>
-                        </div>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
+              <ul className="delivery-assets">
+                {delivery.assets.map((asset) => (
+                  <li key={asset.id}>
+                    <span>{asset.filename}</span>
+                    <span>{formatBytes(asset.bytes)}</span>
+                    <div className="delivery-asset-actions">
+                      <button
+                        className="button ghost"
+                        type="button"
+                        onClick={() => {
+                          void handleOpenAsset(asset.id, 'view')
+                        }}
+                      >
+                        View
+                      </button>
+                      <button
+                        className="button ghost"
+                        type="button"
+                        disabled={!asset.canDownload}
+                        onClick={() => {
+                          void handleOpenAsset(asset.id, 'download')
+                        }}
+                      >
+                        Download
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             </article>
           ))}
         </div>
@@ -1587,7 +1391,7 @@ function App() {
   const renderUpload = () => {
     if (!session?.user.id) {
       return (
-        <section className="portal-section">
+        <section className="portal-section admin-screen">
           <h2>Upload</h2>
           <p>Login required.</p>
         </section>
@@ -1596,68 +1400,125 @@ function App() {
 
     if (role !== 'admin') {
       return (
-        <section className="portal-section">
+        <section className="portal-section admin-screen">
           <h2>Upload</h2>
           <p className="portal-error">Only admin users can access uploads.</p>
         </section>
       )
     }
 
-    return (
-      <section className="portal-section">
-        <h2>Upload</h2>
-        <p>Attach media to a client email and generate delivery access.</p>
+    const uploadClient = adminClients.find((client) => client.id === uploadClientId) ?? null
 
-        <form className="upload-form" onSubmit={handleUploadDelivery}>
-          <label>
-            Client email
-            <input
-              type="email"
-              value={uploadEmail}
-              onChange={(event) => setUploadEmail(event.target.value)}
-              required
-            />
-          </label>
-          <label>
-            Delivery title
-            <input
-              type="text"
-              value={uploadTitle}
-              onChange={(event) => setUploadTitle(event.target.value)}
-              required
-            />
-          </label>
-          <label>
-            Upload media (photos, videos, or folders)
-            <div className="upload-input-group">
-              <div className="upload-picker-wrap">
-                <button
-                  className="button ghost"
-                  type="button"
-                  onClick={() => {
-                    uploadInputRef.current?.click()
-                  }}
-                >
-                  Select Files/Folders
-                </button>
-              </div>
+    return (
+      <section className="portal-section admin-screen">
+        <div className="portal-head admin-screen-head">
+          <div>
+            <p className="eyebrow">Admin upload</p>
+            <h2>Upload to a client folder</h2>
+            <p>Choose a client, drop files, then jump straight into that client’s folder.</p>
+          </div>
+          <button className="button ghost" type="button" onClick={openAdminClients}>
+            View folders
+          </button>
+        </div>
+
+        {adminBusy && <p className="portal-hint">Loading client folders...</p>}
+        {adminError && <p className="portal-error">{adminError}</p>}
+
+        <form className="admin-upload-layout" onSubmit={handleUploadDelivery}>
+          <div className="admin-panel">
+            <label>
+              Client folder
+              <select
+                value={uploadClientId}
+                onChange={(event) => {
+                  const nextClientId = event.target.value
+                  setUploadClientId(nextClientId)
+                  const nextClient = adminClients.find((client) => client.id === nextClientId)
+                  if (nextClient) {
+                    setUploadEmail(nextClient.email)
+                    setUploadTitle(nextClient.full_name)
+                  } else {
+                    setUploadEmail('')
+                    setUploadTitle('Client Delivery')
+                  }
+                }}
+              >
+                <option value="">Create or reuse by email</option>
+                {adminClients.map((client) => (
+                  <option key={client.id} value={client.id}>
+                    {client.full_name} ({client.email})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Client email
               <input
-                ref={uploadInputRef}
-                className="upload-picker-input"
+                type="email"
+                value={uploadEmail}
+                onChange={(event) => setUploadEmail(event.target.value)}
+                required={!uploadClient}
+                disabled={Boolean(uploadClient)}
+              />
+            </label>
+
+            <label>
+              Delivery title
+              <input
+                type="text"
+                value={uploadTitle}
+                onChange={(event) => setUploadTitle(event.target.value)}
+                required
+              />
+            </label>
+
+            <p className="portal-hint">
+              {uploadClient
+                ? `Files will be uploaded into ${uploadClient.full_name}.`
+                : 'Create a new client by email, then upload directly into that folder.'}
+            </p>
+          </div>
+
+          <div className="admin-panel">
+            <label>
+              Photos / videos
+              <input type="file" multiple accept="image/*,video/*" onChange={handleUploadFilesChange} />
+            </label>
+            <label>
+              Folder upload
+              <input
                 type="file"
                 multiple
                 onChange={handleUploadFilesChange}
-                // webkitdirectory enables selecting full folders in Chromium/Safari.
                 {...({ webkitdirectory: '' } as Record<string, string>)}
               />
-              <p className="upload-selection-count">
-                {uploadSelectionSummary}
-              </p>
-            </div>
-          </label>
-          <button className="button primary" type="submit" disabled={uploadBusy || uploadFiles.length === 0}>
-            {uploadBusy ? 'Creating delivery...' : 'Create delivery link'}
-          </button>
+            </label>
+
+            {uploadFiles.length > 0 && (
+              <div className="admin-file-queue">
+                {uploadFiles.map((file, index) => (
+                  <div key={`${file.name}-${file.size}-${index}`} className="admin-file-pill">
+                    <span>{file.webkitRelativePath?.trim() || file.name}</span>
+                    <button
+                      className="button ghost"
+                      type="button"
+                      onClick={() => {
+                        setUploadFiles((current) => current.filter((_, currentIndex) => currentIndex !== index))
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <button className="button primary" type="submit" disabled={uploadBusy || uploadFiles.length === 0}>
+              {uploadBusy ? 'Creating delivery...' : 'Upload to client'}
+            </button>
+          </div>
         </form>
 
         {uploadMessage && <p className="portal-hint">{uploadMessage}</p>}
@@ -1665,139 +1526,276 @@ function App() {
     )
   }
 
-  const renderAdminWork = () => {
+  const renderAdminClients = () => {
     if (!session?.user.id || role !== 'admin') {
       return (
-        <section className="portal-section">
-          <h2>Work Folders</h2>
+        <section className="portal-section admin-screen">
+          <h2>Client folders</h2>
           <p className="portal-error">Only admin users can access this page.</p>
         </section>
       )
     }
 
     return (
-      <section className="portal-section">
-        <h2>Work Folders</h2>
-        {adminWorkBusy && <p className="portal-hint">Loading folders...</p>}
-        {adminWorkError && <p className="portal-error">{adminWorkError}</p>}
-        {!adminWorkBusy && !adminWorkError && adminFolders.length === 0 && (
-          <p className="portal-hint">No uploaded delivery folders found yet.</p>
+      <section className="portal-section admin-screen">
+        <div className="portal-head admin-screen-head">
+          <div>
+            <p className="eyebrow">Admin view</p>
+            <h2>Client folders</h2>
+            <p>Open a client to review uploads, rename files, or delete assets.</p>
+          </div>
+          <button
+            className="button ghost"
+            type="button"
+            onClick={() => {
+              setUploadClientId('')
+              setUploadEmail('')
+              setUploadTitle('Client Delivery')
+              window.location.hash = '#upload'
+            }}
+          >
+            New upload
+          </button>
+        </div>
+
+        <div className="admin-stat-grid">
+          <div className="admin-stat-card">
+            <span>Clients</span>
+            <strong>{adminClients.length}</strong>
+          </div>
+          <div className="admin-stat-card">
+            <span>Projects</span>
+            <strong>{adminClients.reduce((count, client) => count + client.projectCount, 0)}</strong>
+          </div>
+          <div className="admin-stat-card">
+            <span>Files</span>
+            <strong>{adminClients.reduce((count, client) => count + client.assetCount, 0)}</strong>
+          </div>
+        </div>
+
+        <label className="admin-search">
+          Search clients
+          <input
+            type="search"
+            value={adminClientSearch}
+            onChange={(event) => setAdminClientSearch(event.target.value)}
+            placeholder="Search by client, email, or project"
+          />
+        </label>
+
+        {adminBusy && <p className="portal-hint">Loading client folders...</p>}
+        {adminError && <p className="portal-error">{adminError}</p>}
+        {!adminBusy && !adminError && filteredAdminClients.length === 0 && (
+          <p className="portal-hint">No client folders found yet.</p>
         )}
 
-        <div className="delivery-list">
-          {adminFolders.map((folder) => (
-            <article key={folder.deliveryId} className="delivery-card">
-              <div className="delivery-header">
+        <div className="admin-client-grid">
+          {filteredAdminClients.map((client) => (
+            <button
+              key={client.id}
+              className="admin-client-card"
+              type="button"
+              onClick={() => openAdminClient(client.id)}
+            >
+              <div className="admin-client-card-head">
                 <div>
-                  <p className="delivery-title">{folder.title}</p>
-                  <p className="delivery-expiry">
-                    Delivery {folder.deliveryId.slice(0, 8)} | {new Date(folder.createdAt).toLocaleString()}
-                  </p>
+                  <p className="delivery-title">{client.full_name}</p>
+                  <p className="delivery-expiry">{client.email}</p>
                 </div>
-                <button
-                  className="button ghost"
-                  type="button"
-                  onClick={() => {
-                    setOpenAdminFolderId((current) => (current === folder.deliveryId ? '' : folder.deliveryId))
-                  }}
-                >
-                  {openAdminFolderId === folder.deliveryId ? 'Hide files' : 'Open folder'}
-                </button>
+                <span className="admin-client-count">{client.assetCount} files</span>
               </div>
+              <div className="admin-client-meta">
+                <span>{client.projectCount} project{client.projectCount === 1 ? '' : 's'}</span>
+                <span>Updated {new Date(client.latestUpdatedAt).toLocaleDateString()}</span>
+              </div>
+              <div className="admin-client-preview">
+                {client.assets.slice(0, 3).map((asset) => (
+                  <span key={asset.id}>{asset.filename}</span>
+                ))}
+              </div>
+            </button>
+          ))}
+        </div>
+      </section>
+    )
+  }
 
-              {openAdminFolderId === folder.deliveryId && (
-                <>
-                  {folder.assets.length === 0 ? (
-                    <p className="portal-hint">No files in this folder yet.</p>
+  const renderAdminClientDetail = () => {
+    if (!session?.user.id || role !== 'admin') {
+      return (
+        <section className="portal-section admin-screen">
+          <h2>Client folder</h2>
+          <p className="portal-error">Only admin users can access this page.</p>
+        </section>
+      )
+    }
+
+    const client = selectedAdminClient
+
+    if (!client) {
+      return (
+        <section className="portal-section admin-screen">
+          <div className="portal-head admin-screen-head">
+            <div>
+              <p className="eyebrow">Client folder</p>
+              <h2>No client selected</h2>
+              <p>Pick a client from the folder list to view their uploads.</p>
+            </div>
+            <button className="button ghost" type="button" onClick={openAdminClients}>
+              Back to folders
+            </button>
+          </div>
+        </section>
+      )
+    }
+
+    return (
+      <section className="portal-section admin-screen">
+        <div className="portal-head admin-screen-head">
+          <div>
+            <p className="eyebrow">Client folder</p>
+            <h2>{client.full_name}</h2>
+            <p>
+              {client.email}
+              {client.phone ? ` · ${client.phone}` : ''}
+            </p>
+          </div>
+          <div className="admin-head-actions">
+            <button className="button ghost" type="button" onClick={openAdminClients}>
+              Back
+            </button>
+            <button className="button ghost" type="button" onClick={() => openUploadForClient(client)}>
+              Upload more
+            </button>
+          </div>
+        </div>
+
+        <div className="admin-detail-summary">
+          <div className="admin-stat-card">
+            <span>Projects</span>
+            <strong>{client.projectCount}</strong>
+          </div>
+          <div className="admin-stat-card">
+            <span>Files</span>
+            <strong>{client.assetCount}</strong>
+          </div>
+          <div className="admin-stat-card">
+            <span>Updated</span>
+            <strong>{new Date(client.latestUpdatedAt).toLocaleDateString()}</strong>
+          </div>
+        </div>
+
+        {client.notes && <p className="portal-hint">{client.notes}</p>}
+
+        <div className="admin-project-stack">
+          {client.projects.length === 0 ? (
+            <p className="portal-hint">No projects yet for this client.</p>
+          ) : (
+            client.projects.map((project) => {
+              const projectAssets = client.assets.filter((asset) => asset.project_id === project.id)
+
+              return (
+                <article key={project.id} className="admin-project-card">
+                  <div className="delivery-header">
+                    <div>
+                      <p className="delivery-title">{project.name}</p>
+                      <p className="delivery-expiry">
+                        {project.status}
+                        {project.shoot_date ? ` · ${project.shoot_date}` : ''}
+                        {project.location ? ` · ${project.location}` : ''}
+                      </p>
+                    </div>
+                    <span className="admin-client-count">{projectAssets.length} files</span>
+                  </div>
+
+                  {projectAssets.length === 0 ? (
+                    <p className="portal-hint">No uploaded files in this project yet.</p>
                   ) : (
-                    <div className="customer-folder-grid">
-                      {buildAdminSubfolderCards(folder).map((card) => (
-                        <article key={card.id} className="delivery-card customer-folder-card">
-                          <button
-                            className="customer-folder-cover"
-                            type="button"
-                            onClick={() => {
-                              setOpenAdminSubfolderKey((current) => (current === card.id ? '' : card.id))
-                            }}
-                          >
-                            {adminCoverUrls[card.id] ? (
-                              <img
-                                src={adminCoverUrls[card.id]}
-                                alt={card.displayName}
-                                loading="lazy"
-                                decoding="async"
-                              />
-                            ) : (
-                              <div className="customer-folder-placeholder">No preview</div>
-                            )}
-                            <div className="customer-folder-overlay">
-                              <p>{card.displayName}</p>
-                              <span>{card.assets.length} files</span>
+                    <div className="admin-asset-grid">
+                      {projectAssets.map((asset) => {
+                        const isEditing = adminAssetEditingId === asset.id
+                        return (
+                          <article key={asset.id} className="admin-asset-card">
+                            <div className="admin-asset-main">
+                              {isEditing ? (
+                                <input
+                                  type="text"
+                                  value={adminAssetDraftName}
+                                  onChange={(event) => setAdminAssetDraftName(event.target.value)}
+                                  autoFocus
+                                />
+                              ) : (
+                                <p className="admin-asset-name">{asset.filename}</p>
+                              )}
+                              <p className="delivery-expiry">
+                                {formatBytes(asset.bytes)} · {asset.mime_type}
+                              </p>
                             </div>
-                          </button>
-                          <div className="delivery-header">
-                            <div>
-                              <p className="delivery-title">{card.displayName}</p>
-                              <p className="delivery-expiry">{card.assets.length} files</p>
+                            <div className="delivery-asset-actions">
+                              <button
+                                className="button ghost"
+                                type="button"
+                                onClick={() => {
+                                  void handleOpenAsset(asset.id, 'view')
+                                }}
+                              >
+                                View
+                              </button>
+                              {isEditing ? (
+                                <>
+                                  <button
+                                    className="button ghost"
+                                    type="button"
+                                    onClick={() => {
+                                      void handleRenameAdminAsset(asset.id, adminAssetDraftName)
+                                    }}
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    className="button ghost"
+                                    type="button"
+                                    onClick={() => {
+                                      setAdminAssetEditingId('')
+                                      setAdminAssetDraftName('')
+                                    }}
+                                  >
+                                    Cancel
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    className="button ghost"
+                                    type="button"
+                                    onClick={() => {
+                                      setAdminAssetEditingId(asset.id)
+                                      setAdminAssetDraftName(asset.filename)
+                                    }}
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    className="button ghost"
+                                    type="button"
+                                    onClick={() => {
+                                      void handleDeleteAdminAsset(asset.id)
+                                    }}
+                                  >
+                                    Delete
+                                  </button>
+                                </>
+                              )}
                             </div>
-                            <button
-                              className="button ghost"
-                              type="button"
-                              onClick={() => {
-                                setOpenAdminSubfolderKey((current) => (current === card.id ? '' : card.id))
-                              }}
-                            >
-                              {openAdminSubfolderKey === card.id ? 'Hide files' : 'Open folder'}
-                            </button>
-                          </div>
-                          {openAdminSubfolderKey === card.id && (
-                            <ul className="delivery-assets">
-                              {card.assets.map((asset) => {
-                                const isPending = (asset.r2_object_key ?? '').startsWith('pending/')
-                                const parts = assetPathParts(asset.filename)
-                                const shortName =
-                                  card.folderName !== '__root__' && parts[0] === card.folderName
-                                    ? parts.slice(1).join('/') || parts[0]
-                                    : asset.filename
-                                return (
-                                  <li key={asset.id}>
-                                    <span>{shortName}</span>
-                                    <span>{formatBytes(asset.bytes)}</span>
-                                    <div className="delivery-asset-actions">
-                                      <button
-                                        className="button ghost"
-                                        type="button"
-                                        disabled={isPending}
-                                        onClick={() => {
-                                          void handleOpenAsset(asset.id, 'view')
-                                        }}
-                                      >
-                                        View
-                                      </button>
-                                      <button
-                                        className="button ghost"
-                                        type="button"
-                                        disabled={isPending}
-                                        onClick={() => {
-                                          void handleOpenAsset(asset.id, 'download')
-                                        }}
-                                      >
-                                        Download
-                                      </button>
-                                    </div>
-                                  </li>
-                                )
-                              })}
-                            </ul>
-                          )}
-                        </article>
-                      ))}
+                          </article>
+                        )
+                      })}
                     </div>
                   )}
-                </>
-              )}
-            </article>
-          ))}
+                </article>
+              )
+            })
+          )}
         </div>
       </section>
     )
@@ -1855,9 +1853,8 @@ function App() {
           <nav className="nav">
             {session && role === 'customer' && <a href="#my-pictures">My Pictures</a>}
             {session && role === 'admin' && <a href="#upload">Upload</a>}
-            <a href={session && role === 'admin' ? '#admin-work' : '#work'}>
-              {session && role === 'admin' ? 'Deliveries' : 'Work'}
-            </a>
+            {session && role === 'admin' && <a href="#admin-clients">Clients</a>}
+            {!(session && role === 'admin') && <a href="#work">Work</a>}
             {!(session && role === 'admin') && <a href="#about">About</a>}
             <a href="/book.html">Contact</a>
           </nav>
@@ -1921,7 +1918,8 @@ function App() {
         {view === 'home' && renderHomeSections()}
         {view === 'my-pictures' && renderMyPictures()}
         {view === 'upload' && renderUpload()}
-        {view === 'admin-work' && renderAdminWork()}
+        {view === 'admin-clients' && renderAdminClients()}
+        {view === 'admin-client' && renderAdminClientDetail()}
         {view === 'share' && renderShareView()}
       </main>
 

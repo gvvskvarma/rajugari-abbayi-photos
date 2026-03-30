@@ -5,7 +5,7 @@
 - Single flow: email OTP for both login and registration.
 - No role selector in UI.
 - Role is assigned server-side:
-  - default signup role = `customer` (stored as `client` in DB enum)
+  - default signup role = `customer`
   - allowlisted emails auto-promote to `admin` at profile bootstrap.
 
 ## Navigation

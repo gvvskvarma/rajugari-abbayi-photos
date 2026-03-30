@@ -3,14 +3,14 @@
 
 create extension if not exists pgcrypto;
 
-create type public.app_role as enum ('admin', 'client');
+create type public.app_role as enum ('admin', 'customer');
 create type public.project_status as enum ('draft', 'active', 'completed', 'archived');
 create type public.delivery_status as enum ('draft', 'shared', 'expired', 'revoked');
 create type public.asset_kind as enum ('photo', 'video', 'document', 'other');
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
-  role public.app_role not null default 'client',
+  role public.app_role not null default 'customer',
   display_name text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

@@ -94,28 +94,6 @@ In Vercel:
 - Worker APIs: `POST /api/v1/request-upload-url` and `POST /api/v1/upload/complete`
 - Frontend: admin direct-to-R2 upload flow with retry/progress in `src/App.tsx`
 
-### Required R2 bucket CORS for browser uploads
-
-Because uploads are direct browser `PUT` calls to R2 signed URLs, you must set bucket CORS on `photography-private`.
-
-Cloudflare Dashboard -> R2 -> bucket `photography-private` -> Settings -> CORS policy:
-
-```json
-[
-  {
-    "AllowedOrigins": [
-      "https://rajugariabbayishots.vercel.app",
-      "http://localhost:5173",
-      "http://localhost:5174"
-    ],
-    "AllowedMethods": ["PUT", "GET", "HEAD"],
-    "AllowedHeaders": ["Content-Type"],
-    "ExposeHeaders": ["ETag"],
-    "MaxAgeSeconds": 3600
-  }
-]
-```
-
 ## Day 4 delivery/security artifacts
 
 - Supabase migration: `supabase/migrations/20260311_day4_delivery_security.sql`
