@@ -735,6 +735,23 @@ function App() {
     return adminClients.find((client) => client.email.trim().toLowerCase() === normalizedEmail) ?? null
   }, [adminClients, uploadEmail])
 
+  const reuseClientEmailOptions = useMemo(() => {
+    const seen = new Set<string>()
+    return adminClients
+      .map((client) => ({
+        id: client.id,
+        email: client.email.trim(),
+        label: client.full_name.trim() || client.email.trim(),
+      }))
+      .filter((client) => {
+        const key = client.email.toLowerCase()
+        if (!key || seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+      .sort((left, right) => left.email.localeCompare(right.email))
+  }, [adminClients])
+
   const uploadQueueGroups = useMemo(() => buildUploadQueueGroups(uploadItems), [uploadItems])
 
   useEffect(() => {
@@ -1683,19 +1700,33 @@ function App() {
                 type="email"
                 value={uploadEmail}
                 onChange={(event) => setUploadEmail(event.target.value)}
-                list={uploadClientMode === 'reuse' ? 'client-email-options' : undefined}
                 placeholder="client@example.com"
                 required
               />
             </label>
             {uploadClientMode === 'reuse' && (
-              <datalist id="client-email-options">
-                {adminClients.map((client) => (
-                  <option key={client.id} value={client.email}>
-                    {client.full_name}
-                  </option>
-                ))}
-              </datalist>
+              <div className="admin-reuse-picker">
+                <label>
+                  Existing client email
+                  <select
+                    value={selectedUploadClient?.email ?? ''}
+                    onChange={(event) => setUploadEmail(event.target.value)}
+                    disabled={reuseClientEmailOptions.length === 0}
+                  >
+                    <option value="">Select an existing client</option>
+                    {reuseClientEmailOptions.map((client) => (
+                      <option key={client.id} value={client.email}>
+                        {client.email} {client.label ? `- ${client.label}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {reuseClientEmailOptions.length === 0 ? (
+                  <p className="portal-hint">No existing clients loaded yet. Use manual email entry below.</p>
+                ) : (
+                  <p className="portal-hint">Choose an email to reuse that client folder, or type one manually below.</p>
+                )}
+              </div>
             )}
 
             <label>

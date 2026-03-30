@@ -286,6 +286,11 @@
   color: rgba(236, 232, 223, 0.75);
 }
 
+.admin-reuse-picker {
+  display: grid;
+  gap: 10px;
+}
+
 .admin-panel select {
   appearance: none;
   background-image:
