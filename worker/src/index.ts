@@ -864,7 +864,9 @@ app.post('/api/v1/upload/complete', async (c) => {
     if (session.ownerUserId !== user.id) return jsonError('Upload token does not match the current admin', 403)
     if (session.deliveryId !== body.deliveryId) return jsonError('Upload token does not match this delivery', 403)
     if (session.objectKey !== body.objectKey) return jsonError('Upload token does not match this file', 403)
-    if (session.originalFilename !== body.fileName) return jsonError('Upload token does not match this filename', 403)
+    if (session.originalFilename !== sanitizeFileName(body.fileName)) {
+      return jsonError('Upload token does not match this filename', 403)
+    }
     if (session.mimeType !== body.mimeType) return jsonError('Upload token does not match this file type', 403)
     if (Math.abs(session.expectedBytes - body.bytes) > Math.max(1024, session.expectedBytes * 0.02)) {
       return jsonError('Uploaded byte count does not match requested file size', 400)
