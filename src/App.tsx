@@ -67,6 +67,14 @@ type UploadItem = {
   path: string
 }
 
+type UploadQueueGroup = {
+  key: string
+  label: string
+  count: number
+  isFolder: boolean
+  items: UploadItem[]
+}
+
 type FileSystemEntryLike = {
   isFile: boolean
   isDirectory: boolean
@@ -104,6 +112,43 @@ const dedupeUploadItems = (items: UploadItem[]) => {
     if (seen.has(key)) return false
     seen.add(key)
     return true
+  })
+}
+
+const normalizeUploadItemPath = (path: string) => path.trim().replace(/^\/+/, '')
+
+const buildUploadQueueGroups = (items: UploadItem[]) => {
+  const groups = new Map<string, UploadItem[]>()
+  const order: string[] = []
+
+  for (const item of items) {
+    const normalizedPath = normalizeUploadItemPath(item.path)
+    const segments = normalizedPath.split('/').filter(Boolean)
+    const key = segments.length > 1 ? `folder:${segments[0]}` : `file:${normalizedPath}`
+    if (!groups.has(key)) order.push(key)
+
+    const current = groups.get(key) ?? []
+    current.push({
+      ...item,
+      path: normalizedPath,
+    })
+    groups.set(key, current)
+  }
+
+  return order.map((key): UploadQueueGroup => {
+    const groupItems = groups.get(key) ?? []
+    const firstItem = groupItems[0]
+    const firstSegments = firstItem ? firstItem.path.split('/').filter(Boolean) : []
+    const isFolder = firstSegments.length > 1
+    const displayLabel = isFolder ? (key.replace(/^folder:/, '') || firstItem?.path || key) : firstItem?.path ?? key
+
+    return {
+      key,
+      label: displayLabel,
+      count: groupItems.length,
+      isFolder,
+      items: groupItems,
+    }
   })
 }
 
@@ -690,6 +735,8 @@ function App() {
     return adminClients.find((client) => client.email.trim().toLowerCase() === normalizedEmail) ?? null
   }, [adminClients, uploadEmail])
 
+  const uploadQueueGroups = useMemo(() => buildUploadQueueGroups(uploadItems), [uploadItems])
+
   useEffect(() => {
     const id = window.setInterval(() => {
       setCycleStep((current) => current + 1)
@@ -827,10 +874,19 @@ function App() {
       body: options?.body ? JSON.stringify(options.body) : undefined,
     })
     const text = await response.text()
-    const payload = text ? (JSON.parse(text) as Record<string, unknown>) : {}
+    let payload: Record<string, unknown> = {}
+    if (text.trim()) {
+      try {
+        payload = JSON.parse(text) as Record<string, unknown>
+      } catch {
+        if (response.ok) {
+          throw new Error(`Unexpected response from server: ${text.slice(0, 120)}`)
+        }
+      }
+    }
     if (!response.ok) {
       const maybeError = payload.error as { message?: string } | undefined
-      throw new Error(maybeError?.message ?? 'Request failed')
+      throw new Error(maybeError?.message ?? (text.trim() || 'Request failed'))
     }
     return payload as T
   }
@@ -1692,16 +1748,26 @@ function App() {
               </div>
             </div>
 
-            {uploadItems.length > 0 && (
+            {uploadQueueGroups.length > 0 && (
               <div className="admin-file-queue">
-                {uploadItems.map((item, index) => (
-                  <div key={`${item.path}-${item.file.size}-${index}`} className="admin-file-pill">
-                    <span>{item.path}</span>
+                {uploadQueueGroups.map((group) => (
+                  <div key={group.key} className="admin-file-pill">
+                    <div className="admin-file-pill-copy">
+                      <span>{group.label}</span>
+                      <small>{group.isFolder ? `${group.count} items` : 'Single file'}</small>
+                    </div>
                     <button
                       className="button ghost"
                       type="button"
                       onClick={() => {
-                        setUploadItems((current) => current.filter((_, currentIndex) => currentIndex !== index))
+                        setUploadItems((current) =>
+                          current.filter((item) => {
+                            const normalizedPath = normalizeUploadItemPath(item.path)
+                            const segments = normalizedPath.split('/').filter(Boolean)
+                            const key = segments.length > 1 ? `folder:${segments[0]}` : `file:${normalizedPath}`
+                            return key !== group.key
+                          })
+                        )
                       }}
                     >
                       Remove

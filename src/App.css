@@ -383,6 +383,25 @@
   color: var(--ink-soft);
 }
 
+.admin-file-pill-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.admin-file-pill-copy span,
+.admin-file-pill-copy small {
+  display: block;
+  word-break: break-word;
+}
+
+.admin-file-pill-copy small {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(236, 232, 223, 0.56);
+}
+
 .admin-stat-grid,
 .admin-detail-summary {
   display: grid;
