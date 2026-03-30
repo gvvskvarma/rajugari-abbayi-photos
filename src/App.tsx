@@ -647,6 +647,14 @@ function App() {
   const [adminClients, setAdminClients] = useState<AdminClientSummary[]>([])
   const [selectedAdminClientId, setSelectedAdminClientId] = useState(readAdminClientIdFromHash())
   const [adminClientSearch, setAdminClientSearch] = useState('')
+  const [adminClientEditMode, setAdminClientEditMode] = useState(false)
+  const [adminClientDraft, setAdminClientDraft] = useState({
+    fullName: '',
+    email: '',
+    phone: '',
+    notes: '',
+  })
+  const [adminAssetSearch, setAdminAssetSearch] = useState('')
   const [adminAssetEditingId, setAdminAssetEditingId] = useState('')
   const [adminAssetDraftName, setAdminAssetDraftName] = useState('')
   const [adminBusy, setAdminBusy] = useState(false)
@@ -845,13 +853,32 @@ function App() {
   const selectedAdminClient =
     adminClients.find((client) => client.id === selectedAdminClientId) ?? null
 
+  useEffect(() => {
+    if (!selectedAdminClient) {
+      setAdminClientEditMode(false)
+      setAdminClientDraft({ fullName: '', email: '', phone: '', notes: '' })
+      return
+    }
+
+    setAdminClientDraft({
+      fullName: selectedAdminClient.full_name,
+      email: selectedAdminClient.email,
+      phone: selectedAdminClient.phone ?? '',
+      notes: selectedAdminClient.notes ?? '',
+    })
+  }, [selectedAdminClient?.id])
+
   const openAdminClients = () => {
     window.location.hash = '#admin-clients'
     setView('admin-clients')
+    setAdminClientEditMode(false)
+    setAdminAssetSearch('')
   }
 
   const openAdminClient = (clientId: string) => {
     setSelectedAdminClientId(clientId)
+    setAdminClientEditMode(false)
+    setAdminAssetSearch('')
     window.location.hash = `#admin-clients/${clientId}`
   }
 
@@ -1184,6 +1211,86 @@ function App() {
       setAdminAssetDraftName('')
     } catch (error) {
       setAdminError(error instanceof Error ? error.message : 'Unable to delete file')
+    }
+  }
+
+  const handleSaveAdminClient = async () => {
+    if (!supabase || !session?.user.id || role !== 'admin' || !selectedAdminClient) return
+
+    const fullName = adminClientDraft.fullName.trim()
+    const email = adminClientDraft.email.trim().toLowerCase()
+    const phone = adminClientDraft.phone.trim()
+    const notes = adminClientDraft.notes.trim()
+
+    if (!fullName || !email) {
+      setAdminError('Client full name and email are required.')
+      return
+    }
+
+    setAdminBusy(true)
+    setAdminError('')
+
+    try {
+      const token = await getAccessToken()
+      if (!token) {
+        setAdminError('Login session expired. Please log in again.')
+        return
+      }
+
+      const updated = await workerRequest<{ client: AdminClient }>(
+        `/api/v1/admin/clients/${selectedAdminClient.id}`,
+        token,
+        {
+          method: 'PATCH',
+          body: { fullName, email, phone, notes },
+        }
+      )
+
+      setAdminClients((current) =>
+        current.map((client) => (client.id === updated.client.id ? { ...client, ...updated.client } : client))
+      )
+      setSelectedAdminClientId(updated.client.id)
+      setAdminClientEditMode(false)
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'Unable to update client')
+    } finally {
+      setAdminBusy(false)
+    }
+  }
+
+  const handleDeleteAdminClient = async () => {
+    if (!supabase || !session?.user.id || role !== 'admin' || !selectedAdminClient) return
+    if (
+      !window.confirm(
+        `Delete ${selectedAdminClient.full_name}? This removes the client, projects, deliveries, and uploaded files.`
+      )
+    ) {
+      return
+    }
+
+    setAdminBusy(true)
+    setAdminError('')
+
+    try {
+      const token = await getAccessToken()
+      if (!token) {
+        setAdminError('Login session expired. Please log in again.')
+        return
+      }
+
+      await workerRequest<{ ok: boolean }>(`/api/v1/admin/clients/${selectedAdminClient.id}`, token, {
+        method: 'DELETE',
+      })
+
+      setAdminClients((current) => current.filter((client) => client.id !== selectedAdminClient.id))
+      setSelectedAdminClientId('')
+      setAdminClientEditMode(false)
+      setAdminAssetSearch('')
+      window.location.hash = '#admin-clients'
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'Unable to delete client')
+    } finally {
+      setAdminBusy(false)
     }
   }
 
@@ -1925,6 +2032,26 @@ function App() {
     }
 
     const client = selectedAdminClient
+    const clientQuery = adminAssetSearch.trim().toLowerCase()
+    const projectViews = client
+      ? client.projects
+          .map((project) => {
+            const projectAssets = client.assets.filter((asset) => asset.project_id === project.id)
+            const visibleAssets = clientQuery
+              ? projectAssets.filter((asset) =>
+                  [asset.filename, asset.mime_type, project.name].join(' ').toLowerCase().includes(clientQuery)
+                )
+              : projectAssets
+
+            return {
+              project,
+              totalAssets: projectAssets.length,
+              visibleAssets,
+            }
+          })
+          .filter((entry) => !clientQuery || entry.visibleAssets.length > 0)
+      : []
+    const visibleAssetCount = projectViews.reduce((count, entry) => count + entry.visibleAssets.length, 0)
 
     if (!client) {
       return (
@@ -1961,6 +2088,16 @@ function App() {
             <button className="button ghost" type="button" onClick={() => openUploadForClient(client)}>
               Upload more
             </button>
+            <button
+              className="button ghost"
+              type="button"
+              onClick={() => setAdminClientEditMode((current) => !current)}
+            >
+              {adminClientEditMode ? 'Close edit' : 'Edit client'}
+            </button>
+            <button className="button ghost" type="button" onClick={() => void handleDeleteAdminClient()}>
+              Delete client
+            </button>
           </div>
         </div>
 
@@ -1979,116 +2116,202 @@ function App() {
           </div>
         </div>
 
-        {client.notes && <p className="portal-hint">{client.notes}</p>}
+        <div className="admin-detail-toolbar">
+          <label className="admin-search">
+            Search files
+            <input
+              type="search"
+              value={adminAssetSearch}
+              onChange={(event) => setAdminAssetSearch(event.target.value)}
+              placeholder="Search by filename, type, or project"
+            />
+          </label>
+
+          <div className="admin-detail-toolbar-copy">
+            <p className="portal-hint">
+              {visibleAssetCount} visible file{visibleAssetCount === 1 ? '' : 's'}
+              {clientQuery ? ` matching “${adminAssetSearch.trim()}”` : ''}
+            </p>
+            {client.notes && <p className="portal-hint">{client.notes}</p>}
+          </div>
+        </div>
+
+        {adminClientEditMode && (
+          <div className="admin-client-form">
+            <label>
+              Full name
+              <input
+                type="text"
+                value={adminClientDraft.fullName}
+                onChange={(event) =>
+                  setAdminClientDraft((current) => ({ ...current, fullName: event.target.value }))
+                }
+              />
+            </label>
+            <label>
+              Email
+              <input
+                type="email"
+                value={adminClientDraft.email}
+                onChange={(event) =>
+                  setAdminClientDraft((current) => ({ ...current, email: event.target.value }))
+                }
+              />
+            </label>
+            <label>
+              Phone
+              <input
+                type="text"
+                value={adminClientDraft.phone}
+                onChange={(event) =>
+                  setAdminClientDraft((current) => ({ ...current, phone: event.target.value }))
+                }
+              />
+            </label>
+            <label>
+              Notes
+              <textarea
+                rows={4}
+                value={adminClientDraft.notes}
+                onChange={(event) =>
+                  setAdminClientDraft((current) => ({ ...current, notes: event.target.value }))
+                }
+              />
+            </label>
+            <div className="admin-form-actions">
+              <button className="button primary" type="button" onClick={() => void handleSaveAdminClient()}>
+                Save client
+              </button>
+              <button
+                className="button ghost"
+                type="button"
+                onClick={() => {
+                  if (!selectedAdminClient) return
+                  setAdminClientDraft({
+                    fullName: selectedAdminClient.full_name,
+                    email: selectedAdminClient.email,
+                    phone: selectedAdminClient.phone ?? '',
+                    notes: selectedAdminClient.notes ?? '',
+                  })
+                  setAdminClientEditMode(false)
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="admin-project-stack">
-          {client.projects.length === 0 ? (
-            <p className="portal-hint">No projects yet for this client.</p>
+          {projectViews.length === 0 ? (
+            <p className="portal-hint">
+              {client.projects.length === 0
+                ? 'No projects yet for this client.'
+                : 'No files match the current search.'}
+            </p>
           ) : (
-            client.projects.map((project) => {
-              const projectAssets = client.assets.filter((asset) => asset.project_id === project.id)
-
-              return (
-                <article key={project.id} className="admin-project-card">
-                  <div className="delivery-header">
-                    <div>
-                      <p className="delivery-title">{project.name}</p>
-                      <p className="delivery-expiry">
-                        {project.status}
-                        {project.shoot_date ? ` · ${project.shoot_date}` : ''}
-                        {project.location ? ` · ${project.location}` : ''}
-                      </p>
-                    </div>
-                    <span className="admin-client-count">{projectAssets.length} files</span>
+            projectViews.map(({ project, totalAssets, visibleAssets }) => (
+              <article key={project.id} className="admin-project-card">
+                <div className="delivery-header">
+                  <div>
+                    <p className="delivery-title">{project.name}</p>
+                    <p className="delivery-expiry">
+                      {project.status}
+                      {project.shoot_date ? ` · ${project.shoot_date}` : ''}
+                      {project.location ? ` · ${project.location}` : ''}
+                    </p>
                   </div>
+                  <span className="admin-client-count">
+                    {visibleAssets.length}/{totalAssets} files
+                  </span>
+                </div>
 
-                  {projectAssets.length === 0 ? (
-                    <p className="portal-hint">No uploaded files in this project yet.</p>
-                  ) : (
-                    <div className="admin-asset-grid">
-                      {projectAssets.map((asset) => {
-                        const isEditing = adminAssetEditingId === asset.id
-                        return (
-                          <article key={asset.id} className="admin-asset-card">
-                            <div className="admin-asset-main">
-                              {isEditing ? (
-                                <input
-                                  type="text"
-                                  value={adminAssetDraftName}
-                                  onChange={(event) => setAdminAssetDraftName(event.target.value)}
-                                  autoFocus
-                                />
-                              ) : (
-                                <p className="admin-asset-name">{asset.filename}</p>
-                              )}
-                              <p className="delivery-expiry">
-                                {formatBytes(asset.bytes)} · {asset.mime_type}
-                              </p>
-                            </div>
-                            <div className="delivery-asset-actions">
-                              <button
-                                className="button ghost"
-                                type="button"
-                                onClick={() => {
-                                  void handleOpenAsset(asset.id, 'view')
-                                }}
-                              >
-                                View
-                              </button>
-                              {isEditing ? (
-                                <>
-                                  <button
-                                    className="button ghost"
-                                    type="button"
-                                    onClick={() => {
-                                      void handleRenameAdminAsset(asset.id, adminAssetDraftName)
-                                    }}
-                                  >
-                                    Save
-                                  </button>
-                                  <button
-                                    className="button ghost"
-                                    type="button"
-                                    onClick={() => {
-                                      setAdminAssetEditingId('')
-                                      setAdminAssetDraftName('')
-                                    }}
-                                  >
-                                    Cancel
-                                  </button>
-                                </>
-                              ) : (
-                                <>
-                                  <button
-                                    className="button ghost"
-                                    type="button"
-                                    onClick={() => {
-                                      setAdminAssetEditingId(asset.id)
-                                      setAdminAssetDraftName(asset.filename)
-                                    }}
-                                  >
-                                    Edit
-                                  </button>
-                                  <button
-                                    className="button ghost"
-                                    type="button"
-                                    onClick={() => {
-                                      void handleDeleteAdminAsset(asset.id)
-                                    }}
-                                  >
-                                    Delete
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </article>
-                        )
-                      })}
-                    </div>
-                  )}
-                </article>
-              )
-            })
+                {visibleAssets.length === 0 ? (
+                  <p className="portal-hint">No files in this project match the current search.</p>
+                ) : (
+                  <div className="admin-asset-grid">
+                    {visibleAssets.map((asset) => {
+                      const isEditing = adminAssetEditingId === asset.id
+                      return (
+                        <article key={asset.id} className="admin-asset-card">
+                          <div className="admin-asset-main">
+                            {isEditing ? (
+                              <input
+                                type="text"
+                                value={adminAssetDraftName}
+                                onChange={(event) => setAdminAssetDraftName(event.target.value)}
+                                autoFocus
+                              />
+                            ) : (
+                              <p className="admin-asset-name">{asset.filename}</p>
+                            )}
+                            <p className="delivery-expiry">
+                              {formatBytes(asset.bytes)} · {asset.mime_type}
+                            </p>
+                          </div>
+                          <div className="delivery-asset-actions">
+                            <button
+                              className="button ghost"
+                              type="button"
+                              onClick={() => {
+                                void handleOpenAsset(asset.id, 'view')
+                              }}
+                            >
+                              View
+                            </button>
+                            {isEditing ? (
+                              <>
+                                <button
+                                  className="button ghost"
+                                  type="button"
+                                  onClick={() => {
+                                    void handleRenameAdminAsset(asset.id, adminAssetDraftName)
+                                  }}
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  className="button ghost"
+                                  type="button"
+                                  onClick={() => {
+                                    setAdminAssetEditingId('')
+                                    setAdminAssetDraftName('')
+                                  }}
+                                >
+                                  Cancel
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  className="button ghost"
+                                  type="button"
+                                  onClick={() => {
+                                    setAdminAssetEditingId(asset.id)
+                                    setAdminAssetDraftName(asset.filename)
+                                  }}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  className="button ghost"
+                                  type="button"
+                                  onClick={() => {
+                                    void handleDeleteAdminAsset(asset.id)
+                                  }}
+                                >
+                                  Delete
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </article>
+                      )
+                    })}
+                  </div>
+                )}
+              </article>
+            ))
           )}
         </div>
       </section>
