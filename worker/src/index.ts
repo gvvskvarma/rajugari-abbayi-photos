@@ -116,8 +116,9 @@ const supabaseRequest = async <T>(
     throw new Error(`Supabase request failed (${response.status}): ${text}`)
   }
 
-  if (response.status === 204) return {} as T
-  return (await response.json()) as T
+  const text = await response.text()
+  if (!text.trim()) return {} as T
+  return JSON.parse(text) as T
 }
 
 const getUserFromBearer = async (env: Env, authHeader?: string): Promise<User> => {
