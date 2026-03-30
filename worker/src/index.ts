@@ -398,19 +398,14 @@ const getDeliveryAssetRules = async (
   deliveryId: string
 ): Promise<Map<string, DeliveryAssetRule>> => {
   const rows = await supabaseRequest<
-    Array<{ asset_id: string; can_view: boolean; can_download: boolean }>
+    Array<{ asset_id: string; can_view: boolean }>
   >(
     env,
-    `delivery_assets?delivery_id=eq.${encodeURIComponent(
-      deliveryId
-    )}&select=asset_id,can_view,can_download`
+    `delivery_assets?delivery_id=eq.${encodeURIComponent(deliveryId)}&select=asset_id,can_view`
   )
 
   return new Map(
-    rows.map((row) => [
-      row.asset_id,
-      { assetId: row.asset_id, canView: row.can_view, canDownload: row.can_download },
-    ])
+    rows.map((row) => [row.asset_id, { assetId: row.asset_id, canView: row.can_view, canDownload: true }])
   )
 }
 
@@ -931,7 +926,6 @@ app.post('/api/v1/upload/complete', async (c) => {
           delivery_id: body.deliveryId,
           asset_id: assetId,
           can_view: true,
-          can_download: true,
         }),
       },
       true
@@ -999,21 +993,16 @@ app.post('/api/v1/media/signed-url', async (c) => {
     }
 
     const deliveryAssetRows = await supabaseRequest<
-      Array<{ delivery_id: string; can_view: boolean; can_download: boolean }>
+      Array<{ delivery_id: string; can_view: boolean }>
     >(
       c.env,
-      `delivery_assets?asset_id=eq.${encodeURIComponent(
-        body.assetId
-      )}&select=delivery_id,can_view,can_download&limit=1`
+      `delivery_assets?asset_id=eq.${encodeURIComponent(body.assetId)}&select=delivery_id,can_view&limit=1`
     )
     const deliveryAsset = deliveryAssetRows[0]
     const deliveryId = asset.delivery_id ?? deliveryAsset?.delivery_id
     if (!deliveryId || !deliveryAsset) return jsonError('Asset delivery mapping missing', 403)
 
     if (!deliveryAsset.can_view) return jsonError('Viewing this file is disabled', 403)
-    if (mode === 'download' && !deliveryAsset.can_download) {
-      return jsonError('Download disabled for this file', 403)
-    }
 
     if (body.shareToken) {
       const links = await supabaseRequest<
@@ -1103,18 +1092,17 @@ app.get('/api/v1/deliveries/:deliveryId/gallery', async (c) => {
     )
     const uploadedAssets = assets.filter((asset) => !asset.r2_object_key.startsWith('pending/'))
 
-    return c.json(
-      {
-        deliveryId,
-        accessMode,
-        assets: uploadedAssets.map((asset) => ({
-          ...asset,
-          canView: true,
-          canDownload:
-            accessMode !== 'viewer' && (assetRules.get(asset.id)?.canDownload ?? false),
-        })),
-      },
-      200,
+        return c.json(
+          {
+            deliveryId,
+            accessMode,
+            assets: uploadedAssets.map((asset) => ({
+              ...asset,
+              canView: true,
+              canDownload: accessMode !== 'viewer' && (assetRules.get(asset.id)?.canDownload ?? false),
+            })),
+          },
+          200,
       responseHeaders(c)
     )
   } catch (error) {
@@ -1222,8 +1210,7 @@ app.get('/api/v1/my-pictures', async (c) => {
           assets: uploadedAssets.map((asset) => ({
             ...asset,
             canView: true,
-            canDownload:
-              recipient.access_mode !== 'viewer' && (assetRules.get(asset.id)?.canDownload ?? false),
+            canDownload: recipient.access_mode !== 'viewer' && (assetRules.get(asset.id)?.canDownload ?? false),
           })),
         }
       })
