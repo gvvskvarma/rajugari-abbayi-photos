@@ -429,6 +429,11 @@ const logDownloadEvent = async (
   )
 }
 
+const deleteStoredAssets = async (env: Env, objectKeys: string[]) => {
+  const uniqueKeys = [...new Set(objectKeys)].filter((key) => key && !key.startsWith('pending/'))
+  await Promise.all(uniqueKeys.map((key) => env.R2_MEDIA_BUCKET.delete(key)))
+}
+
 const ensureAdmin = (user: User) => {
   if (user.role !== 'admin') {
     throw new Error('Admin access required')
@@ -597,6 +602,23 @@ app.delete('/api/v1/admin/clients/:clientId', async (c) => {
     const clientId = c.req.param('clientId')
     if (!clientId) return jsonError('clientId is required', 400)
 
+    const projects = await supabaseRequest<Array<{ id: string }>>(
+      c.env,
+      `projects?client_id=eq.${encodeURIComponent(clientId)}&owner_user_id=eq.${encodeURIComponent(user.id)}&select=id`
+    )
+    const projectIds = projects.map((project) => project.id)
+    if (projectIds.length > 0) {
+      const projectFilter = projectIds.map((id) => `project_id.eq.${encodeURIComponent(id)}`).join(',')
+      const assets = await supabaseRequest<Array<{ r2_object_key: string }>>(
+        c.env,
+        `assets?or=(${projectFilter})&select=r2_object_key`
+      )
+      await deleteStoredAssets(
+        c.env,
+        assets.map((asset) => asset.r2_object_key)
+      )
+    }
+
     await supabaseRequest(
       c.env,
       `clients?id=eq.${encodeURIComponent(clientId)}&owner_user_id=eq.${encodeURIComponent(user.id)}`,
@@ -747,6 +769,15 @@ app.delete('/api/v1/admin/projects/:projectId', async (c) => {
     ensureAdmin(user)
     const projectId = c.req.param('projectId')
     if (!projectId) return jsonError('projectId is required', 400)
+
+    const assets = await supabaseRequest<Array<{ r2_object_key: string }>>(
+      c.env,
+      `assets?project_id=eq.${encodeURIComponent(projectId)}&owner_user_id=eq.${encodeURIComponent(user.id)}&select=r2_object_key`
+    )
+    await deleteStoredAssets(
+      c.env,
+      assets.map((asset) => asset.r2_object_key)
+    )
 
     await supabaseRequest(
       c.env,

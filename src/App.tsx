@@ -390,6 +390,13 @@ type AdminClientSummary = AdminClient & {
   latestUpdatedAt: string
 }
 
+type AdminProjectView = {
+  project: AdminProject
+  totalAssets: number
+  visibleAssets: AdminAsset[]
+  latestActivityAt: string
+}
+
 const landscapePaths = [
   'project-rga/landscapes/RGA02744.jpg',
   'project-rga/landscapes/RGA02755.jpg',
@@ -655,6 +662,9 @@ function App() {
     notes: '',
   })
   const [adminAssetSearch, setAdminAssetSearch] = useState('')
+  const [adminProjectSort, setAdminProjectSort] = useState<'recent' | 'name' | 'files'>('recent')
+  const [selectedAdminAssetIds, setSelectedAdminAssetIds] = useState<string[]>([])
+  const [adminAssetPreviewUrls, setAdminAssetPreviewUrls] = useState<Record<string, string>>({})
   const [adminAssetEditingId, setAdminAssetEditingId] = useState('')
   const [adminAssetDraftName, setAdminAssetDraftName] = useState('')
   const [adminBusy, setAdminBusy] = useState(false)
@@ -853,6 +863,47 @@ function App() {
   const selectedAdminClient =
     adminClients.find((client) => client.id === selectedAdminClientId) ?? null
 
+  const selectedAdminClientProjectViews = useMemo<AdminProjectView[]>(() => {
+    if (!selectedAdminClient) return []
+
+    const query = adminAssetSearch.trim().toLowerCase()
+    const projectViews = selectedAdminClient.projects.map((project) => {
+      const projectAssets = selectedAdminClient.assets.filter((asset) => asset.project_id === project.id)
+      const visibleAssets = query
+        ? projectAssets.filter((asset) =>
+            [asset.filename, asset.mime_type, project.name].join(' ').toLowerCase().includes(query)
+          )
+        : projectAssets
+      const latestActivityAt =
+        [project.updated_at, ...projectAssets.map((asset) => asset.created_at)]
+          .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] ?? project.updated_at
+
+      return {
+        project,
+        totalAssets: projectAssets.length,
+        visibleAssets,
+        latestActivityAt,
+      }
+    })
+
+    projectViews.sort((left, right) => {
+      if (adminProjectSort === 'name') {
+        return left.project.name.localeCompare(right.project.name)
+      }
+      if (adminProjectSort === 'files') {
+        return right.totalAssets - left.totalAssets
+      }
+      return new Date(right.latestActivityAt).getTime() - new Date(left.latestActivityAt).getTime()
+    })
+
+    return projectViews
+  }, [adminAssetSearch, adminProjectSort, selectedAdminClient])
+
+  const selectedAdminVisibleAssets = useMemo(
+    () => selectedAdminClientProjectViews.flatMap((entry) => entry.visibleAssets),
+    [selectedAdminClientProjectViews]
+  )
+
   useEffect(() => {
     if (!selectedAdminClient) {
       setAdminClientEditMode(false)
@@ -868,17 +919,66 @@ function App() {
     })
   }, [selectedAdminClient?.id])
 
+  useEffect(() => {
+    setSelectedAdminAssetIds((current) =>
+      current.filter((assetId) => selectedAdminVisibleAssets.some((asset) => asset.id === assetId))
+    )
+  }, [selectedAdminVisibleAssets])
+
+  useEffect(() => {
+    if (!supabase || !session?.user.id || role !== 'admin' || selectedAdminVisibleAssets.length === 0) return
+
+    const missingPreviewAssets = selectedAdminVisibleAssets.filter(
+      (asset) => asset.mime_type.startsWith('image/') && !adminAssetPreviewUrls[asset.id]
+    )
+    if (missingPreviewAssets.length === 0) return
+
+    let cancelled = false
+
+    const loadPreviewUrls = async () => {
+      const token = await getAccessToken()
+      if (!token) return
+
+      const entries = await Promise.all(
+        missingPreviewAssets.map(async (asset) => {
+          try {
+            const payload = await workerRequest<{ signedUrl: string }>('/api/v1/media/signed-url', token, {
+              method: 'POST',
+              body: { assetId: asset.id, mode: 'view' },
+            })
+            return [asset.id, payload.signedUrl] as const
+          } catch {
+            return null
+          }
+        })
+      )
+
+      if (cancelled) return
+      const previewEntries = Object.fromEntries(
+        entries.filter((entry): entry is readonly [string, string] => entry !== null)
+      )
+      setAdminAssetPreviewUrls((current) => ({ ...current, ...previewEntries }))
+    }
+
+    void loadPreviewUrls()
+    return () => {
+      cancelled = true
+    }
+  }, [adminAssetPreviewUrls, role, selectedAdminVisibleAssets, session?.user.id])
+
   const openAdminClients = () => {
     window.location.hash = '#admin-clients'
     setView('admin-clients')
     setAdminClientEditMode(false)
     setAdminAssetSearch('')
+    setSelectedAdminAssetIds([])
   }
 
   const openAdminClient = (clientId: string) => {
     setSelectedAdminClientId(clientId)
     setAdminClientEditMode(false)
     setAdminAssetSearch('')
+    setSelectedAdminAssetIds([])
     window.location.hash = `#admin-clients/${clientId}`
   }
 
@@ -1211,6 +1311,87 @@ function App() {
       setAdminAssetDraftName('')
     } catch (error) {
       setAdminError(error instanceof Error ? error.message : 'Unable to delete file')
+    }
+  }
+
+  const handleDeleteAdminProject = async (project: AdminProject) => {
+    if (!supabase || !session?.user.id || role !== 'admin') return
+    if (
+      !window.confirm(
+        `Delete folder ${project.name}? This removes the project, its uploaded files, and the matching customer folder data.`
+      )
+    ) {
+      return
+    }
+
+    setAdminBusy(true)
+    setAdminError('')
+
+    try {
+      const token = await getAccessToken()
+      if (!token) {
+        setAdminError('Login session expired. Please log in again.')
+        return
+      }
+
+      await workerRequest<{ ok: boolean }>(`/api/v1/admin/projects/${project.id}`, token, {
+        method: 'DELETE',
+      })
+
+      await loadAdminData()
+      setSelectedAdminAssetIds([])
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'Unable to delete folder')
+    } finally {
+      setAdminBusy(false)
+    }
+  }
+
+  const toggleSelectedAdminAsset = (assetId: string) => {
+    setSelectedAdminAssetIds((current) =>
+      current.includes(assetId) ? current.filter((id) => id !== assetId) : [...current, assetId]
+    )
+  }
+
+  const clearSelectedAdminAssets = () => setSelectedAdminAssetIds([])
+
+  const selectVisibleAdminAssets = () =>
+    setSelectedAdminAssetIds((current) => {
+      const next = new Set(current)
+      selectedAdminVisibleAssets.forEach((asset) => next.add(asset.id))
+      return [...next]
+    })
+
+  const handleBulkDeleteAdminAssets = async () => {
+    if (!supabase || !session?.user.id || role !== 'admin' || selectedAdminAssetIds.length === 0) return
+    if (
+      !window.confirm(
+        `Delete ${selectedAdminAssetIds.length} selected file${selectedAdminAssetIds.length === 1 ? '' : 's'}? This cannot be undone.`
+      )
+    ) {
+      return
+    }
+
+    setAdminBusy(true)
+    setAdminError('')
+
+    try {
+      const token = await getAccessToken()
+      if (!token) {
+        setAdminError('Login session expired. Please log in again.')
+        return
+      }
+
+      for (const assetId of selectedAdminAssetIds) {
+        await workerRequest<{ ok: boolean }>(`/api/v1/admin/assets/${assetId}`, token, { method: 'DELETE' })
+      }
+
+      await loadAdminData()
+      setSelectedAdminAssetIds([])
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'Unable to delete files')
+    } finally {
+      setAdminBusy(false)
     }
   }
 
@@ -2032,26 +2213,6 @@ function App() {
     }
 
     const client = selectedAdminClient
-    const clientQuery = adminAssetSearch.trim().toLowerCase()
-    const projectViews = client
-      ? client.projects
-          .map((project) => {
-            const projectAssets = client.assets.filter((asset) => asset.project_id === project.id)
-            const visibleAssets = clientQuery
-              ? projectAssets.filter((asset) =>
-                  [asset.filename, asset.mime_type, project.name].join(' ').toLowerCase().includes(clientQuery)
-                )
-              : projectAssets
-
-            return {
-              project,
-              totalAssets: projectAssets.length,
-              visibleAssets,
-            }
-          })
-          .filter((entry) => !clientQuery || entry.visibleAssets.length > 0)
-      : []
-    const visibleAssetCount = projectViews.reduce((count, entry) => count + entry.visibleAssets.length, 0)
 
     if (!client) {
       return (
@@ -2127,13 +2288,38 @@ function App() {
             />
           </label>
 
+          <label className="admin-search">
+            Sort folders
+            <select value={adminProjectSort} onChange={(event) => setAdminProjectSort(event.target.value as typeof adminProjectSort)}>
+              <option value="recent">Recent activity</option>
+              <option value="name">Name</option>
+              <option value="files">File count</option>
+            </select>
+          </label>
+
           <div className="admin-detail-toolbar-copy">
             <p className="portal-hint">
-              {visibleAssetCount} visible file{visibleAssetCount === 1 ? '' : 's'}
-              {clientQuery ? ` matching “${adminAssetSearch.trim()}”` : ''}
+              {selectedAdminAssetIds.length > 0
+                ? `${selectedAdminAssetIds.length} selected file${selectedAdminAssetIds.length === 1 ? '' : 's'}`
+                : `${selectedAdminVisibleAssets.length} visible file${selectedAdminVisibleAssets.length === 1 ? '' : 's'}`}
+              {adminAssetSearch.trim() ? ` matching “${adminAssetSearch.trim()}”` : ''}
             </p>
             {client.notes && <p className="portal-hint">{client.notes}</p>}
           </div>
+        </div>
+
+        <div className="admin-bulk-actions">
+          <button className="button ghost" type="button" onClick={selectVisibleAdminAssets}>
+            Select visible
+          </button>
+          <button className="button ghost" type="button" onClick={clearSelectedAdminAssets}>
+            Clear selection
+          </button>
+          {selectedAdminAssetIds.length > 0 && (
+            <button className="button primary" type="button" onClick={() => void handleBulkDeleteAdminAssets()}>
+              Delete selected
+            </button>
+          )}
         </div>
 
         {adminClientEditMode && (
@@ -2203,14 +2389,14 @@ function App() {
         )}
 
         <div className="admin-project-stack">
-          {projectViews.length === 0 ? (
+          {selectedAdminClientProjectViews.length === 0 ? (
             <p className="portal-hint">
               {client.projects.length === 0
                 ? 'No projects yet for this client.'
                 : 'No files match the current search.'}
             </p>
           ) : (
-            projectViews.map(({ project, totalAssets, visibleAssets }) => (
+            selectedAdminClientProjectViews.map(({ project, totalAssets, visibleAssets, latestActivityAt }) => (
               <article key={project.id} className="admin-project-card">
                 <div className="delivery-header">
                   <div>
@@ -2221,9 +2407,14 @@ function App() {
                       {project.location ? ` · ${project.location}` : ''}
                     </p>
                   </div>
-                  <span className="admin-client-count">
-                    {visibleAssets.length}/{totalAssets} files
-                  </span>
+                  <div className="admin-project-actions">
+                    <span className="admin-client-count">
+                      {visibleAssets.length}/{totalAssets} files
+                    </span>
+                    <button className="button ghost" type="button" onClick={() => void handleDeleteAdminProject(project)}>
+                      Delete folder
+                    </button>
+                  </div>
                 </div>
 
                 {visibleAssets.length === 0 ? (
@@ -2232,8 +2423,29 @@ function App() {
                   <div className="admin-asset-grid">
                     {visibleAssets.map((asset) => {
                       const isEditing = adminAssetEditingId === asset.id
+                      const isSelected = selectedAdminAssetIds.includes(asset.id)
+                      const previewUrl = adminAssetPreviewUrls[asset.id]
+                      const isImage = asset.mime_type.startsWith('image/')
                       return (
-                        <article key={asset.id} className="admin-asset-card">
+                        <article key={asset.id} className={`admin-asset-card ${isSelected ? 'is-selected' : ''}`}>
+                          <button
+                            className="admin-asset-select"
+                            type="button"
+                            aria-pressed={isSelected}
+                            onClick={() => toggleSelectedAdminAsset(asset.id)}
+                          >
+                            <span className="admin-asset-checkbox">{isSelected ? '✓' : ''}</span>
+                            <span className="sr-only">Select {asset.filename}</span>
+                          </button>
+                          <div className="admin-asset-thumb">
+                            {isImage && previewUrl ? (
+                              <img src={previewUrl} alt={asset.filename} loading="lazy" />
+                            ) : (
+                              <div className="admin-asset-thumb-fallback">
+                                <span>{asset.mime_type.split('/')[0]?.slice(0, 1).toUpperCase() || 'F'}</span>
+                              </div>
+                            )}
+                          </div>
                           <div className="admin-asset-main">
                             {isEditing ? (
                               <input
@@ -2242,9 +2454,9 @@ function App() {
                                 onChange={(event) => setAdminAssetDraftName(event.target.value)}
                                 autoFocus
                               />
-                            ) : (
-                              <p className="admin-asset-name">{asset.filename}</p>
-                            )}
+                              ) : (
+                                <p className="admin-asset-name">{asset.filename}</p>
+                              )}
                             <p className="delivery-expiry">
                               {formatBytes(asset.bytes)} · {asset.mime_type}
                             </p>
@@ -2310,6 +2522,7 @@ function App() {
                     })}
                   </div>
                 )}
+                <p className="portal-hint admin-project-updated">Last activity {new Date(latestActivityAt).toLocaleString()}</p>
               </article>
             ))
           )}
