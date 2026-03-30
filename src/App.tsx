@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { ChangeEvent, FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ChangeEvent, DragEvent, FormEvent } from 'react'
 import './App.css'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 
@@ -60,6 +60,125 @@ const uniqueSources = (sources: Array<{ src?: string; srcSet?: string }>) => {
       seen.add(source.src)
       return true
     })
+}
+
+type UploadItem = {
+  file: File
+  path: string
+}
+
+type FileSystemEntryLike = {
+  isFile: boolean
+  isDirectory: boolean
+  name: string
+  fullPath: string
+}
+
+type FileSystemFileEntryLike = FileSystemEntryLike & {
+  file: (success: (file: File) => void, error?: (error: unknown) => void) => void
+}
+
+type FileSystemDirectoryReaderLike = {
+  readEntries: (success: (entries: FileSystemEntryLike[]) => void, error?: (error: unknown) => void) => void
+}
+
+type FileSystemDirectoryEntryLike = FileSystemEntryLike & {
+  createReader: () => FileSystemDirectoryReaderLike
+}
+
+type DataTransferItemWithEntry = DataTransferItem & {
+  webkitGetAsEntry?: () => FileSystemEntryLike | null
+}
+
+const normalizeUploadPath = (path: string, fallbackName: string) => {
+  const cleaned = path.trim().replace(/^\/+/, '')
+  return cleaned || fallbackName
+}
+
+const uploadItemKey = (item: UploadItem) => `${item.path}::${item.file.size}::${item.file.lastModified}`
+
+const dedupeUploadItems = (items: UploadItem[]) => {
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    const key = uploadItemKey(item)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+const readDirectoryEntries = async (directoryEntry: FileSystemDirectoryEntryLike) => {
+  const reader = directoryEntry.createReader()
+  const entries: FileSystemEntryLike[] = []
+
+  while (true) {
+    const batch = await new Promise<FileSystemEntryLike[]>((resolve, reject) => {
+      reader.readEntries(resolve, reject)
+    })
+    if (!batch.length) break
+    entries.push(...batch)
+  }
+
+  return entries
+}
+
+const collectEntryUploadItems = async (entry: FileSystemEntryLike): Promise<UploadItem[]> => {
+  if (entry.isFile) {
+    const fileEntry = entry as FileSystemFileEntryLike
+    const file = await new Promise<File>((resolve, reject) => {
+      fileEntry.file(resolve, reject)
+    })
+    return [{ file, path: normalizeUploadPath(entry.fullPath, file.name) }]
+  }
+
+  if (entry.isDirectory) {
+    const directoryEntry = entry as FileSystemDirectoryEntryLike
+    const children = await readDirectoryEntries(directoryEntry)
+    const nested = await Promise.all(children.map((child) => collectEntryUploadItems(child)))
+    return nested.flat()
+  }
+
+  return []
+}
+
+const collectDroppedUploadItems = async (dataTransfer: DataTransfer): Promise<UploadItem[]> => {
+  const items = Array.from(dataTransfer.items ?? [])
+
+  if (!items.length) {
+    return Array.from(dataTransfer.files ?? []).map((file) => ({
+      file,
+      path: file.name,
+    }))
+  }
+
+  const collected = await Promise.all(
+    items.map(async (item) => {
+      const entry = (item as DataTransferItemWithEntry).webkitGetAsEntry?.()
+      if (entry) {
+        return collectEntryUploadItems(entry)
+      }
+
+      const file = item.getAsFile()
+      return file
+        ? [
+            {
+              file,
+              path: file.name,
+            },
+          ]
+        : []
+    })
+  )
+
+  const flattened = collected.flat()
+  if (flattened.length) {
+    return flattened
+  }
+
+  return Array.from(dataTransfer.files ?? []).map((file) => ({
+    file,
+    path: file.name,
+  }))
 }
 
 type ResponsiveAsset = {
@@ -471,10 +590,13 @@ function App() {
   const [newShareLinks, setNewShareLinks] = useState<Record<string, string>>({})
   const [shareCopyState, setShareCopyState] = useState<Record<string, string>>({})
 
-  const [uploadClientId, setUploadClientId] = useState('')
+  const uploadInputRef = useRef<HTMLInputElement | null>(null)
+  const [uploadClientMode, setUploadClientMode] = useState<'create' | 'reuse'>('create')
   const [uploadEmail, setUploadEmail] = useState('')
   const [uploadTitle, setUploadTitle] = useState('Client Delivery')
-  const [uploadFiles, setUploadFiles] = useState<File[]>([])
+  const [uploadItems, setUploadItems] = useState<UploadItem[]>([])
+  const [uploadDropActive, setUploadDropActive] = useState(false)
+  const uploadDragDepthRef = useRef(0)
   const [uploadBusy, setUploadBusy] = useState(false)
   const [uploadMessage, setUploadMessage] = useState('')
   const [adminClients, setAdminClients] = useState<AdminClientSummary[]>([])
@@ -561,6 +683,12 @@ function App() {
       setAdminBusy(false)
     }
   }
+
+  const selectedUploadClient = useMemo(() => {
+    const normalizedEmail = uploadEmail.trim().toLowerCase()
+    if (!normalizedEmail) return null
+    return adminClients.find((client) => client.email.trim().toLowerCase() === normalizedEmail) ?? null
+  }, [adminClients, uploadEmail])
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -664,9 +792,10 @@ function App() {
   }
 
   const openUploadForClient = (client: AdminClientSummary) => {
-    setUploadClientId(client.id)
+    setUploadClientMode('reuse')
     setUploadEmail(client.email)
     setUploadTitle(client.full_name)
+    setUploadItems([])
     window.location.hash = '#upload'
   }
 
@@ -827,9 +956,53 @@ function App() {
     window.location.hash = '#home'
   }
 
+  const appendUploadItems = (items: UploadItem[]) => {
+    setUploadItems((current) => dedupeUploadItems([...current, ...items]))
+  }
+
   const handleUploadFilesChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const selected = Array.from(event.target.files ?? [])
-    setUploadFiles((current) => [...current, ...selected])
+    const selected = Array.from(event.target.files ?? []).map((file) => ({
+      file,
+      path: file.name,
+    }))
+    appendUploadItems(selected)
+    event.target.value = ''
+  }
+
+  const handleUploadBrowseClick = () => {
+    uploadInputRef.current?.click()
+  }
+
+  const handleUploadDrop = async (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    uploadDragDepthRef.current = 0
+    setUploadDropActive(false)
+    try {
+      const dropped = await collectDroppedUploadItems(event.dataTransfer)
+      appendUploadItems(dropped)
+    } catch (error) {
+      setUploadMessage(error instanceof Error ? error.message : 'Unable to read dropped files')
+    }
+  }
+
+  const handleUploadDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    uploadDragDepthRef.current += 1
+    setUploadDropActive(true)
+  }
+
+  const handleUploadDragOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  const handleUploadDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    uploadDragDepthRef.current = Math.max(0, uploadDragDepthRef.current - 1)
+    if (uploadDragDepthRef.current === 0) {
+      setUploadDropActive(false)
+    }
   }
 
   const handleCreateShareLink = async (deliveryId: string) => {
@@ -958,52 +1131,58 @@ function App() {
     event.preventDefault()
     if (!supabase || !session?.user.id) return
 
-    const selectedClient = adminClients.find((client) => client.id === uploadClientId)
-    const targetEmail = (selectedClient?.email ?? uploadEmail).trim().toLowerCase()
-    if (!targetEmail || uploadFiles.length === 0) {
-      setUploadMessage('Enter client email and add at least one photo/video.')
+    const targetEmail = uploadEmail.trim().toLowerCase()
+    if (!targetEmail || uploadItems.length === 0) {
+      setUploadMessage('Enter a client email and add at least one file or folder item.')
       return
     }
 
     setUploadBusy(true)
     setUploadMessage('')
 
-    let clientId = selectedClient?.id ?? ''
-    if (!clientId) {
-      const existingClient = await supabase
-        .from('clients')
-        .select('id')
-        .eq('email', targetEmail)
-        .eq('owner_user_id', session.user.id)
-        .maybeSingle()
+    const existingClient = await supabase
+      .from('clients')
+      .select('id')
+      .eq('email', targetEmail)
+      .eq('owner_user_id', session.user.id)
+      .maybeSingle()
 
-      if (existingClient.error) {
-        setUploadMessage(existingClient.error.message)
+    if (existingClient.error) {
+      setUploadMessage(existingClient.error.message)
+      setUploadBusy(false)
+      return
+    }
+
+    let clientId = existingClient.data?.id ?? ''
+
+    if (uploadClientMode === 'create') {
+      if (clientId) {
+        setUploadMessage('That client already exists. Switch to Reuse existing.')
         setUploadBusy(false)
         return
       }
 
-      if (existingClient.data?.id) {
-        clientId = existingClient.data.id
-      } else {
-        const insertedClient = await supabase
-          .from('clients')
-          .insert({
-            owner_user_id: session.user.id,
-            full_name: targetEmail.split('@')[0] || 'Client',
-            email: targetEmail,
-          })
-          .select('id')
-          .single()
+      const insertedClient = await supabase
+        .from('clients')
+        .insert({
+          owner_user_id: session.user.id,
+          full_name: targetEmail.split('@')[0] || 'Client',
+          email: targetEmail,
+        })
+        .select('id')
+        .single()
 
-        if (insertedClient.error || !insertedClient.data) {
-          setUploadMessage(insertedClient.error?.message ?? 'Unable to create client.')
-          setUploadBusy(false)
-          return
-        }
-
-        clientId = insertedClient.data.id
+      if (insertedClient.error || !insertedClient.data) {
+        setUploadMessage(insertedClient.error?.message ?? 'Unable to create client.')
+        setUploadBusy(false)
+        return
       }
+
+      clientId = insertedClient.data.id
+    } else if (!clientId) {
+      setUploadMessage('No existing client found for that email. Switch to Create new.')
+      setUploadBusy(false)
+      return
     }
 
     const insertedProject = await supabase
@@ -1063,8 +1242,8 @@ function App() {
     }
 
     try {
-      for (const file of uploadFiles) {
-        const uploadDisplayName = file.webkitRelativePath?.trim() || file.name
+      for (const item of uploadItems) {
+        const uploadDisplayName = item.path.trim() || item.file.name
         const requestResult = await workerRequest<{
           objectKey: string
           uploadToken: string
@@ -1077,13 +1256,13 @@ function App() {
             body: {
               deliveryId: insertedDelivery.data.id,
               fileName: uploadDisplayName,
-              contentType: file.type || 'application/octet-stream',
-              fileSize: Math.max(1, file.size),
+              contentType: item.file.type || 'application/octet-stream',
+              fileSize: Math.max(1, item.file.size),
             },
           }
         )
 
-        await uploadFileToSignedUrl(requestResult.uploadUrl, file)
+        await uploadFileToSignedUrl(requestResult.uploadUrl, item.file)
 
         await workerRequest(
           '/api/v1/upload/complete',
@@ -1095,8 +1274,8 @@ function App() {
               objectKey: requestResult.objectKey,
               uploadToken: requestResult.uploadToken,
               fileName: uploadDisplayName,
-              mimeType: file.type || 'application/octet-stream',
-              bytes: Math.max(1, file.size),
+              mimeType: item.file.type || 'application/octet-stream',
+              bytes: Math.max(1, item.file.size),
             },
           }
         )
@@ -1110,9 +1289,9 @@ function App() {
     setUploadMessage(
       `Upload complete for ${targetEmail}. Opening the client folder now.`
     )
-    setUploadFiles([])
+    setUploadItems([])
     setUploadEmail('')
-    setUploadClientId(clientId)
+    setUploadClientMode('create')
     setSelectedAdminClientId(clientId)
     window.location.hash = `#admin-clients/${clientId}`
     void loadAdminData()
@@ -1407,8 +1586,6 @@ function App() {
       )
     }
 
-    const uploadClient = adminClients.find((client) => client.id === uploadClientId) ?? null
-
     return (
       <section className="portal-section admin-screen">
         <div className="portal-head admin-screen-head">
@@ -1427,31 +1604,22 @@ function App() {
 
         <form className="admin-upload-layout" onSubmit={handleUploadDelivery}>
           <div className="admin-panel">
-            <label>
-              Client folder
-              <select
-                value={uploadClientId}
-                onChange={(event) => {
-                  const nextClientId = event.target.value
-                  setUploadClientId(nextClientId)
-                  const nextClient = adminClients.find((client) => client.id === nextClientId)
-                  if (nextClient) {
-                    setUploadEmail(nextClient.email)
-                    setUploadTitle(nextClient.full_name)
-                  } else {
-                    setUploadEmail('')
-                    setUploadTitle('Client Delivery')
-                  }
-                }}
+            <div className="admin-toggle" role="group" aria-label="Client folder mode">
+              <button
+                className={`admin-toggle-button ${uploadClientMode === 'create' ? 'is-active' : ''}`}
+                type="button"
+                onClick={() => setUploadClientMode('create')}
               >
-                <option value="">Create or reuse by email</option>
-                {adminClients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.full_name} ({client.email})
-                  </option>
-                ))}
-              </select>
-            </label>
+                Create new
+              </button>
+              <button
+                className={`admin-toggle-button ${uploadClientMode === 'reuse' ? 'is-active' : ''}`}
+                type="button"
+                onClick={() => setUploadClientMode('reuse')}
+              >
+                Reuse existing
+              </button>
+            </div>
 
             <label>
               Client email
@@ -1459,10 +1627,20 @@ function App() {
                 type="email"
                 value={uploadEmail}
                 onChange={(event) => setUploadEmail(event.target.value)}
-                required={!uploadClient}
-                disabled={Boolean(uploadClient)}
+                list={uploadClientMode === 'reuse' ? 'client-email-options' : undefined}
+                placeholder="client@example.com"
+                required
               />
             </label>
+            {uploadClientMode === 'reuse' && (
+              <datalist id="client-email-options">
+                {adminClients.map((client) => (
+                  <option key={client.id} value={client.email}>
+                    {client.full_name}
+                  </option>
+                ))}
+              </datalist>
+            )}
 
             <label>
               Delivery title
@@ -1475,37 +1653,55 @@ function App() {
             </label>
 
             <p className="portal-hint">
-              {uploadClient
-                ? `Files will be uploaded into ${uploadClient.full_name}.`
-                : 'Create a new client by email, then upload directly into that folder.'}
+              {uploadClientMode === 'create'
+                ? 'Create a new client folder using the email you enter.'
+                : selectedUploadClient
+                  ? `Files will be uploaded into ${selectedUploadClient.full_name}.`
+                  : 'Enter or select an existing client email to reuse that folder.'}
             </p>
           </div>
 
           <div className="admin-panel">
-            <label>
-              Photos / videos
-              <input type="file" multiple accept="image/*,video/*" onChange={handleUploadFilesChange} />
-            </label>
-            <label>
-              Folder upload
+            <div
+              className={`admin-dropzone ${uploadDropActive ? 'is-active' : ''}`}
+              onDragEnter={handleUploadDragEnter}
+              onDragOver={handleUploadDragOver}
+              onDragLeave={handleUploadDragLeave}
+              onDrop={handleUploadDrop}
+              role="presentation"
+            >
               <input
+                ref={uploadInputRef}
+                className="admin-dropzone-input"
                 type="file"
                 multiple
                 onChange={handleUploadFilesChange}
-                {...({ webkitdirectory: '' } as Record<string, string>)}
               />
-            </label>
+              <div className="admin-dropzone-copy">
+                <p className="eyebrow">Upload content</p>
+                <h3>Drop files or folders here</h3>
+                <p>
+                  Drag a folder, drag individual files, or use the browse action to pick
+                  multiple items.
+                </p>
+              </div>
+              <div className="admin-dropzone-actions">
+                <button className="button ghost" type="button" onClick={handleUploadBrowseClick}>
+                  Browse files
+                </button>
+              </div>
+            </div>
 
-            {uploadFiles.length > 0 && (
+            {uploadItems.length > 0 && (
               <div className="admin-file-queue">
-                {uploadFiles.map((file, index) => (
-                  <div key={`${file.name}-${file.size}-${index}`} className="admin-file-pill">
-                    <span>{file.webkitRelativePath?.trim() || file.name}</span>
+                {uploadItems.map((item, index) => (
+                  <div key={`${item.path}-${item.file.size}-${index}`} className="admin-file-pill">
+                    <span>{item.path}</span>
                     <button
                       className="button ghost"
                       type="button"
                       onClick={() => {
-                        setUploadFiles((current) => current.filter((_, currentIndex) => currentIndex !== index))
+                        setUploadItems((current) => current.filter((_, currentIndex) => currentIndex !== index))
                       }}
                     >
                       Remove
@@ -1515,7 +1711,7 @@ function App() {
               </div>
             )}
 
-            <button className="button primary" type="submit" disabled={uploadBusy || uploadFiles.length === 0}>
+            <button className="button primary" type="submit" disabled={uploadBusy || uploadItems.length === 0}>
               {uploadBusy ? 'Creating delivery...' : 'Upload to client'}
             </button>
           </div>
@@ -1548,9 +1744,10 @@ function App() {
             className="button ghost"
             type="button"
             onClick={() => {
-              setUploadClientId('')
+              setUploadClientMode('create')
               setUploadEmail('')
               setUploadTitle('Client Delivery')
+              setUploadItems([])
               window.location.hash = '#upload'
             }}
           >

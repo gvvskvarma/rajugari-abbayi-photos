@@ -238,6 +238,43 @@
   gap: 14px;
 }
 
+.admin-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.admin-toggle-button {
+  border-radius: 999px;
+  border: 1px solid rgba(236, 232, 223, 0.16);
+  background: rgba(236, 232, 223, 0.06);
+  color: var(--ink-soft);
+  padding: 11px 14px;
+  font-size: 0.7rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.admin-toggle-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(200, 168, 121, 0.45);
+}
+
+.admin-toggle-button.is-active {
+  background: linear-gradient(135deg, #e4c38f, #c8a879);
+  color: #17140f;
+  border-color: transparent;
+  box-shadow: 0 12px 30px rgba(200, 168, 121, 0.2);
+}
+
 .admin-panel label,
 .admin-search {
   display: grid;
@@ -274,6 +311,64 @@
 .admin-file-queue {
   display: grid;
   gap: 10px;
+}
+
+.admin-dropzone {
+  position: relative;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px dashed rgba(236, 232, 223, 0.22);
+  background:
+    radial-gradient(circle at top left, rgba(200, 168, 121, 0.12), transparent 34%),
+    rgba(236, 232, 223, 0.04);
+  padding: 18px;
+  display: grid;
+  gap: 18px;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
+}
+
+.admin-dropzone.is-active {
+  transform: translateY(-1px);
+  border-color: rgba(200, 168, 121, 0.62);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.2);
+  background:
+    radial-gradient(circle at top left, rgba(200, 168, 121, 0.2), transparent 34%),
+    rgba(236, 232, 223, 0.06);
+}
+
+.admin-dropzone-input {
+  position: absolute;
+  inset: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.admin-dropzone-copy {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-dropzone-copy h3 {
+  margin: 0;
+  font-family: 'Twigs', serif;
+  font-size: 1.55rem;
+  letter-spacing: 0.03em;
+}
+
+.admin-dropzone-copy p {
+  color: var(--ink-soft);
+}
+
+.admin-dropzone-actions {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
 }
 
 .admin-file-pill {
@@ -431,6 +526,10 @@
   .admin-upload-layout,
   .admin-stat-grid,
   .admin-detail-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-toggle {
     grid-template-columns: 1fr;
   }
 }
