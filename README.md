@@ -89,10 +89,10 @@ In Vercel:
 
 ## Day 3 upload pipeline artifacts
 
-- Supabase migration: `supabase/migrations/20260311_day3_upload_pipeline.sql`
 - API contract: `docs/api/day3-upload-pipeline-contract.md`
 - Worker APIs: `POST /api/v1/request-upload-url` and `POST /api/v1/upload/complete`
 - Frontend: admin direct-to-R2 upload flow with retry/progress in `src/App.tsx`
+- Historical migration: `supabase/migrations/20260311_day3_upload_pipeline.sql`
 
 ## Day 4 delivery/security artifacts
 

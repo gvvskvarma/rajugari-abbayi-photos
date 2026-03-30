@@ -4,6 +4,20 @@ import type { Context } from 'hono'
 type Role = 'admin' | 'customer'
 type Mode = 'view' | 'download'
 
+type UploadTokenPayload = {
+  v: 1
+  uploadId: string
+  ownerUserId: string
+  deliveryId: string
+  projectId: string
+  objectKey: string
+  originalFilename: string
+  mimeType: string
+  expectedBytes: number
+  issuedAt: string
+  expiresAt: string
+}
+
 type Env = {
   R2_MEDIA_BUCKET: R2Bucket
   SUPABASE_URL: string
@@ -119,6 +133,81 @@ const supabaseRequest = async <T>(
   const text = await response.text()
   if (!text.trim()) return {} as T
   return JSON.parse(text) as T
+}
+
+const textEncoder = new TextEncoder()
+const textDecoder = new TextDecoder()
+const uploadTokenVersion = 'v1'
+
+const bytesToBase64Url = (bytes: Uint8Array) => {
+  let binary = ''
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte)
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+const base64UrlEncode = (value: string) => bytesToBase64Url(textEncoder.encode(value))
+
+const base64UrlDecode = (value: string) => {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
+  const binary = atob(padded)
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
+  return textDecoder.decode(bytes)
+}
+
+const signUploadToken = async (secret: string, payloadB64: string) => {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    textEncoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  )
+  const signature = await crypto.subtle.sign('HMAC', key, textEncoder.encode(`${uploadTokenVersion}.${payloadB64}`))
+  return bytesToBase64Url(new Uint8Array(signature))
+}
+
+const createUploadToken = async (secret: string, payload: UploadTokenPayload) => {
+  const payloadB64 = base64UrlEncode(JSON.stringify(payload))
+  const signature = await signUploadToken(secret, payloadB64)
+  return `${uploadTokenVersion}.${payloadB64}.${signature}`
+}
+
+const verifyUploadToken = async (secret: string, token: string): Promise<UploadTokenPayload> => {
+  const [version, payloadB64, signature] = token.split('.')
+  if (version !== uploadTokenVersion || !payloadB64 || !signature) {
+    throw new Error('Invalid upload token')
+  }
+
+  const expectedSignature = await signUploadToken(secret, payloadB64)
+  if (expectedSignature !== signature) {
+    throw new Error('Invalid upload token')
+  }
+
+  const payload = JSON.parse(base64UrlDecode(payloadB64)) as UploadTokenPayload
+  if (
+    payload.v !== 1 ||
+    !payload.uploadId ||
+    !payload.ownerUserId ||
+    !payload.deliveryId ||
+    !payload.projectId ||
+    !payload.objectKey ||
+    !payload.originalFilename ||
+    !payload.mimeType ||
+    !payload.expectedBytes ||
+    !payload.issuedAt ||
+    !payload.expiresAt
+  ) {
+    throw new Error('Invalid upload token')
+  }
+
+  if (new Date(payload.expiresAt).getTime() <= Date.now()) {
+    throw new Error('Upload session expired')
+  }
+
+  return payload
 }
 
 const getUserFromBearer = async (env: Env, authHeader?: string): Promise<User> => {
@@ -713,33 +802,24 @@ const handleRequestUploadUrl = async (c: Context<{ Bindings: Env }>) => {
     const uploadToken = crypto.randomUUID().replace(/-/g, '')
     const expiresAt = new Date(Date.now() + uploadUrlExpirySeconds * 1000).toISOString()
     const uploadUrl = await buildR2SignedUrl(c.env, 'PUT', objectKey, uploadUrlExpirySeconds, 'view')
-
-    await supabaseRequest(
-      c.env,
-      'upload_sessions',
-      {
-        method: 'POST',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({
-          owner_user_id: user.id,
-          delivery_id: body.deliveryId,
-          project_id: projectId,
-          upload_token: uploadToken,
-          original_filename: safeFileName,
-          mime_type: body.contentType,
-          expected_bytes: Math.max(1, Math.trunc(body.fileSize)),
-          r2_object_key: objectKey,
-          status: 'requested',
-          expires_at: expiresAt,
-        }),
-      },
-      true
-    )
+    const signedUploadToken = await createUploadToken(c.env.SUPABASE_SERVICE_ROLE_KEY, {
+      v: 1,
+      uploadId: uploadToken,
+      ownerUserId: user.id,
+      deliveryId: body.deliveryId,
+      projectId,
+      objectKey,
+      originalFilename: safeFileName,
+      mimeType: body.contentType,
+      expectedBytes: Math.max(1, Math.trunc(body.fileSize)),
+      issuedAt: new Date().toISOString(),
+      expiresAt,
+    })
 
     return c.json(
       {
         objectKey,
-        uploadToken,
+        uploadToken: signedUploadToken,
         uploadUrl,
         expiresInSeconds: uploadUrlExpirySeconds,
         maxFileBytes: maxUploadBytes,
@@ -780,26 +860,13 @@ app.post('/api/v1/upload/complete', async (c) => {
 
     await ensureAdminAndOwnedDelivery(c.env, user, body.deliveryId)
 
-    const sessions = await supabaseRequest<
-      Array<{
-        id: string
-        status: 'requested' | 'uploaded' | 'finalized' | 'failed'
-        expires_at: string
-        expected_bytes: number
-      }>
-    >(
-      c.env,
-      `upload_sessions?upload_token=eq.${encodeURIComponent(
-        body.uploadToken
-      )}&owner_user_id=eq.${encodeURIComponent(user.id)}&delivery_id=eq.${encodeURIComponent(
-        body.deliveryId
-      )}&r2_object_key=eq.${encodeURIComponent(body.objectKey)}&select=id,status,expires_at,expected_bytes&limit=1`
-    )
-    const session = sessions[0]
-    if (!session) return jsonError('Upload session not found', 404)
-    if (new Date(session.expires_at).getTime() <= Date.now()) return jsonError('Upload session expired', 410)
-    if (session.status === 'finalized') return jsonError('Upload session already finalized', 409)
-    if (Math.abs(session.expected_bytes - body.bytes) > Math.max(1024, session.expected_bytes * 0.02)) {
+    const session = await verifyUploadToken(c.env.SUPABASE_SERVICE_ROLE_KEY, body.uploadToken)
+    if (session.ownerUserId !== user.id) return jsonError('Upload token does not match the current admin', 403)
+    if (session.deliveryId !== body.deliveryId) return jsonError('Upload token does not match this delivery', 403)
+    if (session.objectKey !== body.objectKey) return jsonError('Upload token does not match this file', 403)
+    if (session.originalFilename !== body.fileName) return jsonError('Upload token does not match this filename', 403)
+    if (session.mimeType !== body.mimeType) return jsonError('Upload token does not match this file type', 403)
+    if (Math.abs(session.expectedBytes - body.bytes) > Math.max(1024, session.expectedBytes * 0.02)) {
       return jsonError('Uploaded byte count does not match requested file size', 400)
     }
 
@@ -809,8 +876,26 @@ app.post('/api/v1/upload/complete', async (c) => {
     )
     const projectId = deliveries[0]?.project_id
     if (!projectId) return jsonError('Delivery project not found', 404)
+    if (projectId !== session.projectId) return jsonError('Upload token does not match this project', 403)
 
     const kind = body.mimeType.startsWith('video/') ? 'video' : 'photo'
+
+    const existingAssets = await supabaseRequest<Array<{ id: string }>>(
+      c.env,
+      `assets?r2_object_key=eq.${encodeURIComponent(body.objectKey)}&select=id&limit=1`
+    )
+    const existingAssetId = existingAssets[0]?.id
+    if (existingAssetId) {
+      return c.json(
+        {
+          ok: true,
+          assetId: existingAssetId,
+          uploadSessionId: session.uploadId,
+        },
+        200,
+        responseHeaders(c)
+      )
+    }
 
     const insertedAssets = await supabaseRequest<Array<{ id: string }>>(
       c.env,
@@ -850,26 +935,11 @@ app.post('/api/v1/upload/complete', async (c) => {
       true
     )
 
-    await supabaseRequest(
-      c.env,
-      `upload_sessions?id=eq.${encodeURIComponent(session.id)}`,
-      {
-        method: 'PATCH',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({
-          status: 'finalized',
-          completed_at: new Date().toISOString(),
-          attempts: 1,
-        }),
-      },
-      true
-    )
-
     return c.json(
       {
         ok: true,
         assetId,
-        uploadSessionId: session.id,
+        uploadSessionId: session.uploadId,
       },
       200,
       responseHeaders(c)
