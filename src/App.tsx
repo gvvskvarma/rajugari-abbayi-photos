@@ -2631,15 +2631,6 @@ function App() {
                             <p className="admin-asset-name">{displayName}</p>
                           </div>
                           <div className="delivery-asset-actions">
-                            {isImage && (
-                              <button
-                                className="button ghost"
-                                type="button"
-                                onClick={() => void openAdminLightbox(project.id, asset.id)}
-                              >
-                                View
-                              </button>
-                            )}
                             <button
                               className="button ghost"
                               type="button"

@@ -596,7 +596,7 @@
 
 .admin-asset-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 12px;
 }
 
@@ -608,6 +608,8 @@
   padding: 14px;
   display: grid;
   gap: 12px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .admin-asset-card.is-selected {
@@ -771,6 +773,7 @@
 .admin-asset-main {
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 
 .admin-asset-name {
@@ -869,14 +872,16 @@
 
 .delivery-asset-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .delivery-asset-actions .button {
   padding: 7px 10px;
   font-size: 0.66rem;
   letter-spacing: 0.1em;
+  flex: 0 0 auto;
 }
 
 .upload-form {
