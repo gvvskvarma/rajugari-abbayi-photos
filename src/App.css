@@ -83,19 +83,25 @@
   min-width: 76px;
   padding: 8px 12px;
   border-radius: 999px;
-  border: 1px solid rgba(236, 232, 223, 0.2);
-  background: rgba(236, 232, 223, 0.06);
+  border: 1px solid rgba(236, 232, 223, 0.34);
+  background: rgba(236, 232, 223, 0.11);
+  color: #f6f2ea;
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease;
 }
 
 .nav a:hover {
   transform: translateY(-1px);
   border-color: rgba(200, 168, 121, 0.58);
   background: rgba(200, 168, 121, 0.14);
+  color: #fff6ea;
 }
 
 .topbar-right {
@@ -116,9 +122,9 @@
   align-items: center;
   gap: 6px;
   border-radius: 999px;
-  border: 1px solid rgba(236, 232, 223, 0.24);
-  background: rgba(236, 232, 223, 0.08);
-  color: var(--ink);
+  border: 1px solid rgba(236, 232, 223, 0.34);
+  background: rgba(236, 232, 223, 0.11);
+  color: #f6f2ea;
   cursor: pointer;
 }
 
@@ -130,6 +136,7 @@
 .login-icon:hover {
   border-color: rgba(200, 168, 121, 0.62);
   background: rgba(200, 168, 121, 0.16);
+  color: #fff6ea;
 }
 
 .auth-menu {
@@ -253,9 +260,9 @@
 
 .admin-toggle-button {
   border-radius: 999px;
-  border: 1px solid rgba(236, 232, 223, 0.16);
-  background: rgba(236, 232, 223, 0.06);
-  color: var(--ink-soft);
+  border: 1px solid rgba(236, 232, 223, 0.24);
+  background: rgba(236, 232, 223, 0.09);
+  color: #efe7d7;
   padding: 11px 14px;
   font-size: 0.7rem;
   letter-spacing: 0.16em;
@@ -272,7 +279,9 @@
 
 .admin-toggle-button:hover {
   transform: translateY(-1px);
-  border-color: rgba(200, 168, 121, 0.45);
+  border-color: rgba(200, 168, 121, 0.56);
+  background: rgba(200, 168, 121, 0.12);
+  color: #fff6ea;
 }
 
 .admin-toggle-button.is-active {
@@ -979,12 +988,19 @@ main > section {
   justify-content: center;
   padding: 11px 18px;
   border-radius: 10px;
-  border: 1px solid rgba(236, 232, 223, 0.26);
+  border: 1px solid rgba(236, 232, 223, 0.34);
+  background: rgba(236, 232, 223, 0.09);
+  color: #f5efe3;
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
 }
 
 .button.primary {
@@ -995,11 +1011,29 @@ main > section {
 }
 
 .button.ghost {
-  background: rgba(236, 232, 223, 0.07);
+  background: rgba(236, 232, 223, 0.1);
+  border-color: rgba(236, 232, 223, 0.3);
+  color: #f6f2ea;
 }
 
-.button:hover {
+.button:not(.primary):hover {
   transform: translateY(-1px);
+  border-color: rgba(200, 168, 121, 0.5);
+  background: rgba(200, 168, 121, 0.12);
+  color: #fff6ea;
+}
+
+.button.primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 26px rgba(0, 0, 0, 0.36);
+}
+
+.button:focus-visible,
+.nav a:focus-visible,
+.login-icon:focus-visible,
+.admin-toggle-button:focus-visible {
+  outline: 2px solid rgba(200, 168, 121, 0.92);
+  outline-offset: 2px;
 }
 
 .hero-cards {
