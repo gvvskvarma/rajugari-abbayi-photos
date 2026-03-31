@@ -413,17 +413,6 @@ type AdminLightboxState = {
   assetId: string
 }
 
-type PendingAdminDeleteKind = 'asset' | 'project' | 'client' | 'bulk'
-type PendingAdminDeleteStatus = 'pending' | 'committing'
-
-type PendingAdminDelete = {
-  id: string
-  kind: PendingAdminDeleteKind
-  label: string
-  description: string
-  status: PendingAdminDeleteStatus
-}
-
 const landscapePaths = [
   'project-rga/landscapes/RGA02744.jpg',
   'project-rga/landscapes/RGA02755.jpg',
@@ -696,9 +685,6 @@ function App() {
   const [adminBusy, setAdminBusy] = useState(false)
   const [adminError, setAdminError] = useState('')
   const adminLightboxTouchStartRef = useRef<number | null>(null)
-  const [pendingAdminDeletes, setPendingAdminDeletes] = useState<PendingAdminDelete[]>([])
-  const pendingAdminDeleteTimersRef = useRef<Map<string, number>>(new Map())
-  const pendingAdminDeleteActionsRef = useRef<Map<string, () => Promise<void>>>(new Map())
 
   const [shareAssets, setShareAssets] = useState<DeliveryAsset[]>([])
   const [shareBusy, setShareBusy] = useState(false)
@@ -830,7 +816,6 @@ function App() {
         setSession(null)
         setRole('customer')
         setProfileDisplayName('')
-        clearAllPendingAdminDeletes()
         return
       }
       setSession({ user: { id: nextSession.user.id, email: nextSession.user.email ?? undefined } })
@@ -843,7 +828,6 @@ function App() {
         setSession(null)
         setRole('customer')
         setProfileDisplayName('')
-        clearAllPendingAdminDeletes()
         return
       }
       setSession({ user: { id: nextSession.user.id, email: nextSession.user.email ?? undefined } })
@@ -1046,14 +1030,6 @@ function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [adminLightboxAsset, adminLightboxAssets.length, adminLightboxIndex])
 
-  useEffect(() => {
-    return () => {
-      pendingAdminDeleteTimersRef.current.forEach((timerId) => window.clearTimeout(timerId))
-      pendingAdminDeleteTimersRef.current.clear()
-      pendingAdminDeleteActionsRef.current.clear()
-    }
-  }, [])
-
   const openAdminClients = () => {
     closeAdminLightbox()
     window.location.hash = '#admin-clients'
@@ -1078,69 +1054,6 @@ function App() {
     setUploadTitle(client.full_name)
     setUploadItems([])
     window.location.hash = '#upload'
-  }
-
-  const clearPendingAdminDelete = (id: string) => {
-    const timerId = pendingAdminDeleteTimersRef.current.get(id)
-    if (timerId !== undefined) {
-      window.clearTimeout(timerId)
-      pendingAdminDeleteTimersRef.current.delete(id)
-    }
-    pendingAdminDeleteActionsRef.current.delete(id)
-    setPendingAdminDeletes((current) => current.filter((entry) => entry.id !== id))
-  }
-
-  const clearAllPendingAdminDeletes = () => {
-    pendingAdminDeleteTimersRef.current.forEach((timerId) => window.clearTimeout(timerId))
-    pendingAdminDeleteTimersRef.current.clear()
-    pendingAdminDeleteActionsRef.current.clear()
-    setPendingAdminDeletes([])
-  }
-
-  const commitPendingAdminDelete = async (id: string) => {
-    const action = pendingAdminDeleteActionsRef.current.get(id)
-    if (!action) return
-
-    setPendingAdminDeletes((current) =>
-      current.map((entry) => (entry.id === id ? { ...entry, status: 'committing' } : entry))
-    )
-
-    try {
-      await action()
-    } catch (error) {
-      setAdminError(error instanceof Error ? error.message : 'Unable to complete delete')
-    } finally {
-      clearPendingAdminDelete(id)
-    }
-  }
-
-  const queuePendingAdminDelete = (payload: {
-    kind: PendingAdminDeleteKind
-    label: string
-    description: string
-    execute: () => Promise<void>
-  }) => {
-    const id = crypto.randomUUID()
-    pendingAdminDeleteActionsRef.current.set(id, payload.execute)
-    const timerId = window.setTimeout(() => {
-      pendingAdminDeleteTimersRef.current.delete(id)
-      void commitPendingAdminDelete(id)
-    }, 5000)
-    pendingAdminDeleteTimersRef.current.set(id, timerId)
-    setPendingAdminDeletes((current) => [
-      ...current,
-      {
-        id,
-        kind: payload.kind,
-        label: payload.label,
-        description: payload.description,
-        status: 'pending',
-      },
-    ])
-  }
-
-  const undoPendingAdminDelete = (id: string) => {
-    clearPendingAdminDelete(id)
   }
 
   const getAccessToken = async () => {
@@ -1306,7 +1219,6 @@ function App() {
     setAuthMenuOpen(false)
     setMyDeliveries([])
     setNewShareLinks({})
-    clearAllPendingAdminDeletes()
     window.location.hash = '#home'
   }
 
@@ -1623,23 +1535,45 @@ function App() {
       return
     }
 
-    queuePendingAdminDelete({
-      kind: 'asset',
-      label: getDisplayFileName(asset.filename),
-      description: 'This file will be deleted in 5 seconds. Undo if needed.',
-      execute: () => performDeleteAdminAsset(assetId),
-    })
+    if (
+      !window.confirm(
+        `Delete ${getDisplayFileName(asset.filename)}? This will permanently remove the file from the folder, customer view, and database.`
+      )
+    ) {
+      return
+    }
+
+    setAdminBusy(true)
+    setAdminError('')
+    try {
+      await performDeleteAdminAsset(assetId)
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'Unable to delete file')
+    } finally {
+      setAdminBusy(false)
+    }
   }
 
   const handleDeleteAdminProject = async (project: AdminProject) => {
     if (!supabase || !session?.user.id || role !== 'admin') return
 
-    queuePendingAdminDelete({
-      kind: 'project',
-      label: project.name,
-      description: `Folder ${project.name} will be deleted in 5 seconds. Undo if needed.`,
-      execute: () => performDeleteAdminProject(project.id),
-    })
+    if (
+      !window.confirm(
+        `Delete folder ${project.name}? This removes the project, its uploaded files, the customer folder data, and the database records.`
+      )
+    ) {
+      return
+    }
+
+    setAdminBusy(true)
+    setAdminError('')
+    try {
+      await performDeleteAdminProject(project.id)
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'Unable to delete folder')
+    } finally {
+      setAdminBusy(false)
+    }
   }
 
   const toggleSelectedAdminAsset = (assetId: string) => {
@@ -1660,12 +1594,24 @@ function App() {
   const handleBulkDeleteAdminAssets = async () => {
     if (!supabase || !session?.user.id || role !== 'admin' || selectedAdminAssetIds.length === 0) return
     const assetIds = [...selectedAdminAssetIds]
-    queuePendingAdminDelete({
-      kind: 'bulk',
-      label: `${assetIds.length} selected file${assetIds.length === 1 ? '' : 's'}`,
-      description: 'The selected files will be deleted in 5 seconds. Undo if needed.',
-      execute: () => performDeleteAdminAssets(assetIds),
-    })
+    if (
+      !window.confirm(
+        `Delete ${assetIds.length} selected file${assetIds.length === 1 ? '' : 's'}? This permanently removes the files from the folder, customer view, and database.`
+      )
+    ) {
+      return
+    }
+
+    setAdminBusy(true)
+    setAdminError('')
+    try {
+      await performDeleteAdminAssets(assetIds)
+      setSelectedAdminAssetIds([])
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'Unable to delete files')
+    } finally {
+      setAdminBusy(false)
+    }
   }
 
   const handleSaveAdminClient = async () => {
@@ -1715,12 +1661,23 @@ function App() {
   const handleDeleteAdminClient = async () => {
     if (!supabase || !session?.user.id || role !== 'admin' || !selectedAdminClient) return
 
-    queuePendingAdminDelete({
-      kind: 'client',
-      label: selectedAdminClient.full_name,
-      description: `Client ${selectedAdminClient.full_name} will be deleted in 5 seconds. Undo if needed.`,
-      execute: () => performDeleteAdminClient(selectedAdminClient.id),
-    })
+    if (
+      !window.confirm(
+        `Delete ${selectedAdminClient.full_name}? This removes the client, projects, deliveries, uploaded files, and database records.`
+      )
+    ) {
+      return
+    }
+
+    setAdminBusy(true)
+    setAdminError('')
+    try {
+      await performDeleteAdminClient(selectedAdminClient.id)
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'Unable to delete client')
+    } finally {
+      setAdminBusy(false)
+    }
   }
 
   const uploadFileToSignedUrl = async (uploadUrl: string, file: File) => {
@@ -2945,39 +2902,6 @@ function App() {
         {view === 'admin-client' && renderAdminClientDetail()}
         {view === 'share' && renderShareView()}
       </main>
-
-      {pendingAdminDeletes.length > 0 && (
-        <div className="admin-delete-toast-stack" aria-live="polite" aria-relevant="additions removals">
-          {pendingAdminDeletes.map((entry) => (
-            <div
-              key={entry.id}
-              className={`admin-delete-toast ${entry.status === 'committing' ? 'is-committing' : ''}`}
-              role="status"
-            >
-              <div className="admin-delete-toast-copy">
-                <span className="admin-delete-toast-kicker">
-                  {entry.status === 'committing' ? 'Deleting now' : 'Delete queued'}
-                </span>
-                <strong>{entry.label}</strong>
-                <p>{entry.description}</p>
-              </div>
-              <div className="admin-delete-toast-actions">
-                {entry.status === 'pending' ? (
-                  <button
-                    className="button primary admin-delete-toast-button"
-                    type="button"
-                    onClick={() => undoPendingAdminDelete(entry.id)}
-                  >
-                    Undo
-                  </button>
-                ) : (
-                  <span className="admin-delete-toast-status">Please wait…</span>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
 
       <footer className="footer">
         <p>© 2026 Rajugari_Abbayi Photography. Crafted with intention.</p>

@@ -1036,82 +1036,6 @@ main > section {
   outline-offset: 2px;
 }
 
-.admin-delete-toast-stack {
-  position: fixed;
-  right: 24px;
-  bottom: 24px;
-  z-index: 70;
-  display: grid;
-  gap: 10px;
-  width: min(100%, 380px);
-  pointer-events: none;
-}
-
-.admin-delete-toast {
-  pointer-events: auto;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 14px;
-  align-items: center;
-  padding: 14px 16px;
-  border-radius: 16px;
-  border: 1px solid rgba(200, 168, 121, 0.34);
-  background: rgba(15, 17, 24, 0.96);
-  box-shadow: 0 20px 38px rgba(0, 0, 0, 0.38);
-  backdrop-filter: blur(10px);
-}
-
-.admin-delete-toast.is-committing {
-  border-color: rgba(200, 168, 121, 0.52);
-}
-
-.admin-delete-toast-copy {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.admin-delete-toast-kicker {
-  color: rgba(200, 168, 121, 0.92);
-  font-size: 0.64rem;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-
-.admin-delete-toast strong {
-  color: #f6f2ea;
-  font-size: 0.94rem;
-  line-height: 1.2;
-  word-break: break-word;
-}
-
-.admin-delete-toast p {
-  margin: 0;
-  color: rgba(236, 232, 223, 0.82);
-  font-size: 0.84rem;
-  line-height: 1.45;
-}
-
-.admin-delete-toast-actions {
-  display: grid;
-  justify-items: end;
-  gap: 6px;
-}
-
-.admin-delete-toast-button {
-  min-width: 86px;
-  padding: 9px 14px;
-  font-size: 0.66rem;
-}
-
-.admin-delete-toast-status {
-  color: rgba(236, 232, 223, 0.76);
-  font-size: 0.72rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
 .hero-cards {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1556,18 +1480,4 @@ main > section {
     padding: 16px;
   }
 
-  .admin-delete-toast-stack {
-    right: 14px;
-    left: 14px;
-    bottom: 14px;
-    width: auto;
-  }
-
-  .admin-delete-toast {
-    grid-template-columns: 1fr;
-  }
-
-  .admin-delete-toast-actions {
-    justify-items: start;
-  }
 }
