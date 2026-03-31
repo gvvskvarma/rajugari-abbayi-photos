@@ -417,6 +417,7 @@ type DeleteConfirmationState = {
   title: string
   description: string
   confirmLabel: string
+  progressLabel: string
   onConfirm: () => Promise<void>
 }
 
@@ -691,6 +692,7 @@ function App() {
   const [adminLightbox, setAdminLightbox] = useState<AdminLightboxState | null>(null)
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmationState | null>(null)
   const [adminBusy, setAdminBusy] = useState(false)
+  const [adminActionMessage, setAdminActionMessage] = useState('')
   const [adminError, setAdminError] = useState('')
   const adminLightboxTouchStartRef = useRef<number | null>(null)
 
@@ -1091,6 +1093,7 @@ function App() {
     if (!current) return
 
     setDeleteConfirmation(null)
+    setAdminActionMessage(current.progressLabel)
     setAdminBusy(true)
     setAdminError('')
     try {
@@ -1099,6 +1102,7 @@ function App() {
       setAdminError(error instanceof Error ? error.message : 'Unable to complete delete')
     } finally {
       setAdminBusy(false)
+      setAdminActionMessage('')
     }
   }
 
@@ -1454,6 +1458,7 @@ function App() {
   const downloadAdminArchive = async (path: string, body: unknown, filename: string) => {
     if (!supabase) return
     try {
+      setAdminActionMessage(`Preparing ${filename}...`)
       setAdminBusy(true)
       const token = await getAccessToken()
       if (!token) {
@@ -1467,6 +1472,7 @@ function App() {
       setAdminError(error instanceof Error ? error.message : 'Unable to download files')
     } finally {
       setAdminBusy(false)
+      setAdminActionMessage('')
     }
   }
 
@@ -1586,6 +1592,7 @@ function App() {
       description:
         'This permanently removes the file from the folder, customer view, and database.',
       confirmLabel: 'Delete file',
+      progressLabel: 'Deleting file...',
       onConfirm: () => performDeleteAdminAsset(assetId),
     })
   }
@@ -1598,6 +1605,7 @@ function App() {
       description:
         'This removes the project, its uploaded files, the customer folder data, and the database records.',
       confirmLabel: 'Delete folder',
+      progressLabel: 'Deleting folder...',
       onConfirm: () => performDeleteAdminProject(project.id),
     })
   }
@@ -1625,6 +1633,7 @@ function App() {
       description:
         'This permanently removes the files from the folder, customer view, and database.',
       confirmLabel: 'Delete selected',
+      progressLabel: `Deleting ${assetIds.length} selected file${assetIds.length === 1 ? '' : 's'}...`,
       onConfirm: async () => {
         await performDeleteAdminAssets(assetIds)
         setSelectedAdminAssetIds([])
@@ -1684,6 +1693,7 @@ function App() {
       description:
         'This removes the client, projects, deliveries, uploaded files, and database records.',
       confirmLabel: 'Delete client',
+      progressLabel: 'Deleting client...',
       onConfirm: () => performDeleteAdminClient(selectedAdminClient.id),
     })
   }
@@ -2521,23 +2531,51 @@ function App() {
           </div>
         </div>
 
-        <div className="admin-bulk-actions">
-          <button className="button ghost" type="button" onClick={selectVisibleAdminAssets}>
-            Select visible
-          </button>
-          <button className="button ghost" type="button" onClick={clearSelectedAdminAssets}>
-            Clear selection
-          </button>
-          {selectedAdminAssetIds.length > 0 && (
-            <button className="button ghost" type="button" onClick={() => void handleDownloadSelectedAdminAssets()}>
+        <div className="admin-bulk-actions" aria-live="polite">
+          <div className="admin-bulk-actions-copy">
+            <p className="admin-bulk-actions-title">
+              {selectedAdminAssetIds.length > 0
+                ? `${selectedAdminAssetIds.length} selected file${selectedAdminAssetIds.length === 1 ? '' : 's'}`
+                : `${selectedAdminVisibleAssets.length} visible file${selectedAdminVisibleAssets.length === 1 ? '' : 's'}`}
+            </p>
+            <p className="admin-bulk-actions-status">
+              {adminActionMessage || 'Bulk actions stay pinned while you scroll through the folder.'}
+            </p>
+          </div>
+          <div className="admin-bulk-actions-buttons">
+            <button
+              className="button ghost"
+              type="button"
+              onClick={selectVisibleAdminAssets}
+              disabled={adminBusy || selectedAdminVisibleAssets.length === 0}
+            >
+              Select visible
+            </button>
+            <button
+              className="button ghost"
+              type="button"
+              onClick={clearSelectedAdminAssets}
+              disabled={adminBusy || selectedAdminAssetIds.length === 0}
+            >
+              Clear selection
+            </button>
+            <button
+              className="button ghost"
+              type="button"
+              onClick={() => void handleDownloadSelectedAdminAssets()}
+              disabled={adminBusy || selectedAdminAssetIds.length === 0}
+            >
               Download selected
             </button>
-          )}
-          {selectedAdminAssetIds.length > 0 && (
-            <button className="button primary" type="button" onClick={() => void handleBulkDeleteAdminAssets()}>
+            <button
+              className="button primary"
+              type="button"
+              onClick={() => void handleBulkDeleteAdminAssets()}
+              disabled={adminBusy || selectedAdminAssetIds.length === 0}
+            >
               Delete selected
             </button>
-          )}
+          </div>
         </div>
 
         {adminClientEditMode && (

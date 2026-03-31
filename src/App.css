@@ -504,10 +504,50 @@
 }
 
 .admin-bulk-actions {
+  position: sticky;
+  top: 92px;
+  z-index: 22;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(236, 232, 223, 0.14);
+  background: rgba(14, 17, 24, 0.92);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
+}
+
+.admin-bulk-actions-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.admin-bulk-actions-title {
+  margin: 0;
+  color: #f6f2ea;
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-bulk-actions-status {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.admin-bulk-actions-buttons {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
-  margin-top: 2px;
+  justify-content: flex-end;
 }
 
 .admin-bulk-actions .button,
@@ -880,6 +920,10 @@
 
   .admin-toggle {
     grid-template-columns: 1fr;
+  }
+
+  .admin-bulk-actions {
+    top: 130px;
   }
 }
 
@@ -1513,6 +1557,15 @@ main > section {
   .admin-file-pill {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .admin-bulk-actions {
+    top: 146px;
+    padding: 12px;
+  }
+
+  .admin-bulk-actions-buttons {
+    justify-content: flex-start;
   }
 
   .admin-client-card,
