@@ -45,7 +45,30 @@ type User = {
   role: Role
 }
 
+type AdminActivityKind = 'upload' | 'download' | 'delete' | 'edit' | 'create'
+
+type AdminActivityRow = {
+  id: string
+  owner_user_id: string
+  actor_profile_id: string | null
+  kind: AdminActivityKind
+  title: string
+  detail: string
+  client_id: string | null
+  project_id: string | null
+  asset_id: string | null
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
 const app = new Hono<{ Bindings: Env }>()
+const adminActivityKinds = new Set<AdminActivityKind>([
+  'upload',
+  'download',
+  'delete',
+  'edit',
+  'create',
+])
 
 const rateWindowMs = 60_000
 const maxUploadBytes = 5 * 1024 * 1024 * 1024
@@ -389,6 +412,61 @@ const ensureAdminAndOwnedDelivery = async (env: Env, user: User, deliveryId: str
   }
 }
 
+const normalizeActivityMetadata = (value: unknown) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return value as Record<string, unknown>
+}
+
+const insertAdminActivity = async (
+  env: Env,
+  payload: {
+    ownerUserId: string
+    actorProfileId?: string | null
+    kind: AdminActivityKind
+    title: string
+    detail: string
+    clientId?: string | null
+    projectId?: string | null
+    assetId?: string | null
+    metadata?: unknown
+  }
+) => {
+  const rows = await supabaseRequest<Array<AdminActivityRow>>(
+    env,
+    'admin_activity_events?select=id,owner_user_id,actor_profile_id,kind,title,detail,client_id,project_id,asset_id,metadata,created_at',
+    {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify({
+        owner_user_id: payload.ownerUserId,
+        actor_profile_id: payload.actorProfileId ?? payload.ownerUserId,
+        kind: payload.kind,
+        title: payload.title,
+        detail: payload.detail,
+        client_id: payload.clientId ?? null,
+        project_id: payload.projectId ?? null,
+        asset_id: payload.assetId ?? null,
+        metadata: normalizeActivityMetadata(payload.metadata),
+      }),
+    },
+    true
+  )
+
+  return rows[0] ?? null
+}
+
+const serializeAdminActivity = (row: AdminActivityRow) => ({
+  id: row.id,
+  kind: row.kind,
+  title: row.title,
+  detail: row.detail,
+  clientId: row.client_id,
+  projectId: row.project_id,
+  assetId: row.asset_id,
+  metadata: row.metadata ?? {},
+  createdAt: row.created_at,
+})
+
 const ensureDeliveryAccess = async (
   env: Env,
   user: User,
@@ -644,6 +722,79 @@ app.get('/api/v1/me', async (c) => {
     )
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Failed to load profile', 401)
+  }
+})
+
+app.get('/api/v1/admin/activity', async (c) => {
+  try {
+    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
+    ensureAdmin(user)
+
+    const limitRaw = Number.parseInt(c.req.query('limit') ?? '', 10)
+    const limit = Number.isFinite(limitRaw) ? Math.min(50, Math.max(1, limitRaw)) : 24
+    const clientId = c.req.query('clientId')?.trim()
+    const projectId = c.req.query('projectId')?.trim()
+    const assetId = c.req.query('assetId')?.trim()
+
+    const filters = [`owner_user_id=eq.${encodeURIComponent(user.id)}`]
+    if (clientId) filters.push(`client_id=eq.${encodeURIComponent(clientId)}`)
+    if (projectId) filters.push(`project_id=eq.${encodeURIComponent(projectId)}`)
+    if (assetId) filters.push(`asset_id=eq.${encodeURIComponent(assetId)}`)
+
+    const rows = await supabaseRequest<AdminActivityRow[]>(
+      c.env,
+      `admin_activity_events?${filters.join('&')}&select=id,owner_user_id,actor_profile_id,kind,title,detail,client_id,project_id,asset_id,metadata,created_at&order=created_at.desc&limit=${limit}`
+    )
+
+    return c.json({ activities: rows.map(serializeAdminActivity) }, 200, responseHeaders(c))
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Failed to load admin activity', 403)
+  }
+})
+
+app.post('/api/v1/admin/activity', async (c) => {
+  try {
+    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
+    ensureAdmin(user)
+    const body = await c.req.json<{
+      kind?: string
+      title?: string
+      detail?: string
+      clientId?: string | null
+      projectId?: string | null
+      assetId?: string | null
+      metadata?: unknown
+    }>()
+
+    const kind = typeof body.kind === 'string' && adminActivityKinds.has(body.kind as AdminActivityKind)
+      ? (body.kind as AdminActivityKind)
+      : undefined
+    if (!kind) {
+      return jsonError('kind is required and must be a valid activity type', 400)
+    }
+
+    const title = body.title?.trim()
+    const detail = body.detail?.trim()
+    if (!title || !detail) {
+      return jsonError('title and detail are required', 400)
+    }
+
+    const activity = await insertAdminActivity(c.env, {
+      ownerUserId: user.id,
+      actorProfileId: user.id,
+      kind,
+      title,
+      detail,
+      clientId: body.clientId ?? null,
+      projectId: body.projectId ?? null,
+      assetId: body.assetId ?? null,
+      metadata: body.metadata,
+    })
+
+    if (!activity) return jsonError('Failed to store admin activity', 500)
+    return c.json({ activity: serializeAdminActivity(activity) }, 201, responseHeaders(c))
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Failed to store admin activity', 400)
   }
 })
 

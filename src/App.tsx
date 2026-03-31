@@ -429,31 +429,14 @@ type AdminActivityItem = {
   title: string
   detail: string
   createdAt: string
+  clientId?: string | null
+  projectId?: string | null
+  assetId?: string | null
+  metadata?: Record<string, unknown>
 }
 
-const ADMIN_ACTIVITY_STORAGE_KEY = 'rga-admin-activity-v1'
 const ADMIN_ACTIVITY_LIMIT = 24
 const ADMIN_PROJECT_CHUNK_SIZE = 12
-
-const readLocalStorageJson = <T,>(key: string, fallback: T): T => {
-  if (typeof window === 'undefined') return fallback
-  try {
-    const raw = window.localStorage.getItem(key)
-    if (!raw) return fallback
-    return JSON.parse(raw) as T
-  } catch {
-    return fallback
-  }
-}
-
-const writeLocalStorageJson = <T,>(key: string, value: T) => {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value))
-  } catch {
-    // Ignore storage failures; the admin workspace still functions without persistence.
-  }
-}
 
 const getAssetKind = (mimeType: string) => {
   if (mimeType.startsWith('image/')) return 'images'
@@ -734,9 +717,9 @@ function App() {
   const [adminBusy, setAdminBusy] = useState(false)
   const [adminActionMessage, setAdminActionMessage] = useState('')
   const [adminError, setAdminError] = useState('')
-  const [adminActivities, setAdminActivities] = useState<AdminActivityItem[]>(() =>
-    readLocalStorageJson<AdminActivityItem[]>(ADMIN_ACTIVITY_STORAGE_KEY, [])
-  )
+  const [adminActivities, setAdminActivities] = useState<AdminActivityItem[]>([])
+  const [adminActivityBusy, setAdminActivityBusy] = useState(false)
+  const [adminActivityError, setAdminActivityError] = useState('')
   const [adminAssetTypeFilter, setAdminAssetTypeFilter] = useState<'all' | 'images' | 'videos' | 'other'>('all')
   const [adminProjectFilterId, setAdminProjectFilterId] = useState('all')
   const [adminProjectRenderLimits, setAdminProjectRenderLimits] = useState<Record<string, number>>({})
@@ -816,6 +799,34 @@ function App() {
       setAdminError(error instanceof Error ? error.message : 'Failed to load admin data')
     } finally {
       setAdminBusy(false)
+    }
+  }
+
+  const loadAdminActivity = async (clientId?: string) => {
+    if (!supabase || !session?.user.id || role !== 'admin') return
+
+    setAdminActivityBusy(true)
+    setAdminActivityError('')
+
+    try {
+      const token = await getAccessToken()
+      if (!token) {
+        setAdminActivityError('Login session expired. Please log in again.')
+        return
+      }
+
+      const params = new URLSearchParams({ limit: String(ADMIN_ACTIVITY_LIMIT) })
+      if (clientId) params.set('clientId', clientId)
+
+      const payload = await workerRequest<{ activities: AdminActivityItem[] }>(
+        `/api/v1/admin/activity?${params.toString()}`,
+        token
+      )
+      setAdminActivities(payload.activities ?? [])
+    } catch (error) {
+      setAdminActivityError(error instanceof Error ? error.message : 'Failed to load activity trail')
+    } finally {
+      setAdminActivityBusy(false)
     }
   }
 
@@ -1018,10 +1029,6 @@ function App() {
   }, [selectedAdminVisibleAssets])
 
   useEffect(() => {
-    writeLocalStorageJson(ADMIN_ACTIVITY_STORAGE_KEY, adminActivities)
-  }, [adminActivities])
-
-  useEffect(() => {
     if (adminProjectFilterId === 'all') return
     if (!selectedAdminClient?.projects.some((project) => project.id === adminProjectFilterId)) {
       setAdminProjectFilterId('all')
@@ -1162,15 +1169,48 @@ function App() {
     setDeleteConfirmation(null)
   }
 
-  const recordAdminActivity = (kind: AdminActivityKind, title: string, detail: string) => {
-    const entry: AdminActivityItem = {
-      id: crypto.randomUUID(),
-      kind,
-      title,
-      detail,
-      createdAt: new Date().toISOString(),
+  const recordAdminActivity = (
+    kind: AdminActivityKind,
+    title: string,
+    detail: string,
+    context?: {
+      clientId?: string | null
+      projectId?: string | null
+      assetId?: string | null
+      metadata?: Record<string, unknown>
     }
-    setAdminActivities((current) => [entry, ...current.filter((item) => item.title !== title || item.detail !== detail)].slice(0, ADMIN_ACTIVITY_LIMIT))
+  ) => {
+    if (!supabase || !session?.user.id || role !== 'admin') return
+
+    void (async () => {
+      try {
+        const token = await getAccessToken()
+        if (!token) return
+
+        const payload = await workerRequest<{ activity: AdminActivityItem }>(
+          '/api/v1/admin/activity',
+          token,
+          {
+            method: 'POST',
+            body: {
+              kind,
+              title,
+              detail,
+              clientId: context?.clientId ?? null,
+              projectId: context?.projectId ?? null,
+              assetId: context?.assetId ?? null,
+              metadata: context?.metadata ?? {},
+            },
+          }
+        )
+
+        if (payload.activity) {
+          setAdminActivities((current) => [payload.activity, ...current.slice(0, ADMIN_ACTIVITY_LIMIT - 1)])
+        }
+      } catch {
+        // Audit writes should never block the primary action flow.
+      }
+    })()
   }
 
   const confirmDeleteConfirmation = async () => {
@@ -1269,6 +1309,15 @@ function App() {
   }, [role, session?.user.id, view])
 
   useEffect(() => {
+    if (!supabase || !session?.user.id || role !== 'admin') return
+    if (view !== 'admin-clients' && view !== 'admin-client') return
+    if (view === 'admin-client' && !selectedAdminClient?.id) return
+
+    const clientId = view === 'admin-client' ? selectedAdminClient?.id : undefined
+    void loadAdminActivity(clientId)
+  }, [role, session?.user.id, view, selectedAdminClient?.id])
+
+  useEffect(() => {
     if (!supabase || view !== 'share' || !shareToken) return
     const client = supabase
 
@@ -1355,9 +1404,7 @@ function App() {
     setMyDeliveries([])
     setNewShareLinks({})
     setAdminActivities([])
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(ADMIN_ACTIVITY_STORAGE_KEY)
-    }
+    setAdminActivityError('')
     window.location.hash = '#home'
   }
 
@@ -1467,7 +1514,12 @@ function App() {
         recordAdminActivity(
           'download',
           'Downloaded file',
-          getDisplayFileName(adminAsset?.filename ?? assetId)
+          getDisplayFileName(adminAsset?.filename ?? assetId),
+          {
+            clientId: selectedAdminClient?.id ?? null,
+            projectId: adminAsset?.project_id ?? null,
+            assetId,
+          }
         )
       }
     } catch (error) {
@@ -1558,7 +1610,17 @@ function App() {
     path: string,
     body: unknown,
     filename: string,
-    activity?: { kind: AdminActivityKind; title: string; detail: string }
+    activity?: {
+      kind: AdminActivityKind
+      title: string
+      detail: string
+      context?: {
+        clientId?: string | null
+        projectId?: string | null
+        assetId?: string | null
+        metadata?: Record<string, unknown>
+      }
+    }
   ) => {
     if (!supabase) return
     try {
@@ -1573,7 +1635,7 @@ function App() {
       const blob = await loadWorkerBlob(path, token, { method: 'POST', body })
       triggerBrowserDownload(blob, filename)
       if (activity) {
-        recordAdminActivity(activity.kind, activity.title, activity.detail)
+        recordAdminActivity(activity.kind, activity.title, activity.detail, activity.context)
       }
     } catch (error) {
       setAdminError(error instanceof Error ? error.message : 'Unable to download files')
@@ -1586,6 +1648,12 @@ function App() {
   const performDeleteAdminAsset = async (
     assetId: string,
     label?: string,
+    context?: {
+      clientId?: string | null
+      projectId?: string | null
+      assetId?: string | null
+      metadata?: Record<string, unknown>
+    },
     options?: { silent?: boolean }
   ) => {
     if (!supabase || !session?.user.id || role !== 'admin') return
@@ -1612,18 +1680,27 @@ function App() {
       closeAdminLightbox()
     }
     if (!options?.silent) {
-      recordAdminActivity('delete', 'Deleted file', `Removed ${label ?? assetId}`)
+      recordAdminActivity('delete', 'Deleted file', `Removed ${label ?? assetId}`, {
+        clientId: context?.clientId ?? selectedAdminClient?.id ?? null,
+        projectId: context?.projectId ?? null,
+        assetId: context?.assetId ?? assetId,
+        metadata: context?.metadata,
+      })
     }
   }
 
   const performDeleteAdminAssets = async (assetIds: string[]) => {
     for (const assetId of assetIds) {
-      await performDeleteAdminAsset(assetId, undefined, { silent: true })
+      await performDeleteAdminAsset(assetId, undefined, undefined, { silent: true })
     }
     recordAdminActivity(
       'delete',
       `Deleted ${assetIds.length} file${assetIds.length === 1 ? '' : 's'}`,
-      'Removed selected files from the admin folder'
+      'Removed selected files from the admin folder',
+      {
+        clientId: selectedAdminClient?.id ?? null,
+        metadata: { count: assetIds.length, assetIds },
+      }
     )
   }
 
@@ -1645,7 +1722,10 @@ function App() {
     if (adminLightbox?.projectId === projectId) {
       closeAdminLightbox()
     }
-    recordAdminActivity('delete', 'Deleted folder', `Removed ${label ?? projectId}`)
+    recordAdminActivity('delete', 'Deleted folder', `Removed ${label ?? projectId}`, {
+      clientId: selectedAdminClient?.id ?? null,
+      projectId,
+    })
   }
 
   const performDeleteAdminClient = async (clientId: string, label?: string) => {
@@ -1668,7 +1748,9 @@ function App() {
     setSelectedAdminAssetIds([])
     closeAdminLightbox()
     window.location.hash = '#admin-clients'
-    recordAdminActivity('delete', 'Deleted client', `Removed ${label ?? clientId}`)
+    recordAdminActivity('delete', 'Deleted client', `Removed ${label ?? clientId}`, {
+      clientId,
+    })
   }
 
   const handleDownloadAdminProject = async (project: AdminProject) => {
@@ -1688,6 +1770,11 @@ function App() {
         kind: 'download',
         title: 'Downloaded folder',
         detail: project.name,
+        context: {
+          clientId: selectedAdminClient?.id ?? null,
+          projectId: project.id,
+          metadata: { count: projectAssetIds.length },
+        },
       }
     )
   }
@@ -1703,6 +1790,10 @@ function App() {
         kind: 'download',
         title: 'Downloaded selection',
         detail: `${selectedAdminAssetIds.length} selected files from ${clientName}`,
+        context: {
+          clientId: selectedAdminClient?.id ?? null,
+          metadata: { count: selectedAdminAssetIds.length, assetIds: selectedAdminAssetIds },
+        },
       }
     )
   }
@@ -1724,7 +1815,12 @@ function App() {
         'This permanently removes the file from the folder, customer view, and database.',
       confirmLabel: 'Delete file',
       progressLabel: 'Deleting file...',
-      onConfirm: () => performDeleteAdminAsset(assetId, getDisplayFileName(asset.filename)),
+      onConfirm: () =>
+        performDeleteAdminAsset(assetId, getDisplayFileName(asset.filename), {
+          clientId: selectedAdminClient.id,
+          projectId: asset.project_id,
+          assetId: asset.id,
+        }),
     })
   }
 
@@ -1816,7 +1912,9 @@ function App() {
       )
       setSelectedAdminClientId(updated.client.id)
       setAdminClientEditMode(false)
-      recordAdminActivity('edit', 'Updated client', updated.client.full_name)
+      recordAdminActivity('edit', 'Updated client', updated.client.full_name, {
+        clientId: updated.client.id,
+      })
     } catch (error) {
       setAdminError(error instanceof Error ? error.message : 'Unable to update client')
     } finally {
@@ -1837,7 +1935,7 @@ function App() {
     })
   }
 
-  const renderAdminActivityPanel = (title: string) => (
+  const renderAdminActivityPanel = (title: string, clientId?: string) => (
     <section className="admin-activity-panel">
       <div className="admin-activity-panel-head">
         <div>
@@ -1847,7 +1945,12 @@ function App() {
         <span className="admin-client-count">{adminActivities.length} events</span>
       </div>
 
-      {adminActivities.length === 0 ? (
+      {clientId && <p className="portal-hint">Showing activity for the selected client folder.</p>}
+      {adminActivityBusy ? (
+        <p className="portal-hint">Loading recent activity...</p>
+      ) : adminActivityError ? (
+        <p className="portal-error">{adminActivityError}</p>
+      ) : adminActivities.length === 0 ? (
         <p className="portal-hint">No recent activity yet.</p>
       ) : (
         <ul className="admin-activity-list">
@@ -1953,6 +2056,14 @@ function App() {
       return
     }
 
+    recordAdminActivity('create', 'Created folder', uploadTitle, {
+      clientId,
+      projectId: insertedProject.data.id,
+      metadata: {
+        mode: uploadClientMode,
+      },
+    })
+
     const deliveryToken = randomToken()
     const insertedDelivery = await supabase
       .from('deliveries')
@@ -2043,7 +2154,16 @@ function App() {
     recordAdminActivity(
       'upload',
       'Uploaded files',
-      `${uploadItems.length} file${uploadItems.length === 1 ? '' : 's'} to ${targetEmail}`
+      `${uploadItems.length} file${uploadItems.length === 1 ? '' : 's'} to ${targetEmail}`,
+      {
+        clientId,
+        projectId: insertedProject.data.id,
+        metadata: {
+          count: uploadItems.length,
+          deliveryId: insertedDelivery.data.id,
+          mode: uploadClientMode,
+        },
+      }
     )
     setUploadItems([])
     setUploadEmail('')
@@ -2730,7 +2850,7 @@ function App() {
           </div>
         </div>
 
-        {renderAdminActivityPanel('Recent activity')}
+        {renderAdminActivityPanel('Recent activity', selectedAdminClient.id)}
 
         <div className="admin-bulk-actions" aria-live="polite">
           <div className="admin-bulk-actions-copy">

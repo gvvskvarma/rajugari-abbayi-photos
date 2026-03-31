@@ -104,6 +104,14 @@ In Vercel:
   - `GET /api/v1/my-pictures` (private gallery delivery listing)
 - Frontend: private gallery + controlled view/download actions in `src/App.tsx`
 
+## Day 5 admin audit artifacts
+
+- Supabase migration: `supabase/migrations/20260313_admin_activity.sql`
+- Worker APIs:
+  - `GET /api/v1/admin/activity`
+  - `POST /api/v1/admin/activity`
+- Frontend: worker-backed admin activity feed in `src/App.tsx`
+
 ## Day 5 hardening/release artifacts
 
 - Runbook: `docs/runbook/day5-mvp-runbook.md`

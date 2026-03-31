@@ -40,6 +40,7 @@ Apply Supabase migrations in order:
 2. `supabase/migrations/20260310_day2_auth_roles_admin.sql`
 3. `supabase/migrations/20260311_day3_upload_pipeline.sql`
 4. `supabase/migrations/20260311_day4_delivery_security.sql`
+5. `supabase/migrations/20260313_admin_activity.sql`
 
 ## Local run
 
@@ -83,5 +84,6 @@ curl -I https://rajugariabbayishots.vercel.app/
 
 - `POST /api/v1/media/signed-url` enforces delivery-level and per-file access controls.
 - Signed download URL issuance records `download_events`.
+- Admin audit activity is persisted in `admin_activity_events`.
 - Basic route-level rate limits are active in Worker middleware.
 - Keep `.env` and `worker/.dev.vars` local-only; do not commit secrets.
