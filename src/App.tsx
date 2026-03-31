@@ -2570,7 +2570,7 @@ function App() {
               Download selected
             </button>
             <button
-              className="button primary"
+              className={selectedAdminAssetIds.length > 0 ? 'button primary' : 'button ghost'}
               type="button"
               onClick={() => void handleBulkDeleteAdminAssets()}
               disabled={adminBusy || selectedAdminAssetIds.length === 0}
