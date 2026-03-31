@@ -942,11 +942,11 @@ function App() {
       const entries = await Promise.all(
         missingPreviewAssets.map(async (asset) => {
           try {
-            const payload = await workerRequest<{ signedUrl: string }>('/api/v1/media/signed-url', token, {
+            const payload = await workerRequest<{ url: string }>('/api/v1/media/preview-url', token, {
               method: 'POST',
-              body: { assetId: asset.id, mode: 'view' },
+              body: { assetId: asset.id },
             })
-            return [asset.id, payload.signedUrl] as const
+            return [asset.id, payload.url] as const
           } catch {
             return null
           }
@@ -1248,15 +1248,15 @@ function App() {
         reportError('Login session expired. Please log in again.')
         return
       }
-      const payload = await workerRequest<{ signedUrl: string }>(
-        '/api/v1/media/signed-url',
-        token,
-        {
-          method: 'POST',
-          body: { assetId, mode },
-        }
-      )
-      window.open(payload.signedUrl, '_blank', 'noopener,noreferrer')
+      const endpoint =
+        mode === 'view' ? '/api/v1/media/preview-url' : '/api/v1/media/signed-url'
+      const payload = await workerRequest<{ signedUrl?: string; url?: string }>(endpoint, token, {
+        method: 'POST',
+        body: { assetId, mode },
+      })
+      const nextUrl = payload.url ?? payload.signedUrl
+      if (!nextUrl) throw new Error('Missing asset URL')
+      window.open(nextUrl, '_blank', 'noopener,noreferrer')
     } catch (error) {
       reportError(error instanceof Error ? error.message : 'Unable to open file')
     }

@@ -18,6 +18,14 @@ type UploadTokenPayload = {
   expiresAt: string
 }
 
+type PreviewTokenPayload = {
+  v: 1
+  assetId: string
+  deliveryId: string
+  issuedAt: string
+  expiresAt: string
+}
+
 type Env = {
   R2_MEDIA_BUCKET: R2Bucket
   SUPABASE_URL: string
@@ -138,6 +146,7 @@ const supabaseRequest = async <T>(
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
 const uploadTokenVersion = 'v1'
+const previewTokenVersion = 'v1'
 
 const bytesToBase64Url = (bytes: Uint8Array) => {
   let binary = ''
@@ -157,7 +166,7 @@ const base64UrlDecode = (value: string) => {
   return textDecoder.decode(bytes)
 }
 
-const signUploadToken = async (secret: string, payloadB64: string) => {
+const signToken = async (version: string, secret: string, payloadB64: string) => {
   const key = await crypto.subtle.importKey(
     'raw',
     textEncoder.encode(secret),
@@ -165,13 +174,13 @@ const signUploadToken = async (secret: string, payloadB64: string) => {
     false,
     ['sign']
   )
-  const signature = await crypto.subtle.sign('HMAC', key, textEncoder.encode(`${uploadTokenVersion}.${payloadB64}`))
+  const signature = await crypto.subtle.sign('HMAC', key, textEncoder.encode(`${version}.${payloadB64}`))
   return bytesToBase64Url(new Uint8Array(signature))
 }
 
 const createUploadToken = async (secret: string, payload: UploadTokenPayload) => {
   const payloadB64 = base64UrlEncode(JSON.stringify(payload))
-  const signature = await signUploadToken(secret, payloadB64)
+  const signature = await signToken(uploadTokenVersion, secret, payloadB64)
   return `${uploadTokenVersion}.${payloadB64}.${signature}`
 }
 
@@ -181,7 +190,7 @@ const verifyUploadToken = async (secret: string, token: string): Promise<UploadT
     throw new Error('Invalid upload token')
   }
 
-  const expectedSignature = await signUploadToken(secret, payloadB64)
+  const expectedSignature = await signToken(uploadTokenVersion, secret, payloadB64)
   if (expectedSignature !== signature) {
     throw new Error('Invalid upload token')
   }
@@ -205,6 +214,35 @@ const verifyUploadToken = async (secret: string, token: string): Promise<UploadT
 
   if (new Date(payload.expiresAt).getTime() <= Date.now()) {
     throw new Error('Upload session expired')
+  }
+
+  return payload
+}
+
+const createPreviewToken = async (secret: string, payload: PreviewTokenPayload) => {
+  const payloadB64 = base64UrlEncode(JSON.stringify(payload))
+  const signature = await signToken(previewTokenVersion, secret, payloadB64)
+  return `${previewTokenVersion}.${payloadB64}.${signature}`
+}
+
+const verifyPreviewToken = async (secret: string, token: string): Promise<PreviewTokenPayload> => {
+  const [version, payloadB64, signature] = token.split('.')
+  if (version !== previewTokenVersion || !payloadB64 || !signature) {
+    throw new Error('Invalid preview token')
+  }
+
+  const expectedSignature = await signToken(previewTokenVersion, secret, payloadB64)
+  if (expectedSignature !== signature) {
+    throw new Error('Invalid preview token')
+  }
+
+  const payload = JSON.parse(base64UrlDecode(payloadB64)) as PreviewTokenPayload
+  if (!payload.v || !payload.assetId || !payload.deliveryId || !payload.issuedAt || !payload.expiresAt) {
+    throw new Error('Invalid preview token')
+  }
+
+  if (new Date(payload.expiresAt).getTime() <= Date.now()) {
+    throw new Error('Preview token expired')
   }
 
   return payload
@@ -1090,6 +1128,95 @@ app.post('/api/v1/media/signed-url', async (c) => {
     return c.json({ signedUrl, expiresInSeconds: 300, mode }, 200, responseHeaders(c))
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Signed URL request failed', 400)
+  }
+})
+
+app.post('/api/v1/media/preview-url', async (c) => {
+  try {
+    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
+    const body = await c.req.json<{ assetId: string }>()
+
+    if (!body.assetId) return jsonError('assetId is required', 400)
+
+    const assets = await supabaseRequest<
+      Array<{ id: string; delivery_id: string | null; r2_object_key: string; mime_type: string }>
+    >(
+      c.env,
+      `assets?id=eq.${encodeURIComponent(body.assetId)}&select=id,delivery_id,r2_object_key,mime_type&limit=1`
+    )
+
+    const asset = assets[0]
+    if (!asset) return jsonError('Asset not found', 404)
+    if (asset.r2_object_key.startsWith('pending/')) {
+      return jsonError('This file was never uploaded to storage. Re-upload it from Admin Upload.', 410)
+    }
+
+    const deliveryAssetRows = await supabaseRequest<Array<{ delivery_id: string }>>(
+      c.env,
+      `delivery_assets?asset_id=eq.${encodeURIComponent(body.assetId)}&select=delivery_id&limit=1`
+    )
+    const deliveryAsset = deliveryAssetRows[0]
+    const deliveryId = asset.delivery_id ?? deliveryAsset?.delivery_id
+    if (!deliveryId || !deliveryAsset) return jsonError('Asset delivery mapping missing', 403)
+
+    await ensureDeliveryAccess(c.env, user, deliveryId, 'view')
+
+    const token = await createPreviewToken(c.env.SUPABASE_SERVICE_ROLE_KEY, {
+      v: 1,
+      assetId: asset.id,
+      deliveryId,
+      issuedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+    })
+
+    return c.json(
+      {
+        url: `${new URL(c.req.url).origin}/api/v1/media/preview?token=${encodeURIComponent(token)}`,
+        expiresInSeconds: 300,
+      },
+      200,
+      responseHeaders(c)
+    )
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Preview URL request failed', 400)
+  }
+})
+
+app.get('/api/v1/media/preview', async (c) => {
+  try {
+    const token = c.req.query('token')
+    if (!token) return jsonError('token is required', 400)
+
+    const payload = await verifyPreviewToken(c.env.SUPABASE_SERVICE_ROLE_KEY, token)
+    const assets = await supabaseRequest<
+      Array<{ id: string; delivery_id: string | null; r2_object_key: string; mime_type: string; filename: string }>
+    >(
+      c.env,
+      `assets?id=eq.${encodeURIComponent(payload.assetId)}&select=id,delivery_id,r2_object_key,mime_type,filename&limit=1`
+    )
+
+    const asset = assets[0]
+    if (!asset) return jsonError('Asset not found', 404)
+    if (asset.delivery_id !== payload.deliveryId) {
+      return jsonError('Preview token does not match this asset', 403)
+    }
+
+    const object = await c.env.R2_MEDIA_BUCKET.get(asset.r2_object_key)
+    if (!object) {
+      return jsonError('File missing in storage for this asset. Re-upload required.', 404)
+    }
+
+    return new Response(object.body, {
+      status: 200,
+      headers: {
+        ...responseHeaders(c),
+        'content-type': object.httpMetadata?.contentType ?? asset.mime_type,
+        'cache-control': 'private, max-age=300',
+        'content-disposition': 'inline',
+      },
+    })
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Preview failed', 400)
   }
 })
 
