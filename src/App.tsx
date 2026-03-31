@@ -421,6 +421,46 @@ type DeleteConfirmationState = {
   onConfirm: () => Promise<void>
 }
 
+type AdminActivityKind = 'upload' | 'download' | 'delete' | 'edit' | 'create'
+
+type AdminActivityItem = {
+  id: string
+  kind: AdminActivityKind
+  title: string
+  detail: string
+  createdAt: string
+}
+
+const ADMIN_ACTIVITY_STORAGE_KEY = 'rga-admin-activity-v1'
+const ADMIN_ACTIVITY_LIMIT = 24
+const ADMIN_PROJECT_CHUNK_SIZE = 12
+
+const readLocalStorageJson = <T,>(key: string, fallback: T): T => {
+  if (typeof window === 'undefined') return fallback
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return fallback
+    return JSON.parse(raw) as T
+  } catch {
+    return fallback
+  }
+}
+
+const writeLocalStorageJson = <T,>(key: string, value: T) => {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // Ignore storage failures; the admin workspace still functions without persistence.
+  }
+}
+
+const getAssetKind = (mimeType: string) => {
+  if (mimeType.startsWith('image/')) return 'images'
+  if (mimeType.startsWith('video/')) return 'videos'
+  return 'other'
+}
+
 const landscapePaths = [
   'project-rga/landscapes/RGA02744.jpg',
   'project-rga/landscapes/RGA02755.jpg',
@@ -694,6 +734,12 @@ function App() {
   const [adminBusy, setAdminBusy] = useState(false)
   const [adminActionMessage, setAdminActionMessage] = useState('')
   const [adminError, setAdminError] = useState('')
+  const [adminActivities, setAdminActivities] = useState<AdminActivityItem[]>(() =>
+    readLocalStorageJson<AdminActivityItem[]>(ADMIN_ACTIVITY_STORAGE_KEY, [])
+  )
+  const [adminAssetTypeFilter, setAdminAssetTypeFilter] = useState<'all' | 'images' | 'videos' | 'other'>('all')
+  const [adminProjectFilterId, setAdminProjectFilterId] = useState('all')
+  const [adminProjectRenderLimits, setAdminProjectRenderLimits] = useState<Record<string, number>>({})
   const adminLightboxTouchStartRef = useRef<number | null>(null)
 
   const [shareAssets, setShareAssets] = useState<DeliveryAsset[]>([])
@@ -893,24 +939,31 @@ function App() {
     if (!selectedAdminClient) return []
 
     const query = adminAssetSearch.trim().toLowerCase()
-    const projectViews = selectedAdminClient.projects.map((project) => {
-      const projectAssets = selectedAdminClient.assets.filter((asset) => asset.project_id === project.id)
-      const visibleAssets = query
-        ? projectAssets.filter((asset) =>
+    const projectViews = selectedAdminClient.projects
+      .filter((project) => adminProjectFilterId === 'all' || project.id === adminProjectFilterId)
+      .map((project) => {
+        const projectAssets = selectedAdminClient.assets.filter((asset) => asset.project_id === project.id)
+        const filteredAssets = projectAssets.filter((asset) => {
+          const searchMatch =
+            !query ||
             [asset.filename, asset.mime_type, project.name].join(' ').toLowerCase().includes(query)
-          )
-        : projectAssets
-      const latestActivityAt =
-        [project.updated_at, ...projectAssets.map((asset) => asset.created_at)]
-          .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] ?? project.updated_at
+          const typeMatch =
+            adminAssetTypeFilter === 'all' || getAssetKind(asset.mime_type) === adminAssetTypeFilter
+          return searchMatch && typeMatch
+        })
+        const renderLimit = adminProjectRenderLimits[project.id] ?? ADMIN_PROJECT_CHUNK_SIZE
+        const visibleAssets = filteredAssets.slice(0, renderLimit)
+        const latestActivityAt =
+          [project.updated_at, ...projectAssets.map((asset) => asset.created_at)]
+            .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] ?? project.updated_at
 
-      return {
-        project,
-        totalAssets: projectAssets.length,
-        visibleAssets,
-        latestActivityAt,
-      }
-    })
+        return {
+          project,
+          totalAssets: filteredAssets.length,
+          visibleAssets,
+          latestActivityAt,
+        }
+      })
 
     projectViews.sort((left, right) => {
       if (adminProjectSort === 'name') {
@@ -923,7 +976,7 @@ function App() {
     })
 
     return projectViews
-  }, [adminAssetSearch, adminProjectSort, selectedAdminClient])
+  }, [adminAssetSearch, adminAssetTypeFilter, adminProjectFilterId, adminProjectRenderLimits, adminProjectSort, selectedAdminClient])
 
   const selectedAdminVisibleAssets = useMemo(
     () => selectedAdminClientProjectViews.flatMap((entry) => entry.visibleAssets),
@@ -963,6 +1016,21 @@ function App() {
       current.filter((assetId) => selectedAdminVisibleAssets.some((asset) => asset.id === assetId))
     )
   }, [selectedAdminVisibleAssets])
+
+  useEffect(() => {
+    writeLocalStorageJson(ADMIN_ACTIVITY_STORAGE_KEY, adminActivities)
+  }, [adminActivities])
+
+  useEffect(() => {
+    if (adminProjectFilterId === 'all') return
+    if (!selectedAdminClient?.projects.some((project) => project.id === adminProjectFilterId)) {
+      setAdminProjectFilterId('all')
+    }
+  }, [adminProjectFilterId, selectedAdminClient?.id])
+
+  useEffect(() => {
+    setAdminProjectRenderLimits({})
+  }, [selectedAdminClient?.id])
 
   useEffect(() => {
     if (!adminLightbox) return
@@ -1060,6 +1128,9 @@ function App() {
     setView('admin-clients')
     setAdminClientEditMode(false)
     setAdminAssetSearch('')
+    setAdminAssetTypeFilter('all')
+    setAdminProjectFilterId('all')
+    setAdminProjectRenderLimits({})
     setSelectedAdminAssetIds([])
   }
 
@@ -1068,6 +1139,9 @@ function App() {
     setSelectedAdminClientId(clientId)
     setAdminClientEditMode(false)
     setAdminAssetSearch('')
+    setAdminAssetTypeFilter('all')
+    setAdminProjectFilterId('all')
+    setAdminProjectRenderLimits({})
     setSelectedAdminAssetIds([])
     window.location.hash = `#admin-clients/${clientId}`
   }
@@ -1086,6 +1160,17 @@ function App() {
 
   const closeDeleteConfirmation = () => {
     setDeleteConfirmation(null)
+  }
+
+  const recordAdminActivity = (kind: AdminActivityKind, title: string, detail: string) => {
+    const entry: AdminActivityItem = {
+      id: crypto.randomUUID(),
+      kind,
+      title,
+      detail,
+      createdAt: new Date().toISOString(),
+    }
+    setAdminActivities((current) => [entry, ...current.filter((item) => item.title !== title || item.detail !== detail)].slice(0, ADMIN_ACTIVITY_LIMIT))
   }
 
   const confirmDeleteConfirmation = async () => {
@@ -1269,6 +1354,10 @@ function App() {
     setAuthMenuOpen(false)
     setMyDeliveries([])
     setNewShareLinks({})
+    setAdminActivities([])
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(ADMIN_ACTIVITY_STORAGE_KEY)
+    }
     window.location.hash = '#home'
   }
 
@@ -1373,6 +1462,14 @@ function App() {
       const nextUrl = payload.url ?? payload.signedUrl
       if (!nextUrl) throw new Error('Missing asset URL')
       window.open(nextUrl, '_blank', 'noopener,noreferrer')
+      if (mode === 'download' && role === 'admin') {
+        const adminAsset = selectedAdminClient?.assets.find((entry) => entry.id === assetId)
+        recordAdminActivity(
+          'download',
+          'Downloaded file',
+          getDisplayFileName(adminAsset?.filename ?? assetId)
+        )
+      }
     } catch (error) {
       reportError(error instanceof Error ? error.message : 'Unable to open file')
     }
@@ -1457,7 +1554,12 @@ function App() {
     setAdminLightbox({ projectId: currentLightbox.projectId, assetId: adminLightboxAssets[nextIndex].id })
   }
 
-  const downloadAdminArchive = async (path: string, body: unknown, filename: string) => {
+  const downloadAdminArchive = async (
+    path: string,
+    body: unknown,
+    filename: string,
+    activity?: { kind: AdminActivityKind; title: string; detail: string }
+  ) => {
     if (!supabase) return
     try {
       setAdminActionMessage(`Preparing ${filename}...`)
@@ -1470,6 +1572,9 @@ function App() {
 
       const blob = await loadWorkerBlob(path, token, { method: 'POST', body })
       triggerBrowserDownload(blob, filename)
+      if (activity) {
+        recordAdminActivity(activity.kind, activity.title, activity.detail)
+      }
     } catch (error) {
       setAdminError(error instanceof Error ? error.message : 'Unable to download files')
     } finally {
@@ -1478,7 +1583,11 @@ function App() {
     }
   }
 
-  const performDeleteAdminAsset = async (assetId: string) => {
+  const performDeleteAdminAsset = async (
+    assetId: string,
+    label?: string,
+    options?: { silent?: boolean }
+  ) => {
     if (!supabase || !session?.user.id || role !== 'admin') return
 
     const token = await getAccessToken()
@@ -1502,15 +1611,23 @@ function App() {
     if (adminLightbox?.assetId === assetId) {
       closeAdminLightbox()
     }
+    if (!options?.silent) {
+      recordAdminActivity('delete', 'Deleted file', `Removed ${label ?? assetId}`)
+    }
   }
 
   const performDeleteAdminAssets = async (assetIds: string[]) => {
     for (const assetId of assetIds) {
-      await performDeleteAdminAsset(assetId)
+      await performDeleteAdminAsset(assetId, undefined, { silent: true })
     }
+    recordAdminActivity(
+      'delete',
+      `Deleted ${assetIds.length} file${assetIds.length === 1 ? '' : 's'}`,
+      'Removed selected files from the admin folder'
+    )
   }
 
-  const performDeleteAdminProject = async (projectId: string) => {
+  const performDeleteAdminProject = async (projectId: string, label?: string) => {
     if (!supabase || !session?.user.id || role !== 'admin') return
 
     const token = await getAccessToken()
@@ -1528,9 +1645,10 @@ function App() {
     if (adminLightbox?.projectId === projectId) {
       closeAdminLightbox()
     }
+    recordAdminActivity('delete', 'Deleted folder', `Removed ${label ?? projectId}`)
   }
 
-  const performDeleteAdminClient = async (clientId: string) => {
+  const performDeleteAdminClient = async (clientId: string, label?: string) => {
     if (!supabase || !session?.user.id || role !== 'admin') return
 
     const token = await getAccessToken()
@@ -1550,6 +1668,7 @@ function App() {
     setSelectedAdminAssetIds([])
     closeAdminLightbox()
     window.location.hash = '#admin-clients'
+    recordAdminActivity('delete', 'Deleted client', `Removed ${label ?? clientId}`)
   }
 
   const handleDownloadAdminProject = async (project: AdminProject) => {
@@ -1564,7 +1683,12 @@ function App() {
     await downloadAdminArchive(
       '/api/v1/admin/downloads',
       { assetIds: projectAssetIds, filename: project.name },
-      `${sanitizeDownloadName(project.name)}.zip`
+      `${sanitizeDownloadName(project.name)}.zip`,
+      {
+        kind: 'download',
+        title: 'Downloaded folder',
+        detail: project.name,
+      }
     )
   }
 
@@ -1574,7 +1698,12 @@ function App() {
     await downloadAdminArchive(
       '/api/v1/admin/downloads',
       { assetIds: selectedAdminAssetIds, filename: clientName },
-      `${sanitizeDownloadName(clientName)}-selected.zip`
+      `${sanitizeDownloadName(clientName)}-selected.zip`,
+      {
+        kind: 'download',
+        title: 'Downloaded selection',
+        detail: `${selectedAdminAssetIds.length} selected files from ${clientName}`,
+      }
     )
   }
 
@@ -1595,7 +1724,7 @@ function App() {
         'This permanently removes the file from the folder, customer view, and database.',
       confirmLabel: 'Delete file',
       progressLabel: 'Deleting file...',
-      onConfirm: () => performDeleteAdminAsset(assetId),
+      onConfirm: () => performDeleteAdminAsset(assetId, getDisplayFileName(asset.filename)),
     })
   }
 
@@ -1608,7 +1737,7 @@ function App() {
         'This removes the project, its uploaded files, the customer folder data, and the database records.',
       confirmLabel: 'Delete folder',
       progressLabel: 'Deleting folder...',
-      onConfirm: () => performDeleteAdminProject(project.id),
+      onConfirm: () => performDeleteAdminProject(project.id, project.name),
     })
   }
 
@@ -1626,6 +1755,13 @@ function App() {
       selectedAdminVisibleAssets.forEach((asset) => next.add(asset.id))
       return [...next]
     })
+
+  const loadMoreAdminProjectAssets = (projectId: string) => {
+    setAdminProjectRenderLimits((current) => ({
+      ...current,
+      [projectId]: (current[projectId] ?? ADMIN_PROJECT_CHUNK_SIZE) + ADMIN_PROJECT_CHUNK_SIZE,
+    }))
+  }
 
   const handleBulkDeleteAdminAssets = async () => {
     if (!supabase || !session?.user.id || role !== 'admin' || selectedAdminAssetIds.length === 0) return
@@ -1680,6 +1816,7 @@ function App() {
       )
       setSelectedAdminClientId(updated.client.id)
       setAdminClientEditMode(false)
+      recordAdminActivity('edit', 'Updated client', updated.client.full_name)
     } catch (error) {
       setAdminError(error instanceof Error ? error.message : 'Unable to update client')
     } finally {
@@ -1696,9 +1833,37 @@ function App() {
         'This removes the client, projects, deliveries, uploaded files, and database records.',
       confirmLabel: 'Delete client',
       progressLabel: 'Deleting client...',
-      onConfirm: () => performDeleteAdminClient(selectedAdminClient.id),
+      onConfirm: () => performDeleteAdminClient(selectedAdminClient.id, selectedAdminClient.full_name),
     })
   }
+
+  const renderAdminActivityPanel = (title: string) => (
+    <section className="admin-activity-panel">
+      <div className="admin-activity-panel-head">
+        <div>
+          <p className="eyebrow">Audit trail</p>
+          <h3>{title}</h3>
+        </div>
+        <span className="admin-client-count">{adminActivities.length} events</span>
+      </div>
+
+      {adminActivities.length === 0 ? (
+        <p className="portal-hint">No recent activity yet.</p>
+      ) : (
+        <ul className="admin-activity-list">
+          {adminActivities.slice(0, 6).map((entry) => (
+            <li key={entry.id} className={`admin-activity-item is-${entry.kind}`}>
+              <div>
+                <p className="admin-activity-title">{entry.title}</p>
+                <p className="admin-activity-detail">{entry.detail}</p>
+              </div>
+              <time dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleString()}</time>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
 
   const uploadFileToSignedUrl = async (uploadUrl: string, file: File) => {
     const response = await fetch(uploadUrl, {
@@ -1874,6 +2039,11 @@ function App() {
 
     setUploadMessage(
       `Upload complete for ${targetEmail}. Opening the client folder now.`
+    )
+    recordAdminActivity(
+      'upload',
+      'Uploaded files',
+      `${uploadItems.length} file${uploadItems.length === 1 ? '' : 's'} to ${targetEmail}`
     )
     setUploadItems([])
     setUploadEmail('')
@@ -2390,6 +2560,8 @@ function App() {
           />
         </label>
 
+        {renderAdminActivityPanel('Recent activity')}
+
         {adminBusy && <p className="portal-hint">Loading client folders...</p>}
         {adminError && <p className="portal-error">{adminError}</p>}
         {!adminBusy && !adminError && filteredAdminClients.length === 0 && (
@@ -2522,16 +2694,43 @@ function App() {
             </select>
           </label>
 
+          <label className="admin-search">
+            Media type
+            <select
+              value={adminAssetTypeFilter}
+              onChange={(event) => setAdminAssetTypeFilter(event.target.value as typeof adminAssetTypeFilter)}
+            >
+              <option value="all">All files</option>
+              <option value="images">Images</option>
+              <option value="videos">Videos</option>
+              <option value="other">Other files</option>
+            </select>
+          </label>
+
+          <label className="admin-search">
+            Project
+            <select value={adminProjectFilterId} onChange={(event) => setAdminProjectFilterId(event.target.value)}>
+              <option value="all">All projects</option>
+              {selectedAdminClient.projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <div className="admin-detail-toolbar-copy">
             <p className="portal-hint">
               {selectedAdminAssetIds.length > 0
                 ? `${selectedAdminAssetIds.length} selected file${selectedAdminAssetIds.length === 1 ? '' : 's'}`
-                : `${selectedAdminVisibleAssets.length} visible file${selectedAdminVisibleAssets.length === 1 ? '' : 's'}`}
+                : `${selectedAdminVisibleAssets.length} loaded file${selectedAdminVisibleAssets.length === 1 ? '' : 's'}`}
               {adminAssetSearch.trim() ? ` matching “${adminAssetSearch.trim()}”` : ''}
             </p>
             {client.notes && <p className="portal-hint">{client.notes}</p>}
           </div>
         </div>
+
+        {renderAdminActivityPanel('Recent activity')}
 
         <div className="admin-bulk-actions" aria-live="polite">
           <div className="admin-bulk-actions-copy">
@@ -2651,7 +2850,7 @@ function App() {
             <p className="portal-hint">
               {client.projects.length === 0
                 ? 'No projects yet for this client.'
-                : 'No files match the current search.'}
+                : 'No files match the current filters.'}
             </p>
           ) : (
             selectedAdminClientProjectViews.map(({ project, totalAssets, visibleAssets, latestActivityAt }) => (
@@ -2746,6 +2945,20 @@ function App() {
                         </article>
                       )
                     })}
+                  </div>
+                )}
+                {totalAssets > visibleAssets.length && (
+                  <div className="admin-project-more">
+                    <p className="portal-hint">
+                      Showing {visibleAssets.length} of {totalAssets} loaded files.
+                    </p>
+                    <button
+                      className="button ghost"
+                      type="button"
+                      onClick={() => loadMoreAdminProjectAssets(project.id)}
+                    >
+                      Load more
+                    </button>
                   </div>
                 )}
                 <p className="portal-hint admin-project-updated">Last activity {new Date(latestActivityAt).toLocaleString()}</p>
