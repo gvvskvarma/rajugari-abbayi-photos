@@ -360,6 +360,11 @@ type DeliveryCard = {
   assets: DeliveryAsset[]
 }
 
+type CustomerLightboxState = {
+  deliveryId: string
+  assetId: string
+}
+
 type AdminClient = {
   id: string
   full_name: string
@@ -546,13 +551,6 @@ const readShareTokenFromHash = () => {
   return hash.replace('#share/', '').trim()
 }
 
-const formatBytes = (value: number) => {
-  if (value < 1024) return `${value} B`
-  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`
-  if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MB`
-  return `${(value / 1024 ** 3).toFixed(2)} GB`
-}
-
 const daysRemainingText = (expiresAt: string | null) => {
   if (!expiresAt) return 'Not started'
   const diffMs = new Date(expiresAt).getTime() - Date.now()
@@ -688,6 +686,11 @@ function App() {
   const [customerBusy, setCustomerBusy] = useState(false)
   const [newShareLinks, setNewShareLinks] = useState<Record<string, string>>({})
   const [shareCopyState, setShareCopyState] = useState<Record<string, string>>({})
+  const [shareAllowDownload, setShareAllowDownload] = useState(false)
+  const [shareDeliveryId, setShareDeliveryId] = useState('')
+  const [shareAssetPreviewUrls, setShareAssetPreviewUrls] = useState<Record<string, string>>({})
+  const [customerLightbox, setCustomerLightbox] = useState<CustomerLightboxState | null>(null)
+  const [customerAssetPreviewUrls, setCustomerAssetPreviewUrls] = useState<Record<string, string>>({})
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const [uploadClientMode, setUploadClientMode] = useState<'create' | 'reuse'>('create')
@@ -727,6 +730,7 @@ function App() {
   const [adminProjectFilterId, setAdminProjectFilterId] = useState('all')
   const [adminProjectRenderLimits, setAdminProjectRenderLimits] = useState<Record<string, number>>({})
   const adminLightboxTouchStartRef = useRef<number | null>(null)
+  const customerLightboxTouchStartRef = useRef<number | null>(null)
 
   const [shareAssets, setShareAssets] = useState<DeliveryAsset[]>([])
   const [shareBusy, setShareBusy] = useState(false)
@@ -863,6 +867,29 @@ function App() {
       [client.email, client.label].join(' ').toLowerCase().includes(query)
     )
   }, [reuseClientEmailOptions, uploadReuseSearch])
+
+  const customerVisibleAssets = useMemo(() => {
+    if (view === 'share') return shareAssets
+    if (view === 'my-pictures') return myDeliveries.flatMap((delivery) => delivery.assets)
+    return []
+  }, [myDeliveries, shareAssets, view])
+
+  const customerLightboxAssets = useMemo(() => {
+    if (!customerLightbox) return []
+    if (view === 'share') {
+      return shareAssets.filter((asset) => asset.mime_type.startsWith('image/'))
+    }
+    const delivery = myDeliveries.find((entry) => entry.deliveryId === customerLightbox.deliveryId)
+    return (delivery?.assets ?? []).filter((asset) => asset.mime_type.startsWith('image/'))
+  }, [customerLightbox, myDeliveries, shareAssets, view])
+
+  const customerLightboxIndex = useMemo(() => {
+    if (!customerLightbox) return -1
+    return customerLightboxAssets.findIndex((asset) => asset.id === customerLightbox.assetId)
+  }, [customerLightbox, customerLightboxAssets])
+
+  const customerLightboxAsset = customerLightboxIndex >= 0 ? customerLightboxAssets[customerLightboxIndex] : null
+  const customerPreviewUrls = view === 'share' ? shareAssetPreviewUrls : customerAssetPreviewUrls
 
   const adminClientById = useMemo(() => {
     return new Map(adminClients.map((client) => [client.id, client] as const))
@@ -1115,6 +1142,130 @@ function App() {
       cancelled = true
     }
   }, [adminAssetPreviewUrls, role, selectedAdminVisibleAssets, session?.user.id])
+
+  useEffect(() => {
+    if (!supabase || view !== 'my-pictures' || !session?.user.id || myDeliveries.length === 0) return
+
+    const missingPreviewAssets = myDeliveries
+      .flatMap((delivery) => delivery.assets.map((asset) => ({ deliveryId: delivery.deliveryId, asset })))
+      .filter(
+        ({ asset }) => asset.mime_type.startsWith('image/') && !customerAssetPreviewUrls[asset.id]
+      )
+
+    if (missingPreviewAssets.length === 0) return
+
+    let cancelled = false
+
+    const loadPreviewUrls = async () => {
+      const token = await getAccessToken()
+      if (!token) return
+
+      const entries = await Promise.all(
+        missingPreviewAssets.map(async ({ asset }) => {
+          try {
+            const payload = await workerRequest<{ url: string }>('/api/v1/media/preview-url', token, {
+              method: 'POST',
+              body: { assetId: asset.id },
+            })
+            return [asset.id, payload.url] as const
+          } catch {
+            return null
+          }
+        })
+      )
+
+      if (cancelled) return
+      const previewEntries = Object.fromEntries(
+        entries.filter((entry): entry is readonly [string, string] => entry !== null)
+      )
+      setCustomerAssetPreviewUrls((current) => ({ ...current, ...previewEntries }))
+    }
+
+    void loadPreviewUrls()
+    return () => {
+      cancelled = true
+    }
+  }, [customerAssetPreviewUrls, myDeliveries, role, session?.user.id, supabase, view])
+
+  useEffect(() => {
+    if (!supabase || view !== 'share' || !shareToken || shareAssets.length === 0) return
+
+    const missingPreviewAssets = shareAssets.filter(
+      (asset) => asset.mime_type.startsWith('image/') && !shareAssetPreviewUrls[asset.id]
+    )
+
+    if (missingPreviewAssets.length === 0) return
+
+    let cancelled = false
+
+    const loadPreviewUrls = async () => {
+      const entries = await Promise.all(
+        missingPreviewAssets.map(async (asset) => {
+          try {
+            const payload = await workerRequest<{ signedUrl?: string; url?: string }>(
+              '/api/v1/media/signed-url',
+              '',
+              {
+                method: 'POST',
+                body: { assetId: asset.id, mode: 'view', shareToken },
+              }
+            )
+            const nextUrl = payload.url ?? payload.signedUrl
+            return nextUrl ? [asset.id, nextUrl] as const : null
+          } catch {
+            return null
+          }
+        })
+      )
+
+      if (cancelled) return
+      const previewEntries = Object.fromEntries(
+        entries.filter((entry): entry is readonly [string, string] => entry !== null)
+      )
+      setShareAssetPreviewUrls((current) => ({ ...current, ...previewEntries }))
+    }
+
+    void loadPreviewUrls()
+    return () => {
+      cancelled = true
+    }
+  }, [shareAssetPreviewUrls, shareAssets, shareToken, supabase, view])
+
+  useEffect(() => {
+    if (!customerLightboxAsset) return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setCustomerLightbox(null)
+        return
+      }
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        const nextIndex = customerLightboxIndex - 1
+        if (nextIndex >= 0) {
+          setCustomerLightbox({
+            deliveryId: customerLightbox?.deliveryId ?? '',
+            assetId: customerLightboxAssets[nextIndex].id,
+          })
+        }
+        return
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        const nextIndex = customerLightboxIndex + 1
+        if (nextIndex < customerLightboxAssets.length) {
+          setCustomerLightbox({
+            deliveryId: customerLightbox?.deliveryId ?? '',
+            assetId: customerLightboxAssets[nextIndex].id,
+          })
+        }
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [customerLightbox, customerLightboxAsset, customerLightboxAssets, customerLightboxIndex])
 
   useEffect(() => {
     if (!adminLightboxAsset) return
@@ -1370,6 +1521,9 @@ function App() {
     const loadShareView = async () => {
       setShareBusy(true)
       setShareMessage('')
+      setShareAllowDownload(false)
+      setShareDeliveryId('')
+      setShareAssetPreviewUrls({})
 
       const linkResult = await client
         .from('share_links')
@@ -1380,6 +1534,9 @@ function App() {
       if (linkResult.error || !linkResult.data) {
         setShareMessage('This share link is invalid or unavailable.')
         setShareAssets([])
+        setShareAllowDownload(false)
+        setShareDeliveryId('')
+        setShareAssetPreviewUrls({})
         setShareBusy(false)
         return
       }
@@ -1387,6 +1544,9 @@ function App() {
       if (new Date(linkResult.data.expires_at).getTime() <= Date.now()) {
         setShareMessage('This share link has expired.')
         setShareAssets([])
+        setShareAllowDownload(false)
+        setShareDeliveryId('')
+        setShareAssetPreviewUrls({})
         setShareBusy(false)
         return
       }
@@ -1400,8 +1560,13 @@ function App() {
       if (assetsResult.error) {
         setShareMessage(assetsResult.error.message)
         setShareAssets([])
+        setShareAllowDownload(false)
+        setShareDeliveryId('')
+        setShareAssetPreviewUrls({})
       } else {
         setShareAssets((assetsResult.data ?? []) as DeliveryAsset[])
+        setShareAllowDownload(Boolean(linkResult.data.allow_download))
+        setShareDeliveryId(linkResult.data.delivery_id)
       }
 
       setShareBusy(false)
@@ -1451,6 +1616,8 @@ function App() {
     setNewShareLinks({})
     setAdminActivities([])
     setAdminActivityError('')
+    setShareAssetPreviewUrls({})
+    setCustomerAssetPreviewUrls({})
     window.location.hash = '#home'
   }
 
@@ -1537,7 +1704,109 @@ function App() {
     }
   }
 
-  const handleOpenAsset = async (assetId: string, mode: 'view' | 'download') => {
+  const openCustomerLightbox = (deliveryId: string, assetId: string) => {
+    setCustomerLightbox({ deliveryId, assetId })
+  }
+
+  const closeCustomerLightbox = () => setCustomerLightbox(null)
+
+  const moveCustomerLightbox = (direction: 'prev' | 'next') => {
+    if (!customerLightbox || !customerLightboxAsset || customerLightboxIndex < 0) return
+    const nextIndex = direction === 'next' ? customerLightboxIndex + 1 : customerLightboxIndex - 1
+    if (nextIndex < 0 || nextIndex >= customerLightboxAssets.length) return
+    setCustomerLightbox({
+      deliveryId: customerLightbox.deliveryId,
+      assetId: customerLightboxAssets[nextIndex].id,
+    })
+  }
+
+  const renderCustomerLightbox = () => {
+    if (!customerLightboxAsset || !customerLightbox) return null
+
+    const previewUrl = customerPreviewUrls[customerLightboxAsset.id]
+    const canDownload =
+      view === 'share' ? shareAllowDownload : Boolean(customerLightboxAsset.canDownload)
+
+    return (
+      <div
+        className="customer-lightbox"
+        role="dialog"
+        aria-modal="true"
+        aria-label={getDisplayFileName(customerLightboxAsset.filename)}
+        onClick={closeCustomerLightbox}
+        onTouchStart={(event) => {
+          customerLightboxTouchStartRef.current = event.touches[0]?.clientX ?? null
+        }}
+        onTouchEnd={(event) => {
+          const start = customerLightboxTouchStartRef.current
+          customerLightboxTouchStartRef.current = null
+          if (start === null) return
+          const delta = event.changedTouches[0]?.clientX - start
+          if (Math.abs(delta) < 48) return
+          if (delta < 0) {
+            moveCustomerLightbox('next')
+          } else {
+            moveCustomerLightbox('prev')
+          }
+        }}
+      >
+        <div className="customer-lightbox-panel" onClick={(event) => event.stopPropagation()}>
+          <button className="customer-lightbox-close" type="button" onClick={closeCustomerLightbox}>
+            Close
+          </button>
+          <div className="customer-lightbox-stage">
+            {previewUrl ? (
+              <img src={previewUrl} alt={getDisplayFileName(customerLightboxAsset.filename)} />
+            ) : (
+              <div className="customer-lightbox-loading">Loading preview…</div>
+            )}
+          </div>
+          <div className="customer-lightbox-meta">
+            <p className="customer-lightbox-name">{getDisplayFileName(customerLightboxAsset.filename)}</p>
+            <div className="customer-lightbox-actions">
+              <button
+                className="button ghost"
+                type="button"
+                onClick={() => moveCustomerLightbox('prev')}
+                disabled={customerLightboxIndex <= 0}
+              >
+                Previous
+              </button>
+              <button
+                className="button ghost"
+                type="button"
+                onClick={() => moveCustomerLightbox('next')}
+                disabled={customerLightboxIndex >= customerLightboxAssets.length - 1}
+              >
+                Next
+              </button>
+              <button
+                className="button ghost"
+                type="button"
+                disabled={!canDownload}
+                onClick={() => {
+                  void handleOpenAsset(customerLightboxAsset.id, 'download', {
+                    shareToken: view === 'share' ? shareToken : undefined,
+                  })
+                }}
+              >
+                Download
+              </button>
+            </div>
+            <p className="portal-hint">
+              {customerLightboxIndex + 1} / {customerLightboxAssets.length}
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const handleOpenAsset = async (
+    assetId: string,
+    mode: 'view' | 'download',
+    options?: { shareToken?: string }
+  ) => {
     if (!supabase) return
     const reportError = role === 'admin' ? setAdminError : setCustomerError
     try {
@@ -1546,11 +1815,10 @@ function App() {
         reportError('Login session expired. Please log in again.')
         return
       }
-      const endpoint =
-        mode === 'view' ? '/api/v1/media/preview-url' : '/api/v1/media/signed-url'
+      const endpoint = mode === 'view' && !options?.shareToken ? '/api/v1/media/preview-url' : '/api/v1/media/signed-url'
       const payload = await workerRequest<{ signedUrl?: string; url?: string }>(endpoint, token, {
         method: 'POST',
-        body: { assetId, mode },
+        body: { assetId, mode, shareToken: options?.shareToken },
       })
       const nextUrl = payload.url ?? payload.signedUrl
       if (!nextUrl) throw new Error('Missing asset URL')
@@ -2525,6 +2793,20 @@ function App() {
             <h2>My Pictures</h2>
             <p>Media matched to <strong>{session.user.email}</strong>.</p>
           </div>
+          <div className="customer-summary-strip">
+            <div className="admin-stat-card">
+              <span>Deliveries</span>
+              <strong>{myDeliveries.length}</strong>
+            </div>
+            <div className="admin-stat-card">
+              <span>Files</span>
+              <strong>{customerVisibleAssets.length}</strong>
+            </div>
+            <div className="admin-stat-card">
+              <span>Available</span>
+              <strong>{myDeliveries.filter((delivery) => delivery.accessMode !== 'viewer').length}</strong>
+            </div>
+          </div>
         </div>
 
         {customerBusy && <p className="portal-hint">Loading your deliveries...</p>}
@@ -2541,16 +2823,21 @@ function App() {
                   <p className="delivery-title">Delivery {delivery.deliveryId.slice(0, 8)}</p>
                   <p className="delivery-expiry">{daysRemainingText(delivery.expiresAt)}</p>
                 </div>
-                <button
-                  className="button ghost"
-                  type="button"
-                  disabled={delivery.accessMode === 'viewer'}
-                  onClick={() => {
-                    void handleCreateShareLink(delivery.deliveryId)
-                  }}
-                >
-                  Create view-only link
-                </button>
+                <div className="delivery-header-actions">
+                  <span className="admin-client-count">
+                    {delivery.assets.length} file{delivery.assets.length === 1 ? '' : 's'}
+                  </span>
+                  <button
+                    className="button ghost"
+                    type="button"
+                    disabled={delivery.accessMode === 'viewer'}
+                    onClick={() => {
+                      void handleCreateShareLink(delivery.deliveryId)
+                    }}
+                  >
+                    Create view-only link
+                  </button>
+                </div>
               </div>
 
               {newShareLinks[delivery.deliveryId] && (
@@ -2568,20 +2855,49 @@ function App() {
                 </div>
               )}
 
-              <ul className="delivery-assets">
+              <div className="customer-asset-grid">
                 {delivery.assets.map((asset) => (
-                  <li key={asset.id}>
-                    <span>{asset.filename}</span>
-                    <span>{formatBytes(asset.bytes)}</span>
-                    <div className="delivery-asset-actions">
+                  <article key={asset.id} className="customer-asset-card">
+                    {asset.mime_type.startsWith('image/') ? (
+                      <button
+                        className="customer-asset-thumb customer-asset-thumb-button"
+                        type="button"
+                        onClick={() => openCustomerLightbox(delivery.deliveryId, asset.id)}
+                        aria-label={`Open ${getDisplayFileName(asset.filename)}`}
+                        disabled={!customerAssetPreviewUrls[asset.id]}
+                      >
+                        {customerAssetPreviewUrls[asset.id] ? (
+                          <img src={customerAssetPreviewUrls[asset.id]} alt={getDisplayFileName(asset.filename)} loading="lazy" />
+                        ) : (
+                          <div className="customer-asset-thumb-fallback">
+                            <span>IMG</span>
+                          </div>
+                        )}
+                      </button>
+                    ) : (
+                      <div className="customer-asset-thumb">
+                        <div className="customer-asset-thumb-fallback">
+                          <span>{asset.mime_type.split('/')[0]?.slice(0, 1).toUpperCase() || 'F'}</span>
+                        </div>
+                      </div>
+                    )}
+                    <div className="customer-asset-main">
+                      <p className="customer-asset-name">{getDisplayFileName(asset.filename)}</p>
+                      <p className="portal-hint">{getAssetKind(asset.mime_type)}</p>
+                    </div>
+                    <div className="customer-asset-actions">
                       <button
                         className="button ghost"
                         type="button"
                         onClick={() => {
+                          if (asset.mime_type.startsWith('image/') && customerAssetPreviewUrls[asset.id]) {
+                            openCustomerLightbox(delivery.deliveryId, asset.id)
+                            return
+                          }
                           void handleOpenAsset(asset.id, 'view')
                         }}
                       >
-                        View
+                        Open
                       </button>
                       <button
                         className="button ghost"
@@ -2594,12 +2910,14 @@ function App() {
                         Download
                       </button>
                     </div>
-                  </li>
+                  </article>
                 ))}
-              </ul>
+              </div>
             </article>
           ))}
         </div>
+
+        {customerLightboxAsset && customerLightbox && renderCustomerLightbox()}
       </section>
     )
   }
@@ -3378,23 +3696,105 @@ function App() {
 
   const renderShareView = () => (
     <section className="portal-section">
-      <h2>Shared Gallery</h2>
-      <p>View-only mode. Download is disabled for this link.</p>
+      <div className="portal-head">
+        <div>
+          <h2>Shared Gallery</h2>
+          <p>
+            {shareAllowDownload ? 'Downloads are enabled for this link.' : 'View-only mode for this link.'}
+          </p>
+        </div>
+        <div className="customer-summary-strip">
+          <div className="admin-stat-card">
+            <span>Files</span>
+            <strong>{shareAssets.length}</strong>
+          </div>
+          <div className="admin-stat-card">
+            <span>Images</span>
+            <strong>{shareAssets.filter((asset) => asset.mime_type.startsWith('image/')).length}</strong>
+          </div>
+          <div className="admin-stat-card">
+            <span>Access</span>
+            <strong>{shareAllowDownload ? 'Download' : 'View only'}</strong>
+          </div>
+        </div>
+      </div>
 
       {shareBusy && <p className="portal-hint">Loading shared media...</p>}
       {shareMessage && <p className="portal-error">{shareMessage}</p>}
 
-      {!shareBusy && !shareMessage && (
-        <ul className="delivery-assets">
-          {shareAssets.map((asset) => (
-            <li key={asset.id}>
-              <span>{asset.filename}</span>
-              <span>{formatBytes(asset.bytes)}</span>
-              <span>{asset.mime_type}</span>
-            </li>
-          ))}
-        </ul>
+      {!shareBusy && !shareMessage && shareAssets.length === 0 && (
+        <p className="portal-hint">No files are available in this shared gallery yet.</p>
       )}
+
+      {!shareBusy && !shareMessage && shareAssets.length > 0 && (
+        <div className="customer-asset-grid">
+          {shareAssets.map((asset) => {
+            const isImage = asset.mime_type.startsWith('image/')
+            const previewUrl = shareAssetPreviewUrls[asset.id]
+            const displayName = getDisplayFileName(asset.filename)
+            const canDownload = shareAllowDownload
+
+            return (
+              <article key={asset.id} className="customer-asset-card">
+                {isImage ? (
+                  <button
+                    className="customer-asset-thumb customer-asset-thumb-button"
+                    type="button"
+                    onClick={() => openCustomerLightbox(shareDeliveryId, asset.id)}
+                    aria-label={`Open ${displayName}`}
+                    disabled={!previewUrl}
+                  >
+                    {previewUrl ? (
+                      <img src={previewUrl} alt={displayName} loading="lazy" />
+                    ) : (
+                      <div className="customer-asset-thumb-fallback">
+                        <span>IMG</span>
+                      </div>
+                    )}
+                  </button>
+                ) : (
+                  <div className="customer-asset-thumb">
+                    <div className="customer-asset-thumb-fallback">
+                      <span>{asset.mime_type.split('/')[0]?.slice(0, 1).toUpperCase() || 'F'}</span>
+                    </div>
+                  </div>
+                )}
+                <div className="customer-asset-main">
+                  <p className="customer-asset-name">{displayName}</p>
+                  <p className="portal-hint">{getAssetKind(asset.mime_type)}</p>
+                </div>
+                <div className="customer-asset-actions">
+                  <button
+                    className="button ghost"
+                    type="button"
+                    onClick={() => {
+                      if (isImage && previewUrl) {
+                        openCustomerLightbox(shareDeliveryId, asset.id)
+                        return
+                      }
+                      void handleOpenAsset(asset.id, 'view', { shareToken })
+                    }}
+                  >
+                    Open
+                  </button>
+                  <button
+                    className="button ghost"
+                    type="button"
+                    disabled={!canDownload}
+                    onClick={() => {
+                      void handleOpenAsset(asset.id, 'download', { shareToken })
+                    }}
+                  >
+                    Download
+                  </button>
+                </div>
+              </article>
+            )
+          })}
+        </div>
+      )}
+
+      {customerLightboxAsset && customerLightbox && renderCustomerLightbox()}
     </section>
   )
 
