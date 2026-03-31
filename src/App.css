@@ -542,6 +542,27 @@
   font-size: 0.88rem;
 }
 
+.admin-activity-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.admin-activity-context span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(236, 232, 223, 0.14);
+  background: rgba(236, 232, 223, 0.06);
+  color: rgba(236, 232, 223, 0.82);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .admin-activity-item.is-download {
   border-color: rgba(121, 168, 200, 0.22);
 }

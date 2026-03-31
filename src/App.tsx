@@ -853,6 +853,20 @@ function App() {
       .sort((left, right) => left.email.localeCompare(right.email))
   }, [adminClients])
 
+  const adminClientById = useMemo(() => {
+    return new Map(adminClients.map((client) => [client.id, client] as const))
+  }, [adminClients])
+
+  const adminProjectById = useMemo(() => {
+    return new Map(
+      adminClients.flatMap((client) => client.projects).map((project) => [project.id, project] as const)
+    )
+  }, [adminClients])
+
+  const adminAssetById = useMemo(() => {
+    return new Map(adminClients.flatMap((client) => client.assets).map((asset) => [asset.id, asset] as const))
+  }, [adminClients])
+
   const uploadQueueGroups = useMemo(() => buildUploadQueueGroups(uploadItems), [uploadItems])
 
   useEffect(() => {
@@ -1935,6 +1949,15 @@ function App() {
     })
   }
 
+  const getAdminActivityContext = (entry: AdminActivityItem) => {
+    const client = entry.clientId ? adminClientById.get(entry.clientId) : null
+    const project = entry.projectId ? adminProjectById.get(entry.projectId) : null
+    const asset = entry.assetId ? adminAssetById.get(entry.assetId) : null
+    const itemCount = typeof entry.metadata?.count === 'number' ? entry.metadata.count : null
+
+    return { client, project, asset, itemCount }
+  }
+
   const renderAdminActivityPanel = (title: string, clientId?: string) => (
     <section className="admin-activity-panel">
       <div className="admin-activity-panel-head">
@@ -1956,10 +1979,25 @@ function App() {
         <ul className="admin-activity-list">
           {adminActivities.slice(0, 6).map((entry) => (
             <li key={entry.id} className={`admin-activity-item is-${entry.kind}`}>
-              <div>
-                <p className="admin-activity-title">{entry.title}</p>
-                <p className="admin-activity-detail">{entry.detail}</p>
-              </div>
+              {(() => {
+                const { client, project, asset, itemCount } = getAdminActivityContext(entry)
+                return (
+                  <div>
+                    <p className="admin-activity-title">{entry.title}</p>
+                    <p className="admin-activity-detail">{entry.detail}</p>
+                    <div className="admin-activity-context">
+                      {client && <span>Client: {client.full_name}</span>}
+                      {project && <span>Folder: {project.name}</span>}
+                      {asset && <span>File: {getDisplayFileName(asset.filename)}</span>}
+                      {itemCount !== null && (
+                        <span>
+                          {itemCount} item{itemCount === 1 ? '' : 's'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
               <time dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleString()}</time>
             </li>
           ))}
