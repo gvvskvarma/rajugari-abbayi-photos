@@ -1727,8 +1727,8 @@ function App() {
     if (!customerLightboxAsset || !customerLightbox) return null
 
     const previewUrl = customerPreviewUrls[customerLightboxAsset.id]
-    const canDownload =
-      view === 'share' ? shareAllowDownload : Boolean(customerLightboxAsset.canDownload)
+    const canDownload = Boolean(customerLightboxAsset.canDownload)
+    const showDownloadAction = view !== 'share'
 
     return (
       <div
@@ -1783,18 +1783,18 @@ function App() {
               >
                 Next
               </button>
-              <button
-                className="button ghost"
-                type="button"
-                disabled={!canDownload}
-                onClick={() => {
-                  void handleOpenAsset(customerLightboxAsset.id, 'download', {
-                    shareToken: view === 'share' ? shareToken : undefined,
-                  })
-                }}
-              >
-                Download
-              </button>
+              {showDownloadAction && (
+                <button
+                  className="button ghost"
+                  type="button"
+                  disabled={!canDownload}
+                  onClick={() => {
+                    void handleOpenAsset(customerLightboxAsset.id, 'download')
+                  }}
+                >
+                  Download
+                </button>
+              )}
             </div>
             <p className="portal-hint">
               {customerLightboxIndex + 1} / {customerLightboxAssets.length}
@@ -3710,11 +3710,7 @@ function App() {
       <div className="portal-head">
         <div>
           <h2>Shared Gallery</h2>
-          <p className="share-gallery-copy">
-            {shareAllowDownload
-              ? 'This shared link can preview and download files.'
-              : 'This shared link is view-only. Downloads are disabled.'}
-          </p>
+          <p className="share-gallery-copy">This shared link is view-only. Open any file to preview it in place.</p>
         </div>
         <div className="customer-summary-strip">
           <div className="admin-stat-card">
@@ -3727,7 +3723,7 @@ function App() {
           </div>
           <div className="admin-stat-card">
             <span>Access</span>
-            <strong>{shareAllowDownload ? 'Download' : 'View only'}</strong>
+            <strong>{shareAllowDownload ? 'Preview only' : 'View only'}</strong>
           </div>
           <div className="admin-stat-card">
             <span>Expires</span>
@@ -3756,7 +3752,6 @@ function App() {
             const isImage = asset.mime_type.startsWith('image/')
             const previewUrl = shareAssetPreviewUrls[asset.id]
             const displayName = getDisplayFileName(asset.filename)
-            const canDownload = shareAllowDownload
 
             return (
               <article key={asset.id} className="customer-asset-card">
@@ -3800,16 +3795,6 @@ function App() {
                     }}
                   >
                     Open
-                  </button>
-                  <button
-                    className="button ghost"
-                    type="button"
-                    disabled={!canDownload}
-                    onClick={() => {
-                      void handleOpenAsset(asset.id, 'download', { shareToken })
-                    }}
-                  >
-                    Download
                   </button>
                 </div>
               </article>
