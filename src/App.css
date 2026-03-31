@@ -491,9 +491,42 @@
 }
 
 .admin-activity-toolbar {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: minmax(220px, 280px);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.admin-activity-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding-inline: 14px;
+  text-transform: none;
+  letter-spacing: 0.05em;
+  font-size: 0.76rem;
+}
+
+.admin-activity-chip span {
+  min-width: 24px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(236, 232, 223, 0.12);
+  color: #f3efe7;
+  font-size: 0.68rem;
+  line-height: 1;
+  text-align: center;
+}
+
+.admin-activity-chip.is-active {
+  background: linear-gradient(135deg, #e4c38f, #c8a879);
+  color: #17140f;
+  border-color: transparent;
+  box-shadow: 0 12px 30px rgba(200, 168, 121, 0.2);
+}
+
+.admin-activity-chip.is-active span {
+  background: rgba(23, 20, 15, 0.16);
+  color: #17140f;
 }
 
 .admin-activity-panel-head {
@@ -1049,7 +1082,7 @@
   }
 
   .admin-activity-toolbar {
-    grid-template-columns: 1fr;
+    gap: 8px;
   }
 
   .admin-bulk-actions {
@@ -1698,7 +1731,8 @@ main > section {
   .admin-head-actions,
   .admin-file-pill,
   .admin-activity-panel-head,
-  .admin-project-more {
+  .admin-project-more,
+  .admin-activity-toolbar {
     flex-direction: column;
     align-items: flex-start;
   }

@@ -803,7 +803,7 @@ function App() {
     }
   }
 
-  const loadAdminActivity = async (clientId?: string, kindFilter: 'all' | AdminActivityKind = adminActivityKindFilter) => {
+  const loadAdminActivity = async (clientId?: string) => {
     if (!supabase || !session?.user.id || role !== 'admin') return
 
     setAdminActivityBusy(true)
@@ -818,7 +818,6 @@ function App() {
 
       const params = new URLSearchParams({ limit: String(ADMIN_ACTIVITY_LIMIT) })
       if (clientId) params.set('clientId', clientId)
-      if (kindFilter !== 'all') params.set('kind', kindFilter)
 
       const payload = await workerRequest<{ activities: AdminActivityItem[] }>(
         `/api/v1/admin/activity?${params.toString()}`,
@@ -1337,8 +1336,8 @@ function App() {
     if (view === 'admin-client' && !selectedAdminClient?.id) return
 
     const clientId = view === 'admin-client' ? selectedAdminClient?.id : undefined
-    void loadAdminActivity(clientId, adminActivityKindFilter)
-  }, [role, session?.user.id, view, selectedAdminClient?.id, adminActivityKindFilter])
+    void loadAdminActivity(clientId)
+  }, [role, session?.user.id, view, selectedAdminClient?.id])
 
   useEffect(() => {
     if (!supabase || view !== 'share' || !shareToken) return
@@ -1967,6 +1966,32 @@ function App() {
     return { client, project, asset, itemCount }
   }
 
+  const adminActivityCounts = useMemo(() => {
+    const counts: Record<'all' | AdminActivityKind, number> = {
+      all: 0,
+      upload: 0,
+      download: 0,
+      create: 0,
+      edit: 0,
+      delete: 0,
+    }
+
+    for (const activity of adminActivities) {
+      counts.all += 1
+      counts[activity.kind] += 1
+    }
+
+    return counts
+  }, [adminActivities])
+
+  const visibleAdminActivities = useMemo(() => {
+    return adminActivities.filter((entry) => {
+      const clientMatches = !selectedAdminClient?.id || entry.clientId === selectedAdminClient.id
+      const kindMatches = adminActivityKindFilter === 'all' || entry.kind === adminActivityKindFilter
+      return clientMatches && kindMatches
+    })
+  }, [adminActivities, adminActivityKindFilter, selectedAdminClient?.id])
+
   const renderAdminActivityPanel = (title: string, clientId?: string) => (
     <section className="admin-activity-panel">
       <div className="admin-activity-panel-head">
@@ -1974,24 +1999,58 @@ function App() {
           <p className="eyebrow">Audit trail</p>
           <h3>{title}</h3>
         </div>
-        <span className="admin-client-count">{adminActivities.length} events</span>
+        <span className="admin-client-count">{visibleAdminActivities.length} events</span>
       </div>
 
-      <div className="admin-activity-toolbar">
-        <label className="admin-search admin-activity-filter">
-          Event type
-          <select
-            value={adminActivityKindFilter}
-            onChange={(event) => setAdminActivityKindFilter(event.target.value as 'all' | AdminActivityKind)}
-          >
-            <option value="all">All events</option>
-            <option value="upload">Uploads</option>
-            <option value="download">Downloads</option>
-            <option value="create">Creates</option>
-            <option value="edit">Edits</option>
-            <option value="delete">Deletes</option>
-          </select>
-        </label>
+      <div className="admin-activity-toolbar" role="toolbar" aria-label="Audit trail filters">
+        <button
+          className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'all' ? 'is-active' : ''}`}
+          type="button"
+          onClick={() => setAdminActivityKindFilter('all')}
+        >
+          All events
+          <span>{adminActivityCounts.all}</span>
+        </button>
+        <button
+          className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'upload' ? 'is-active' : ''}`}
+          type="button"
+          onClick={() => setAdminActivityKindFilter('upload')}
+        >
+          Uploads
+          <span>{adminActivityCounts.upload}</span>
+        </button>
+        <button
+          className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'download' ? 'is-active' : ''}`}
+          type="button"
+          onClick={() => setAdminActivityKindFilter('download')}
+        >
+          Downloads
+          <span>{adminActivityCounts.download}</span>
+        </button>
+        <button
+          className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'create' ? 'is-active' : ''}`}
+          type="button"
+          onClick={() => setAdminActivityKindFilter('create')}
+        >
+          Creates
+          <span>{adminActivityCounts.create}</span>
+        </button>
+        <button
+          className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'edit' ? 'is-active' : ''}`}
+          type="button"
+          onClick={() => setAdminActivityKindFilter('edit')}
+        >
+          Edits
+          <span>{adminActivityCounts.edit}</span>
+        </button>
+        <button
+          className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'delete' ? 'is-active' : ''}`}
+          type="button"
+          onClick={() => setAdminActivityKindFilter('delete')}
+        >
+          Deletes
+          <span>{adminActivityCounts.delete}</span>
+        </button>
       </div>
 
       {clientId && <p className="portal-hint">Showing activity for the selected client folder.</p>}
@@ -1999,11 +2058,11 @@ function App() {
         <p className="portal-hint">Loading recent activity...</p>
       ) : adminActivityError ? (
         <p className="portal-error">{adminActivityError}</p>
-      ) : adminActivities.length === 0 ? (
+      ) : visibleAdminActivities.length === 0 ? (
         <p className="portal-hint">No recent activity yet.</p>
       ) : (
         <ul className="admin-activity-list">
-          {adminActivities.slice(0, 6).map((entry) => (
+          {visibleAdminActivities.slice(0, 6).map((entry) => (
             <li key={entry.id} className={`admin-activity-item is-${entry.kind}`}>
               {(() => {
                 const { client, project, asset, itemCount } = getAdminActivityContext(entry)
