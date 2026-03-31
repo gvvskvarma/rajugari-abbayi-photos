@@ -1387,7 +1387,9 @@ function App() {
     document.body.appendChild(anchor)
     anchor.click()
     anchor.remove()
-    window.setTimeout(() => URL.revokeObjectURL(url), 1500)
+    // Keep the blob URL alive long enough for the browser to finish persisting
+    // larger archives before we release the backing object.
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
   }
 
   const loadWorkerBlob = async (
