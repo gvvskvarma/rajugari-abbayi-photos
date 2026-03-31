@@ -245,6 +245,12 @@
   gap: 16px;
 }
 
+.admin-upload-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .admin-panel {
   border-radius: 14px;
   border: 1px solid rgba(236, 232, 223, 0.14);
@@ -534,6 +540,13 @@
   justify-content: space-between;
   gap: 12px;
   align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.admin-activity-panel-head-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
   flex-wrap: wrap;
 }
 
@@ -1062,6 +1075,7 @@
 
 @media (max-width: 920px) {
   .admin-upload-layout,
+  .admin-upload-summary,
   .admin-stat-grid,
   .admin-detail-summary,
   .admin-detail-toolbar {
@@ -1731,6 +1745,7 @@ main > section {
   .admin-head-actions,
   .admin-file-pill,
   .admin-activity-panel-head,
+  .admin-activity-panel-head-actions,
   .admin-project-more,
   .admin-activity-toolbar {
     flex-direction: column;

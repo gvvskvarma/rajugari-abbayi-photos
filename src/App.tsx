@@ -692,6 +692,7 @@ function App() {
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const [uploadClientMode, setUploadClientMode] = useState<'create' | 'reuse'>('create')
   const [uploadEmail, setUploadEmail] = useState('')
+  const [uploadReuseSearch, setUploadReuseSearch] = useState('')
   const [uploadTitle, setUploadTitle] = useState('Client Delivery')
   const [uploadItems, setUploadItems] = useState<UploadItem[]>([])
   const [uploadDropActive, setUploadDropActive] = useState(false)
@@ -721,6 +722,7 @@ function App() {
   const [adminActivityBusy, setAdminActivityBusy] = useState(false)
   const [adminActivityError, setAdminActivityError] = useState('')
   const [adminActivityKindFilter, setAdminActivityKindFilter] = useState<'all' | AdminActivityKind>('all')
+  const [adminActivityExpanded, setAdminActivityExpanded] = useState(true)
   const [adminAssetTypeFilter, setAdminAssetTypeFilter] = useState<'all' | 'images' | 'videos' | 'other'>('all')
   const [adminProjectFilterId, setAdminProjectFilterId] = useState('all')
   const [adminProjectRenderLimits, setAdminProjectRenderLimits] = useState<Record<string, number>>({})
@@ -853,6 +855,14 @@ function App() {
       })
       .sort((left, right) => left.email.localeCompare(right.email))
   }, [adminClients])
+
+  const filteredReuseClientEmailOptions = useMemo(() => {
+    const query = uploadReuseSearch.trim().toLowerCase()
+    if (!query) return reuseClientEmailOptions
+    return reuseClientEmailOptions.filter((client) =>
+      [client.email, client.label].join(' ').toLowerCase().includes(query)
+    )
+  }, [reuseClientEmailOptions, uploadReuseSearch])
 
   const adminClientById = useMemo(() => {
     return new Map(adminClients.map((client) => [client.id, client] as const))
@@ -1149,6 +1159,8 @@ function App() {
     window.location.hash = '#admin-clients'
     setView('admin-clients')
     setAdminClientEditMode(false)
+    setAdminActivityExpanded(true)
+    setAdminActivityKindFilter('all')
     setAdminAssetSearch('')
     setAdminAssetTypeFilter('all')
     setAdminProjectFilterId('all')
@@ -1160,6 +1172,8 @@ function App() {
     closeAdminLightbox()
     setSelectedAdminClientId(clientId)
     setAdminClientEditMode(false)
+    setAdminActivityExpanded(false)
+    setAdminActivityKindFilter('all')
     setAdminAssetSearch('')
     setAdminAssetTypeFilter('all')
     setAdminProjectFilterId('all')
@@ -1171,6 +1185,7 @@ function App() {
   const openUploadForClient = (client: AdminClientSummary) => {
     setUploadClientMode('reuse')
     setUploadEmail(client.email)
+    setUploadReuseSearch('')
     setUploadTitle(client.full_name)
     setUploadItems([])
     window.location.hash = '#upload'
@@ -1338,6 +1353,15 @@ function App() {
     const clientId = view === 'admin-client' ? selectedAdminClient?.id : undefined
     void loadAdminActivity(clientId)
   }, [role, session?.user.id, view, selectedAdminClient?.id])
+
+  useEffect(() => {
+    if (view === 'admin-client') {
+      setAdminActivityExpanded(false)
+    }
+    if (view === 'admin-clients') {
+      setAdminActivityExpanded(true)
+    }
+  }, [view])
 
   useEffect(() => {
     if (!supabase || view !== 'share' || !shareToken) return
@@ -1999,94 +2023,107 @@ function App() {
           <p className="eyebrow">Audit trail</p>
           <h3>{title}</h3>
         </div>
-        <span className="admin-client-count">{visibleAdminActivities.length} events</span>
+        <div className="admin-activity-panel-head-actions">
+          <span className="admin-client-count">{visibleAdminActivities.length} events</span>
+          <button
+            className="button ghost"
+            type="button"
+            onClick={() => setAdminActivityExpanded((current) => !current)}
+          >
+            {adminActivityExpanded ? 'Hide activity' : 'Show activity'}
+          </button>
+        </div>
       </div>
 
-      <div className="admin-activity-toolbar" role="toolbar" aria-label="Audit trail filters">
-        <button
-          className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'all' ? 'is-active' : ''}`}
-          type="button"
-          onClick={() => setAdminActivityKindFilter('all')}
-        >
-          All events
-          <span>{adminActivityCounts.all}</span>
-        </button>
-        <button
-          className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'upload' ? 'is-active' : ''}`}
-          type="button"
-          onClick={() => setAdminActivityKindFilter('upload')}
-        >
-          Uploads
-          <span>{adminActivityCounts.upload}</span>
-        </button>
-        <button
-          className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'download' ? 'is-active' : ''}`}
-          type="button"
-          onClick={() => setAdminActivityKindFilter('download')}
-        >
-          Downloads
-          <span>{adminActivityCounts.download}</span>
-        </button>
-        <button
-          className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'create' ? 'is-active' : ''}`}
-          type="button"
-          onClick={() => setAdminActivityKindFilter('create')}
-        >
-          Creates
-          <span>{adminActivityCounts.create}</span>
-        </button>
-        <button
-          className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'edit' ? 'is-active' : ''}`}
-          type="button"
-          onClick={() => setAdminActivityKindFilter('edit')}
-        >
-          Edits
-          <span>{adminActivityCounts.edit}</span>
-        </button>
-        <button
-          className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'delete' ? 'is-active' : ''}`}
-          type="button"
-          onClick={() => setAdminActivityKindFilter('delete')}
-        >
-          Deletes
-          <span>{adminActivityCounts.delete}</span>
-        </button>
-      </div>
+      {adminActivityExpanded && (
+        <>
+          <div className="admin-activity-toolbar" role="toolbar" aria-label="Audit trail filters">
+            <button
+              className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'all' ? 'is-active' : ''}`}
+              type="button"
+              onClick={() => setAdminActivityKindFilter('all')}
+            >
+              All events
+              <span>{adminActivityCounts.all}</span>
+            </button>
+            <button
+              className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'upload' ? 'is-active' : ''}`}
+              type="button"
+              onClick={() => setAdminActivityKindFilter('upload')}
+            >
+              Uploads
+              <span>{adminActivityCounts.upload}</span>
+            </button>
+            <button
+              className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'download' ? 'is-active' : ''}`}
+              type="button"
+              onClick={() => setAdminActivityKindFilter('download')}
+            >
+              Downloads
+              <span>{adminActivityCounts.download}</span>
+            </button>
+            <button
+              className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'create' ? 'is-active' : ''}`}
+              type="button"
+              onClick={() => setAdminActivityKindFilter('create')}
+            >
+              Creates
+              <span>{adminActivityCounts.create}</span>
+            </button>
+            <button
+              className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'edit' ? 'is-active' : ''}`}
+              type="button"
+              onClick={() => setAdminActivityKindFilter('edit')}
+            >
+              Edits
+              <span>{adminActivityCounts.edit}</span>
+            </button>
+            <button
+              className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'delete' ? 'is-active' : ''}`}
+              type="button"
+              onClick={() => setAdminActivityKindFilter('delete')}
+            >
+              Deletes
+              <span>{adminActivityCounts.delete}</span>
+            </button>
+          </div>
 
-      {clientId && <p className="portal-hint">Showing activity for the selected client folder.</p>}
-      {adminActivityBusy ? (
-        <p className="portal-hint">Loading recent activity...</p>
-      ) : adminActivityError ? (
-        <p className="portal-error">{adminActivityError}</p>
-      ) : visibleAdminActivities.length === 0 ? (
-        <p className="portal-hint">No recent activity yet.</p>
-      ) : (
-        <ul className="admin-activity-list">
-          {visibleAdminActivities.slice(0, 6).map((entry) => (
-            <li key={entry.id} className={`admin-activity-item is-${entry.kind}`}>
-              {(() => {
-                const { client, project, asset, itemCount } = getAdminActivityContext(entry)
-                return (
-                  <div>
-                    <p className="admin-activity-title">{entry.title}</p>
-                    <p className="admin-activity-detail">{entry.detail}</p>
-                    <div className="admin-activity-context">
-                      {client && <span>Client: {client.full_name}</span>}
-                      {project && <span>Folder: {project.name}</span>}
-                      {asset && <span>File: {getDisplayFileName(asset.filename)}</span>}
-                      {itemCount !== null && (
-                        <span>
-                          {itemCount} item{itemCount === 1 ? '' : 's'}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )
-              })()}
-              <time dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleString()}</time>
-            </li>
-          ))}
-        </ul>
+          {clientId && <p className="portal-hint">Showing activity for the selected client folder.</p>}
+          {adminActivityBusy ? (
+            <p className="portal-hint">Loading recent activity...</p>
+          ) : adminActivityError ? (
+            <p className="portal-error">{adminActivityError}</p>
+          ) : visibleAdminActivities.length === 0 ? (
+            <p className="portal-hint">No recent activity yet.</p>
+          ) : (
+            <ul className="admin-activity-list">
+              {visibleAdminActivities.slice(0, 6).map((entry) => (
+                <li key={entry.id} className={`admin-activity-item is-${entry.kind}`}>
+                  {(() => {
+                    const { client, project, asset, itemCount } = getAdminActivityContext(entry)
+                    return (
+                      <div>
+                        <p className="admin-activity-title">{entry.title}</p>
+                        <p className="admin-activity-detail">{entry.detail}</p>
+                        <div className="admin-activity-context">
+                          {client && <span>Client: {client.full_name}</span>}
+                          {project && <span>Folder: {project.name}</span>}
+                          {asset && <span>File: {getDisplayFileName(asset.filename)}</span>}
+                          {itemCount !== null && (
+                            <span>
+                              {itemCount} item{itemCount === 1 ? '' : 's'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })()}
+                  <time dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleString()}</time>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </section>
   )
@@ -2291,6 +2328,7 @@ function App() {
     setUploadItems([])
     setUploadEmail('')
     setUploadClientMode('create')
+    setUploadReuseSearch('')
     setSelectedAdminClientId(clientId)
     window.location.hash = `#admin-clients/${clientId}`
     void loadAdminData()
@@ -2601,6 +2639,46 @@ function App() {
         {adminBusy && <p className="portal-hint">Loading client folders...</p>}
         {adminError && <p className="portal-error">{adminError}</p>}
 
+        <div className="admin-upload-summary" aria-label="Upload summary">
+          <div className="admin-stat-card">
+            <span>Client</span>
+            <strong>
+              {uploadClientMode === 'reuse'
+                ? selectedUploadClient?.full_name ?? 'Choose an existing client'
+                : 'Create new client'}
+            </strong>
+            <p className="portal-hint">
+              {uploadClientMode === 'reuse'
+                ? selectedUploadClient
+                  ? selectedUploadClient.email
+                  : 'Search or type an email to reuse an existing folder.'
+                : 'A new client folder will be created from the email you enter.'}
+            </p>
+          </div>
+          <div className="admin-stat-card">
+            <span>Files</span>
+            <strong>
+              {uploadItems.length} item{uploadItems.length === 1 ? '' : 's'}
+            </strong>
+            <p className="portal-hint">
+              {uploadQueueGroups.length > 0
+                ? `${uploadQueueGroups.filter((group) => group.isFolder).length} folder group${
+                    uploadQueueGroups.filter((group) => group.isFolder).length === 1 ? '' : 's'
+                  }, ${uploadQueueGroups.filter((group) => !group.isFolder).length} file group${
+                    uploadQueueGroups.filter((group) => !group.isFolder).length === 1 ? '' : 's'
+                  }`
+                : 'Drop files or folders to build the upload queue.'}
+            </p>
+          </div>
+          <div className="admin-stat-card">
+            <span>Upload</span>
+            <strong>{uploadTitle.trim() || 'Client Delivery'}</strong>
+            <p className="portal-hint">
+              {uploadBusy ? 'Preparing upload...' : 'Upload will use the title above as the folder name.'}
+            </p>
+          </div>
+        </div>
+
         <form className="admin-upload-layout" onSubmit={handleUploadDelivery}>
           <div className="admin-panel">
             <div className="admin-toggle" role="group" aria-label="Client folder mode">
@@ -2633,14 +2711,23 @@ function App() {
             {uploadClientMode === 'reuse' && (
               <div className="admin-reuse-picker">
                 <label>
+                  Search existing clients
+                  <input
+                    type="search"
+                    value={uploadReuseSearch}
+                    onChange={(event) => setUploadReuseSearch(event.target.value)}
+                    placeholder="Search by name or email"
+                  />
+                </label>
+                <label>
                   Existing client email
                   <select
                     value={selectedUploadClient?.email ?? ''}
                     onChange={(event) => setUploadEmail(event.target.value)}
-                    disabled={reuseClientEmailOptions.length === 0}
+                    disabled={filteredReuseClientEmailOptions.length === 0}
                   >
                     <option value="">Select an existing client</option>
-                    {reuseClientEmailOptions.map((client) => (
+                    {filteredReuseClientEmailOptions.map((client) => (
                       <option key={client.id} value={client.email}>
                         {client.email} {client.label ? `- ${client.label}` : ''}
                       </option>
@@ -2649,6 +2736,10 @@ function App() {
                 </label>
                 {reuseClientEmailOptions.length === 0 ? (
                   <p className="portal-hint">No existing clients loaded yet. Use manual email entry below.</p>
+                ) : filteredReuseClientEmailOptions.length === 0 ? (
+                  <p className="portal-hint">
+                    No existing clients match the search. Clear the search or type an email manually.
+                  </p>
                 ) : (
                   <p className="portal-hint">Choose an email to reuse that client folder, or type one manually below.</p>
                 )}
