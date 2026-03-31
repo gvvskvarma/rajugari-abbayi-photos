@@ -1426,9 +1426,16 @@ function App() {
 
   const handleDownloadAdminProject = async (project: AdminProject) => {
     if (!supabase || !session?.user.id || role !== 'admin') return
+    const projectAssetIds = selectedAdminClient?.assets
+      .filter((asset) => asset.project_id === project.id)
+      .map((asset) => asset.id) ?? []
+    if (projectAssetIds.length === 0) {
+      setAdminError('No files found for this folder.')
+      return
+    }
     await downloadAdminArchive(
-      `/api/v1/admin/projects/${project.id}/download`,
-      {},
+      '/api/v1/admin/downloads',
+      { assetIds: projectAssetIds, filename: project.name },
       `${sanitizeDownloadName(project.name)}.zip`
     )
   }

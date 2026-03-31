@@ -511,6 +511,13 @@ const streamZipResponse = async (
   entries: Array<{ filename: string; r2_object_key: string }>,
   archiveName: string
 ) => {
+  for (const entry of entries) {
+    const object = await c.env.R2_MEDIA_BUCKET.head(entry.r2_object_key)
+    if (!object) {
+      throw new Error(`File missing in storage for ${entry.filename}. Re-upload required.`)
+    }
+  }
+
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       const zip = new Zip((error, chunk, final) => {
