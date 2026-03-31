@@ -501,6 +501,27 @@
   margin-top: 2px;
 }
 
+.admin-bulk-actions .button,
+.admin-project-actions .button {
+  color: #f6f2ea;
+  border-color: rgba(236, 232, 223, 0.34);
+  background: rgba(236, 232, 223, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(11, 13, 19, 0.18);
+}
+
+.admin-bulk-actions .button:hover,
+.admin-project-actions .button:hover {
+  border-color: rgba(200, 168, 121, 0.72);
+  background: rgba(200, 168, 121, 0.16);
+}
+
+.admin-bulk-actions .button.primary,
+.admin-project-actions .button.primary {
+  color: #0f1118;
+  border-color: rgba(200, 168, 121, 0.86);
+  background: linear-gradient(120deg, #dbc29b, #c8a879);
+}
+
 .admin-client-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
