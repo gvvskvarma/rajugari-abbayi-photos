@@ -688,6 +688,8 @@ function App() {
   const [shareCopyState, setShareCopyState] = useState<Record<string, string>>({})
   const [shareAllowDownload, setShareAllowDownload] = useState(false)
   const [shareDeliveryId, setShareDeliveryId] = useState('')
+  const [shareExpiresAt, setShareExpiresAt] = useState('')
+  const [sharePageCopyState, setSharePageCopyState] = useState('')
   const [shareAssetPreviewUrls, setShareAssetPreviewUrls] = useState<Record<string, string>>({})
   const [customerLightbox, setCustomerLightbox] = useState<CustomerLightboxState | null>(null)
   const [customerAssetPreviewUrls, setCustomerAssetPreviewUrls] = useState<Record<string, string>>({})
@@ -1522,6 +1524,8 @@ function App() {
       setShareMessage('')
       setShareAllowDownload(false)
       setShareDeliveryId('')
+      setShareExpiresAt('')
+      setSharePageCopyState('')
       setShareAssetPreviewUrls({})
 
       try {
@@ -1537,6 +1541,7 @@ function App() {
           setShareAssets([])
           setShareAllowDownload(false)
           setShareDeliveryId('')
+          setShareExpiresAt('')
           setShareAssetPreviewUrls({})
           setShareBusy(false)
           return
@@ -1545,11 +1550,13 @@ function App() {
         setShareAssets(payload.assets ?? [])
         setShareAllowDownload(Boolean(payload.allowDownload))
         setShareDeliveryId(payload.deliveryId)
+        setShareExpiresAt(payload.expiresAt)
       } catch (error) {
         setShareMessage(error instanceof Error ? error.message : 'This share link is invalid or unavailable.')
         setShareAssets([])
         setShareAllowDownload(false)
         setShareDeliveryId('')
+        setShareExpiresAt('')
         setShareAssetPreviewUrls({})
       }
       setShareBusy(false)
@@ -1600,6 +1607,8 @@ function App() {
     setAdminActivities([])
     setAdminActivityError('')
     setShareAssetPreviewUrls({})
+    setSharePageCopyState('')
+    setShareExpiresAt('')
     setCustomerAssetPreviewUrls({})
     window.location.hash = '#home'
   }
@@ -1684,6 +1693,17 @@ function App() {
       setShareCopyState((current) => ({ ...current, [deliveryId]: 'Copied' }))
     } catch {
       setShareCopyState((current) => ({ ...current, [deliveryId]: 'Copy failed' }))
+    }
+  }
+
+  const handleCopySharedGalleryLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href)
+      setSharePageCopyState('Copied')
+      window.setTimeout(() => setSharePageCopyState(''), 1800)
+    } catch {
+      setSharePageCopyState('Copy failed')
+      window.setTimeout(() => setSharePageCopyState(''), 1800)
     }
   }
 
@@ -3690,8 +3710,10 @@ function App() {
       <div className="portal-head">
         <div>
           <h2>Shared Gallery</h2>
-          <p>
-            {shareAllowDownload ? 'Downloads are enabled for this link.' : 'View-only mode for this link.'}
+          <p className="share-gallery-copy">
+            {shareAllowDownload
+              ? 'This shared link can preview and download files.'
+              : 'This shared link is view-only. Downloads are disabled.'}
           </p>
         </div>
         <div className="customer-summary-strip">
@@ -3707,7 +3729,18 @@ function App() {
             <span>Access</span>
             <strong>{shareAllowDownload ? 'Download' : 'View only'}</strong>
           </div>
+          <div className="admin-stat-card">
+            <span>Expires</span>
+            <strong>{daysRemainingText(shareExpiresAt || null)}</strong>
+          </div>
         </div>
+      </div>
+
+      <div className="share-link-row share-link-row-wide">
+        <input className="share-link-input" value={window.location.href} readOnly />
+        <button className="button ghost" type="button" onClick={() => void handleCopySharedGalleryLink()}>
+          {sharePageCopyState || 'Copy link'}
+        </button>
       </div>
 
       {shareBusy && <p className="portal-hint">Loading shared media...</p>}
