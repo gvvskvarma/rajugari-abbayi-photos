@@ -732,11 +732,15 @@ app.get('/api/v1/admin/activity', async (c) => {
 
     const limitRaw = Number.parseInt(c.req.query('limit') ?? '', 10)
     const limit = Number.isFinite(limitRaw) ? Math.min(50, Math.max(1, limitRaw)) : 24
+    const kind = c.req.query('kind')?.trim()
     const clientId = c.req.query('clientId')?.trim()
     const projectId = c.req.query('projectId')?.trim()
     const assetId = c.req.query('assetId')?.trim()
 
     const filters = [`owner_user_id=eq.${encodeURIComponent(user.id)}`]
+    if (kind && adminActivityKinds.has(kind as AdminActivityKind)) {
+      filters.push(`kind=eq.${encodeURIComponent(kind)}`)
+    }
     if (clientId) filters.push(`client_id=eq.${encodeURIComponent(clientId)}`)
     if (projectId) filters.push(`project_id=eq.${encodeURIComponent(projectId)}`)
     if (assetId) filters.push(`asset_id=eq.${encodeURIComponent(assetId)}`)

@@ -490,6 +490,12 @@
   gap: 12px;
 }
 
+.admin-activity-toolbar {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(220px, 280px);
+}
+
 .admin-activity-panel-head {
   display: flex;
   justify-content: space-between;
@@ -1040,6 +1046,10 @@
   .admin-bulk-actions-buttons {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .admin-activity-toolbar {
+    grid-template-columns: 1fr;
   }
 
   .admin-bulk-actions {

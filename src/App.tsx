@@ -720,6 +720,7 @@ function App() {
   const [adminActivities, setAdminActivities] = useState<AdminActivityItem[]>([])
   const [adminActivityBusy, setAdminActivityBusy] = useState(false)
   const [adminActivityError, setAdminActivityError] = useState('')
+  const [adminActivityKindFilter, setAdminActivityKindFilter] = useState<'all' | AdminActivityKind>('all')
   const [adminAssetTypeFilter, setAdminAssetTypeFilter] = useState<'all' | 'images' | 'videos' | 'other'>('all')
   const [adminProjectFilterId, setAdminProjectFilterId] = useState('all')
   const [adminProjectRenderLimits, setAdminProjectRenderLimits] = useState<Record<string, number>>({})
@@ -802,7 +803,7 @@ function App() {
     }
   }
 
-  const loadAdminActivity = async (clientId?: string) => {
+  const loadAdminActivity = async (clientId?: string, kindFilter: 'all' | AdminActivityKind = adminActivityKindFilter) => {
     if (!supabase || !session?.user.id || role !== 'admin') return
 
     setAdminActivityBusy(true)
@@ -817,6 +818,7 @@ function App() {
 
       const params = new URLSearchParams({ limit: String(ADMIN_ACTIVITY_LIMIT) })
       if (clientId) params.set('clientId', clientId)
+      if (kindFilter !== 'all') params.set('kind', kindFilter)
 
       const payload = await workerRequest<{ activities: AdminActivityItem[] }>(
         `/api/v1/admin/activity?${params.toString()}`,
@@ -1219,7 +1221,14 @@ function App() {
         )
 
         if (payload.activity) {
-          setAdminActivities((current) => [payload.activity, ...current.slice(0, ADMIN_ACTIVITY_LIMIT - 1)])
+          const selectedClientId = selectedAdminClient?.id ?? undefined
+          const activityKind = payload.activity.kind
+          const kindMatches = adminActivityKindFilter === 'all' || adminActivityKindFilter === activityKind
+          const clientMatches = !selectedClientId || payload.activity.clientId === selectedClientId
+
+          if (kindMatches && clientMatches) {
+            setAdminActivities((current) => [payload.activity, ...current.slice(0, ADMIN_ACTIVITY_LIMIT - 1)])
+          }
         }
       } catch {
         // Audit writes should never block the primary action flow.
@@ -1328,8 +1337,8 @@ function App() {
     if (view === 'admin-client' && !selectedAdminClient?.id) return
 
     const clientId = view === 'admin-client' ? selectedAdminClient?.id : undefined
-    void loadAdminActivity(clientId)
-  }, [role, session?.user.id, view, selectedAdminClient?.id])
+    void loadAdminActivity(clientId, adminActivityKindFilter)
+  }, [role, session?.user.id, view, selectedAdminClient?.id, adminActivityKindFilter])
 
   useEffect(() => {
     if (!supabase || view !== 'share' || !shareToken) return
@@ -1966,6 +1975,23 @@ function App() {
           <h3>{title}</h3>
         </div>
         <span className="admin-client-count">{adminActivities.length} events</span>
+      </div>
+
+      <div className="admin-activity-toolbar">
+        <label className="admin-search admin-activity-filter">
+          Event type
+          <select
+            value={adminActivityKindFilter}
+            onChange={(event) => setAdminActivityKindFilter(event.target.value as 'all' | AdminActivityKind)}
+          >
+            <option value="all">All events</option>
+            <option value="upload">Uploads</option>
+            <option value="download">Downloads</option>
+            <option value="create">Creates</option>
+            <option value="edit">Edits</option>
+            <option value="delete">Deletes</option>
+          </select>
+        </label>
       </div>
 
       {clientId && <p className="portal-hint">Showing activity for the selected client folder.</p>}
