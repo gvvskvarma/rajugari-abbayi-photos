@@ -413,6 +413,13 @@ type AdminLightboxState = {
   assetId: string
 }
 
+type DeleteConfirmationState = {
+  title: string
+  description: string
+  confirmLabel: string
+  onConfirm: () => Promise<void>
+}
+
 const landscapePaths = [
   'project-rga/landscapes/RGA02744.jpg',
   'project-rga/landscapes/RGA02755.jpg',
@@ -682,6 +689,7 @@ function App() {
   const [selectedAdminAssetIds, setSelectedAdminAssetIds] = useState<string[]>([])
   const [adminAssetPreviewUrls, setAdminAssetPreviewUrls] = useState<Record<string, string>>({})
   const [adminLightbox, setAdminLightbox] = useState<AdminLightboxState | null>(null)
+  const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmationState | null>(null)
   const [adminBusy, setAdminBusy] = useState(false)
   const [adminError, setAdminError] = useState('')
   const adminLightboxTouchStartRef = useRef<number | null>(null)
@@ -1030,6 +1038,20 @@ function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [adminLightboxAsset, adminLightboxAssets.length, adminLightboxIndex])
 
+  useEffect(() => {
+    if (!deleteConfirmation) return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setDeleteConfirmation(null)
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [deleteConfirmation])
+
   const openAdminClients = () => {
     closeAdminLightbox()
     window.location.hash = '#admin-clients'
@@ -1054,6 +1076,30 @@ function App() {
     setUploadTitle(client.full_name)
     setUploadItems([])
     window.location.hash = '#upload'
+  }
+
+  const openDeleteConfirmation = (payload: DeleteConfirmationState) => {
+    setDeleteConfirmation(payload)
+  }
+
+  const closeDeleteConfirmation = () => {
+    setDeleteConfirmation(null)
+  }
+
+  const confirmDeleteConfirmation = async () => {
+    const current = deleteConfirmation
+    if (!current) return
+
+    setDeleteConfirmation(null)
+    setAdminBusy(true)
+    setAdminError('')
+    try {
+      await current.onConfirm()
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'Unable to complete delete')
+    } finally {
+      setAdminBusy(false)
+    }
   }
 
   const getAccessToken = async () => {
@@ -1535,45 +1581,25 @@ function App() {
       return
     }
 
-    if (
-      !window.confirm(
-        `Delete ${getDisplayFileName(asset.filename)}? This will permanently remove the file from the folder, customer view, and database.`
-      )
-    ) {
-      return
-    }
-
-    setAdminBusy(true)
-    setAdminError('')
-    try {
-      await performDeleteAdminAsset(assetId)
-    } catch (error) {
-      setAdminError(error instanceof Error ? error.message : 'Unable to delete file')
-    } finally {
-      setAdminBusy(false)
-    }
+    openDeleteConfirmation({
+      title: `Delete ${getDisplayFileName(asset.filename)}?`,
+      description:
+        'This permanently removes the file from the folder, customer view, and database.',
+      confirmLabel: 'Delete file',
+      onConfirm: () => performDeleteAdminAsset(assetId),
+    })
   }
 
   const handleDeleteAdminProject = async (project: AdminProject) => {
     if (!supabase || !session?.user.id || role !== 'admin') return
 
-    if (
-      !window.confirm(
-        `Delete folder ${project.name}? This removes the project, its uploaded files, the customer folder data, and the database records.`
-      )
-    ) {
-      return
-    }
-
-    setAdminBusy(true)
-    setAdminError('')
-    try {
-      await performDeleteAdminProject(project.id)
-    } catch (error) {
-      setAdminError(error instanceof Error ? error.message : 'Unable to delete folder')
-    } finally {
-      setAdminBusy(false)
-    }
+    openDeleteConfirmation({
+      title: `Delete folder ${project.name}?`,
+      description:
+        'This removes the project, its uploaded files, the customer folder data, and the database records.',
+      confirmLabel: 'Delete folder',
+      onConfirm: () => performDeleteAdminProject(project.id),
+    })
   }
 
   const toggleSelectedAdminAsset = (assetId: string) => {
@@ -1594,24 +1620,16 @@ function App() {
   const handleBulkDeleteAdminAssets = async () => {
     if (!supabase || !session?.user.id || role !== 'admin' || selectedAdminAssetIds.length === 0) return
     const assetIds = [...selectedAdminAssetIds]
-    if (
-      !window.confirm(
-        `Delete ${assetIds.length} selected file${assetIds.length === 1 ? '' : 's'}? This permanently removes the files from the folder, customer view, and database.`
-      )
-    ) {
-      return
-    }
-
-    setAdminBusy(true)
-    setAdminError('')
-    try {
-      await performDeleteAdminAssets(assetIds)
-      setSelectedAdminAssetIds([])
-    } catch (error) {
-      setAdminError(error instanceof Error ? error.message : 'Unable to delete files')
-    } finally {
-      setAdminBusy(false)
-    }
+    openDeleteConfirmation({
+      title: `Delete ${assetIds.length} selected file${assetIds.length === 1 ? '' : 's'}?`,
+      description:
+        'This permanently removes the files from the folder, customer view, and database.',
+      confirmLabel: 'Delete selected',
+      onConfirm: async () => {
+        await performDeleteAdminAssets(assetIds)
+        setSelectedAdminAssetIds([])
+      },
+    })
   }
 
   const handleSaveAdminClient = async () => {
@@ -1661,23 +1679,13 @@ function App() {
   const handleDeleteAdminClient = async () => {
     if (!supabase || !session?.user.id || role !== 'admin' || !selectedAdminClient) return
 
-    if (
-      !window.confirm(
-        `Delete ${selectedAdminClient.full_name}? This removes the client, projects, deliveries, uploaded files, and database records.`
-      )
-    ) {
-      return
-    }
-
-    setAdminBusy(true)
-    setAdminError('')
-    try {
-      await performDeleteAdminClient(selectedAdminClient.id)
-    } catch (error) {
-      setAdminError(error instanceof Error ? error.message : 'Unable to delete client')
-    } finally {
-      setAdminBusy(false)
-    }
+    openDeleteConfirmation({
+      title: `Delete ${selectedAdminClient.full_name}?`,
+      description:
+        'This removes the client, projects, deliveries, uploaded files, and database records.',
+      confirmLabel: 'Delete client',
+      onConfirm: () => performDeleteAdminClient(selectedAdminClient.id),
+    })
   }
 
   const uploadFileToSignedUrl = async (uploadUrl: string, file: File) => {
@@ -2902,6 +2910,38 @@ function App() {
         {view === 'admin-client' && renderAdminClientDetail()}
         {view === 'share' && renderShareView()}
       </main>
+
+      {deleteConfirmation && (
+        <div
+          className="admin-confirm-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="admin-confirm-title"
+          aria-describedby="admin-confirm-description"
+          onClick={closeDeleteConfirmation}
+        >
+          <div className="admin-confirm-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="admin-confirm-copy">
+              <p className="eyebrow">Confirm delete</p>
+              <h3 id="admin-confirm-title">{deleteConfirmation.title}</h3>
+              <p id="admin-confirm-description">{deleteConfirmation.description}</p>
+            </div>
+            <div className="admin-confirm-actions">
+              <button className="button ghost" type="button" onClick={closeDeleteConfirmation} disabled={adminBusy}>
+                Cancel
+              </button>
+              <button
+                className="button primary admin-confirm-destructive"
+                type="button"
+                onClick={() => void confirmDeleteConfirmation()}
+                disabled={adminBusy}
+              >
+                {adminBusy ? 'Deleting...' : deleteConfirmation.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <footer className="footer">
         <p>© 2026 Rajugari_Abbayi Photography. Crafted with intention.</p>
