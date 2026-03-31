@@ -152,6 +152,17 @@ const buildUploadQueueGroups = (items: UploadItem[]) => {
   })
 }
 
+const getDisplayFileName = (value: string) => {
+  const cleaned = value.trim().replace(/\/+$/, '')
+  const segments = cleaned.split('/').filter(Boolean)
+  return segments[segments.length - 1] || cleaned
+}
+
+const sanitizeDownloadName = (value: string) => {
+  const cleaned = getDisplayFileName(value).replace(/[^a-zA-Z0-9._-]/g, '_')
+  return cleaned || 'download'
+}
+
 const readDirectoryEntries = async (directoryEntry: FileSystemDirectoryEntryLike) => {
   const reader = directoryEntry.createReader()
   const entries: FileSystemEntryLike[] = []
@@ -395,6 +406,11 @@ type AdminProjectView = {
   totalAssets: number
   visibleAssets: AdminAsset[]
   latestActivityAt: string
+}
+
+type AdminLightboxState = {
+  projectId: string
+  assetId: string
 }
 
 const landscapePaths = [
@@ -665,10 +681,10 @@ function App() {
   const [adminProjectSort, setAdminProjectSort] = useState<'recent' | 'name' | 'files'>('recent')
   const [selectedAdminAssetIds, setSelectedAdminAssetIds] = useState<string[]>([])
   const [adminAssetPreviewUrls, setAdminAssetPreviewUrls] = useState<Record<string, string>>({})
-  const [adminAssetEditingId, setAdminAssetEditingId] = useState('')
-  const [adminAssetDraftName, setAdminAssetDraftName] = useState('')
+  const [adminLightbox, setAdminLightbox] = useState<AdminLightboxState | null>(null)
   const [adminBusy, setAdminBusy] = useState(false)
   const [adminError, setAdminError] = useState('')
+  const adminLightboxTouchStartRef = useRef<number | null>(null)
 
   const [shareAssets, setShareAssets] = useState<DeliveryAsset[]>([])
   const [shareBusy, setShareBusy] = useState(false)
@@ -904,6 +920,19 @@ function App() {
     [selectedAdminClientProjectViews]
   )
 
+  const adminLightboxAssets = useMemo(() => {
+    if (!adminLightbox) return []
+    const project = selectedAdminClientProjectViews.find((entry) => entry.project.id === adminLightbox.projectId)
+    return (project?.visibleAssets ?? []).filter((asset) => asset.mime_type.startsWith('image/'))
+  }, [adminLightbox, selectedAdminClientProjectViews])
+
+  const adminLightboxIndex = useMemo(() => {
+    if (!adminLightbox) return -1
+    return adminLightboxAssets.findIndex((asset) => asset.id === adminLightbox.assetId)
+  }, [adminLightbox, adminLightboxAssets])
+
+  const adminLightboxAsset = adminLightboxIndex >= 0 ? adminLightboxAssets[adminLightboxIndex] : null
+
   useEffect(() => {
     if (!selectedAdminClient) {
       setAdminClientEditMode(false)
@@ -924,6 +953,17 @@ function App() {
       current.filter((assetId) => selectedAdminVisibleAssets.some((asset) => asset.id === assetId))
     )
   }, [selectedAdminVisibleAssets])
+
+  useEffect(() => {
+    if (!adminLightbox) return
+    if (adminLightboxAssets.length === 0) {
+      setAdminLightbox(null)
+      return
+    }
+    if (adminLightboxIndex === -1) {
+      setAdminLightbox({ projectId: adminLightbox.projectId, assetId: adminLightboxAssets[0].id })
+    }
+  }, [adminLightbox, adminLightboxAssets, adminLightboxIndex])
 
   useEffect(() => {
     if (!supabase || !session?.user.id || role !== 'admin' || selectedAdminVisibleAssets.length === 0) return
@@ -966,7 +1006,32 @@ function App() {
     }
   }, [adminAssetPreviewUrls, role, selectedAdminVisibleAssets, session?.user.id])
 
+  useEffect(() => {
+    if (!adminLightboxAsset) return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeAdminLightbox()
+        return
+      }
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        moveAdminLightbox('prev')
+        return
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        moveAdminLightbox('next')
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [adminLightboxAsset, adminLightboxAssets.length, adminLightboxIndex])
+
   const openAdminClients = () => {
+    closeAdminLightbox()
     window.location.hash = '#admin-clients'
     setView('admin-clients')
     setAdminClientEditMode(false)
@@ -975,6 +1040,7 @@ function App() {
   }
 
   const openAdminClient = (clientId: string) => {
+    closeAdminLightbox()
     setSelectedAdminClientId(clientId)
     setAdminClientEditMode(false)
     setAdminAssetSearch('')
@@ -1262,30 +1328,119 @@ function App() {
     }
   }
 
-  const handleRenameAdminAsset = async (assetId: string, nextName: string) => {
-    if (!supabase || !session?.user.id || role !== 'admin') return
-    const trimmedName = nextName.trim()
-    if (!trimmedName) return
+  const triggerBrowserDownload = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename
+    anchor.rel = 'noopener noreferrer'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1500)
+  }
 
-    const { error } = await supabase
-      .from('assets')
-      .update({ filename: trimmedName })
-      .eq('id', assetId)
-      .eq('owner_user_id', session.user.id)
-
-    if (error) {
-      setAdminError(error.message)
-      return
+  const loadWorkerBlob = async (
+    path: string,
+    token: string,
+    options?: { method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown }
+  ) => {
+    if (!apiBaseUrl) {
+      throw new Error('Set VITE_API_BASE_URL to enable gallery APIs.')
     }
 
-    setAdminClients((current) =>
-      current.map((client) => ({
-        ...client,
-        assets: client.assets.map((asset) => (asset.id === assetId ? { ...asset, filename: trimmedName } : asset)),
-      }))
+    const response = await fetch(`${apiBaseUrl}${path}`, {
+      method: options?.method ?? 'GET',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: options?.body ? JSON.stringify(options.body) : undefined,
+    })
+
+    if (!response.ok) {
+      const text = await response.text()
+      let message = text.trim() || 'Request failed'
+      try {
+        const payload = JSON.parse(text) as { error?: { message?: string } }
+        message = payload.error?.message ?? message
+      } catch {
+        // Keep the raw text fallback.
+      }
+      throw new Error(message)
+    }
+
+    return response.blob()
+  }
+
+  const openAdminLightbox = async (projectId: string, assetId: string) => {
+    const asset = selectedAdminClientProjectViews
+      .find((entry) => entry.project.id === projectId)
+      ?.visibleAssets.find((entry) => entry.id === assetId)
+    if (!asset || !asset.mime_type.startsWith('image/')) return
+
+    setAdminLightbox({ projectId, assetId })
+    if (adminAssetPreviewUrls[asset.id]) return
+
+    try {
+      const token = await getAccessToken()
+      if (!token) return
+      const payload = await workerRequest<{ url: string }>('/api/v1/media/preview-url', token, {
+        method: 'POST',
+        body: { assetId: asset.id },
+      })
+      setAdminAssetPreviewUrls((current) => ({ ...current, [asset.id]: payload.url }))
+    } catch {
+      // The lightbox can still open; the image will retry from the existing preload effect.
+    }
+  }
+
+  const closeAdminLightbox = () => setAdminLightbox(null)
+
+  const moveAdminLightbox = (direction: 'prev' | 'next') => {
+    const currentLightbox = adminLightbox
+    if (!currentLightbox || !adminLightboxAsset || adminLightboxIndex < 0) return
+    const nextIndex = direction === 'next' ? adminLightboxIndex + 1 : adminLightboxIndex - 1
+    if (nextIndex < 0 || nextIndex >= adminLightboxAssets.length) return
+    setAdminLightbox({ projectId: currentLightbox.projectId, assetId: adminLightboxAssets[nextIndex].id })
+  }
+
+  const downloadAdminArchive = async (path: string, body: unknown, filename: string) => {
+    if (!supabase) return
+    try {
+      setAdminBusy(true)
+      const token = await getAccessToken()
+      if (!token) {
+        setAdminError('Login session expired. Please log in again.')
+        return
+      }
+
+      const blob = await loadWorkerBlob(path, token, { method: 'POST', body })
+      triggerBrowserDownload(blob, filename)
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'Unable to download files')
+    } finally {
+      setAdminBusy(false)
+    }
+  }
+
+  const handleDownloadAdminProject = async (project: AdminProject) => {
+    if (!supabase || !session?.user.id || role !== 'admin') return
+    await downloadAdminArchive(
+      `/api/v1/admin/projects/${project.id}/download`,
+      {},
+      `${sanitizeDownloadName(project.name)}.zip`
     )
-    setAdminAssetEditingId('')
-    setAdminAssetDraftName('')
+  }
+
+  const handleDownloadSelectedAdminAssets = async () => {
+    if (!supabase || !session?.user.id || role !== 'admin' || selectedAdminAssetIds.length === 0) return
+    const clientName = selectedAdminClient?.full_name ?? 'selected-files'
+    await downloadAdminArchive(
+      '/api/v1/admin/downloads',
+      { assetIds: selectedAdminAssetIds, filename: clientName },
+      `${sanitizeDownloadName(clientName)}-selected.zip`
+    )
   }
 
   const handleDeleteAdminAsset = async (assetId: string) => {
@@ -1307,8 +1462,9 @@ function App() {
           assetCount: client.assets.filter((asset) => asset.id !== assetId).length,
         }))
       )
-      setAdminAssetEditingId('')
-      setAdminAssetDraftName('')
+      if (adminLightbox?.assetId === assetId) {
+        closeAdminLightbox()
+      }
     } catch (error) {
       setAdminError(error instanceof Error ? error.message : 'Unable to delete file')
     }
@@ -1340,6 +1496,9 @@ function App() {
 
       await loadAdminData()
       setSelectedAdminAssetIds([])
+      if (adminLightbox?.projectId === project.id) {
+        closeAdminLightbox()
+      }
     } catch (error) {
       setAdminError(error instanceof Error ? error.message : 'Unable to delete folder')
     } finally {
@@ -1467,6 +1626,7 @@ function App() {
       setSelectedAdminClientId('')
       setAdminClientEditMode(false)
       setAdminAssetSearch('')
+      closeAdminLightbox()
       window.location.hash = '#admin-clients'
     } catch (error) {
       setAdminError(error instanceof Error ? error.message : 'Unable to delete client')
@@ -2316,6 +2476,11 @@ function App() {
             Clear selection
           </button>
           {selectedAdminAssetIds.length > 0 && (
+            <button className="button ghost" type="button" onClick={() => void handleDownloadSelectedAdminAssets()}>
+              Download selected
+            </button>
+          )}
+          {selectedAdminAssetIds.length > 0 && (
             <button className="button primary" type="button" onClick={() => void handleBulkDeleteAdminAssets()}>
               Delete selected
             </button>
@@ -2411,6 +2576,9 @@ function App() {
                     <span className="admin-client-count">
                       {visibleAssets.length}/{totalAssets} files
                     </span>
+                    <button className="button ghost" type="button" onClick={() => void handleDownloadAdminProject(project)}>
+                      Download folder
+                    </button>
                     <button className="button ghost" type="button" onClick={() => void handleDeleteAdminProject(project)}>
                       Delete folder
                     </button>
@@ -2422,10 +2590,10 @@ function App() {
                 ) : (
                   <div className="admin-asset-grid">
                     {visibleAssets.map((asset) => {
-                      const isEditing = adminAssetEditingId === asset.id
                       const isSelected = selectedAdminAssetIds.includes(asset.id)
                       const previewUrl = adminAssetPreviewUrls[asset.id]
                       const isImage = asset.mime_type.startsWith('image/')
+                      const displayName = getDisplayFileName(asset.filename)
                       return (
                         <article key={asset.id} className={`admin-asset-card ${isSelected ? 'is-selected' : ''}`}>
                           <button
@@ -2435,87 +2603,61 @@ function App() {
                             onClick={() => toggleSelectedAdminAsset(asset.id)}
                           >
                             <span className="admin-asset-checkbox">{isSelected ? '✓' : ''}</span>
-                            <span className="sr-only">Select {asset.filename}</span>
+                            <span className="sr-only">Select {displayName}</span>
                           </button>
-                          <div className="admin-asset-thumb">
-                            {isImage && previewUrl ? (
-                              <img src={previewUrl} alt={asset.filename} loading="lazy" />
-                            ) : (
+                          {isImage ? (
+                            <button
+                              className="admin-asset-thumb admin-asset-thumb-button"
+                              type="button"
+                              onClick={() => void openAdminLightbox(project.id, asset.id)}
+                              aria-label={`Open ${displayName}`}
+                            >
+                              {previewUrl ? (
+                                <img src={previewUrl} alt={displayName} loading="lazy" />
+                              ) : (
+                                <div className="admin-asset-thumb-fallback">
+                                  <span>IMG</span>
+                                </div>
+                              )}
+                            </button>
+                          ) : (
+                            <div className="admin-asset-thumb">
                               <div className="admin-asset-thumb-fallback">
                                 <span>{asset.mime_type.split('/')[0]?.slice(0, 1).toUpperCase() || 'F'}</span>
                               </div>
-                            )}
-                          </div>
+                            </div>
+                          )}
                           <div className="admin-asset-main">
-                            {isEditing ? (
-                              <input
-                                type="text"
-                                value={adminAssetDraftName}
-                                onChange={(event) => setAdminAssetDraftName(event.target.value)}
-                                autoFocus
-                              />
-                              ) : (
-                                <p className="admin-asset-name">{asset.filename}</p>
-                              )}
-                            <p className="delivery-expiry">
-                              {formatBytes(asset.bytes)} · {asset.mime_type}
-                            </p>
+                            <p className="admin-asset-name">{displayName}</p>
                           </div>
                           <div className="delivery-asset-actions">
+                            {isImage && (
+                              <button
+                                className="button ghost"
+                                type="button"
+                                onClick={() => void openAdminLightbox(project.id, asset.id)}
+                              >
+                                View
+                              </button>
+                            )}
                             <button
                               className="button ghost"
                               type="button"
                               onClick={() => {
-                                void handleOpenAsset(asset.id, 'view')
+                                void handleOpenAsset(asset.id, 'download')
                               }}
                             >
-                              View
+                              Download
                             </button>
-                            {isEditing ? (
-                              <>
-                                <button
-                                  className="button ghost"
-                                  type="button"
-                                  onClick={() => {
-                                    void handleRenameAdminAsset(asset.id, adminAssetDraftName)
-                                  }}
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  className="button ghost"
-                                  type="button"
-                                  onClick={() => {
-                                    setAdminAssetEditingId('')
-                                    setAdminAssetDraftName('')
-                                  }}
-                                >
-                                  Cancel
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  className="button ghost"
-                                  type="button"
-                                  onClick={() => {
-                                    setAdminAssetEditingId(asset.id)
-                                    setAdminAssetDraftName(asset.filename)
-                                  }}
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  className="button ghost"
-                                  type="button"
-                                  onClick={() => {
-                                    void handleDeleteAdminAsset(asset.id)
-                                  }}
-                                >
-                                  Delete
-                                </button>
-                              </>
-                            )}
+                            <button
+                              className="button ghost"
+                              type="button"
+                              onClick={() => {
+                                void handleDeleteAdminAsset(asset.id)
+                              }}
+                            >
+                              Delete
+                            </button>
                           </div>
                         </article>
                       )
@@ -2527,6 +2669,78 @@ function App() {
             ))
           )}
         </div>
+
+        {adminLightboxAsset && adminLightbox && (
+          <div
+            className="admin-lightbox"
+            role="dialog"
+            aria-modal="true"
+            aria-label={getDisplayFileName(adminLightboxAsset.filename)}
+            onClick={closeAdminLightbox}
+            onTouchStart={(event) => {
+              adminLightboxTouchStartRef.current = event.touches[0]?.clientX ?? null
+            }}
+            onTouchEnd={(event) => {
+              const start = adminLightboxTouchStartRef.current
+              adminLightboxTouchStartRef.current = null
+              if (start === null) return
+              const delta = event.changedTouches[0]?.clientX - start
+              if (Math.abs(delta) < 48) return
+              if (delta < 0) {
+                moveAdminLightbox('next')
+              } else {
+                moveAdminLightbox('prev')
+              }
+            }}
+          >
+            <div className="admin-lightbox-panel" onClick={(event) => event.stopPropagation()}>
+              <button className="admin-lightbox-close" type="button" onClick={closeAdminLightbox}>
+                Close
+              </button>
+              <div className="admin-lightbox-stage">
+                {adminAssetPreviewUrls[adminLightboxAsset.id] ? (
+                  <img
+                    src={adminAssetPreviewUrls[adminLightboxAsset.id]}
+                    alt={getDisplayFileName(adminLightboxAsset.filename)}
+                  />
+                ) : (
+                  <div className="admin-lightbox-loading">Loading preview…</div>
+                )}
+              </div>
+              <div className="admin-lightbox-meta">
+                <p className="admin-lightbox-name">{getDisplayFileName(adminLightboxAsset.filename)}</p>
+                <div className="admin-lightbox-actions">
+                  <button
+                    className="button ghost"
+                    type="button"
+                    onClick={() => moveAdminLightbox('prev')}
+                    disabled={adminLightboxIndex <= 0}
+                  >
+                    Previous
+                  </button>
+                  <button
+                    className="button ghost"
+                    type="button"
+                    onClick={() => moveAdminLightbox('next')}
+                    disabled={adminLightboxIndex >= adminLightboxAssets.length - 1}
+                  >
+                    Next
+                  </button>
+                  <button
+                    className="button ghost"
+                    type="button"
+                    onClick={() => void handleOpenAsset(adminLightboxAsset.id, 'download')}
+                  >
+                    Download
+                  </button>
+                </div>
+                <p className="portal-hint">
+                  {adminLightboxIndex + 1} / {adminLightboxAssets.length}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </section>
     )
   }

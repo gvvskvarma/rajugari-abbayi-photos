@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import type { Context } from 'hono'
+import { Zip, ZipPassThrough } from 'fflate'
 
 type Role = 'admin' | 'customer'
 type Mode = 'view' | 'download'
@@ -470,6 +471,95 @@ const logDownloadEvent = async (
 const deleteStoredAssets = async (env: Env, objectKeys: string[]) => {
   const uniqueKeys = [...new Set(objectKeys)].filter((key) => key && !key.startsWith('pending/'))
   await Promise.all(uniqueKeys.map((key) => env.R2_MEDIA_BUCKET.delete(key)))
+}
+
+const getDisplayFileName = (value: string) => {
+  const cleaned = value.trim().replace(/\/+$/, '')
+  const segments = cleaned.split('/').filter(Boolean)
+  return segments[segments.length - 1] || cleaned
+}
+
+const sanitizeArchiveEntryName = (value: string) => {
+  const baseName = getDisplayFileName(value).replace(/[\0\\/:*?"<>|]/g, '_').trim()
+  return baseName || 'file'
+}
+
+const uniquifyArchiveEntryName = (filename: string, seen: Set<string>) => {
+  const initialName = sanitizeArchiveEntryName(filename)
+  if (!seen.has(initialName)) {
+    seen.add(initialName)
+    return initialName
+  }
+
+  const dotIndex = initialName.lastIndexOf('.')
+  const baseName = dotIndex > 0 ? initialName.slice(0, dotIndex) : initialName
+  const extension = dotIndex > 0 ? initialName.slice(dotIndex) : ''
+  let suffix = 2
+
+  while (true) {
+    const candidate = `${baseName} (${suffix})${extension}`
+    if (!seen.has(candidate)) {
+      seen.add(candidate)
+      return candidate
+    }
+    suffix += 1
+  }
+}
+
+const streamZipResponse = async (
+  c: Context<{ Bindings: Env }>,
+  entries: Array<{ filename: string; r2_object_key: string }>,
+  archiveName: string
+) => {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const zip = new Zip((error, chunk, final) => {
+        if (error) {
+          controller.error(error)
+          return
+        }
+        if (chunk) controller.enqueue(chunk)
+        if (final) controller.close()
+      })
+
+      void (async () => {
+        try {
+          const seenNames = new Set<string>()
+          for (const entry of entries) {
+            const object = await c.env.R2_MEDIA_BUCKET.get(entry.r2_object_key)
+            if (!object?.body) {
+              throw new Error(`File missing in storage for ${entry.filename}. Re-upload required.`)
+            }
+
+            const archiveEntry = new ZipPassThrough(uniquifyArchiveEntryName(entry.filename, seenNames))
+            zip.add(archiveEntry)
+
+            const reader = object.body.getReader()
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              if (value) archiveEntry.push(value, false)
+            }
+            archiveEntry.push(new Uint8Array(0), true)
+          }
+
+          zip.end()
+        } catch (error) {
+          controller.error(error instanceof Error ? error : new Error('Failed to build archive'))
+        }
+      })()
+    },
+  })
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      ...responseHeaders(c),
+      'content-type': 'application/zip',
+      'content-disposition': `attachment; filename="${sanitizeArchiveEntryName(archiveName)}"`,
+      'cache-control': 'no-store',
+    },
+  })
 }
 
 const ensureAdmin = (user: User) => {
@@ -1217,6 +1307,55 @@ app.get('/api/v1/media/preview', async (c) => {
     })
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Preview failed', 400)
+  }
+})
+
+app.post('/api/v1/admin/downloads', async (c) => {
+  try {
+    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
+    ensureAdmin(user)
+    const body = await c.req.json<{ assetIds?: string[]; filename?: string }>()
+    const assetIds = [...new Set((body.assetIds ?? []).filter((assetId) => typeof assetId === 'string' && assetId.trim()))]
+    if (assetIds.length === 0) return jsonError('assetIds are required', 400)
+
+    const assets = await supabaseRequest<Array<{ id: string; filename: string; r2_object_key: string }>>(
+      c.env,
+      `assets?owner_user_id=eq.${encodeURIComponent(user.id)}&select=id,filename,r2_object_key,created_at&order=created_at.asc`
+    )
+
+    const selectedAssets = assets.filter((asset) => assetIds.includes(asset.id))
+    if (selectedAssets.length === 0) return jsonError('No matching assets found', 404)
+
+    const archiveName = `${sanitizeArchiveEntryName(body.filename ?? 'selected-files')}.zip`
+    return streamZipResponse(c, selectedAssets, archiveName)
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Download failed', 400)
+  }
+})
+
+app.post('/api/v1/admin/projects/:projectId/download', async (c) => {
+  try {
+    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
+    ensureAdmin(user)
+    const projectId = c.req.param('projectId')
+    if (!projectId) return jsonError('projectId is required', 400)
+
+    const projects = await supabaseRequest<Array<{ id: string; name: string }>>(
+      c.env,
+      `projects?id=eq.${encodeURIComponent(projectId)}&owner_user_id=eq.${encodeURIComponent(user.id)}&select=id,name&limit=1`
+    )
+    const project = projects[0]
+    if (!project) return jsonError('Project not found', 404)
+
+    const assets = await supabaseRequest<Array<{ id: string; filename: string; r2_object_key: string }>>(
+      c.env,
+      `assets?project_id=eq.${encodeURIComponent(projectId)}&owner_user_id=eq.${encodeURIComponent(user.id)}&select=id,filename,r2_object_key,created_at&order=created_at.asc`
+    )
+    if (assets.length === 0) return jsonError('No files found for this project', 404)
+
+    return streamZipResponse(c, assets, `${sanitizeArchiveEntryName(project.name)}.zip`)
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Project download failed', 400)
   }
 })
 
