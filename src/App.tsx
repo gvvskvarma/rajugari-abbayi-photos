@@ -1516,7 +1516,6 @@ function App() {
 
   useEffect(() => {
     if (!supabase || view !== 'share' || !shareToken) return
-    const client = supabase
 
     const loadShareView = async () => {
       setShareBusy(true)
@@ -1525,55 +1524,39 @@ function App() {
       setShareDeliveryId('')
       setShareAssetPreviewUrls({})
 
-      const linkResult = await client
-        .from('share_links')
-        .select('delivery_id, expires_at, allow_download')
-        .eq('token', shareToken)
-        .single()
+      try {
+        const payload = await workerRequest<{
+          deliveryId: string
+          allowDownload: boolean
+          expiresAt: string
+          assets: DeliveryAsset[]
+        }>(`/api/v1/share-links/${encodeURIComponent(shareToken)}/gallery`, '')
 
-      if (linkResult.error || !linkResult.data) {
-        setShareMessage('This share link is invalid or unavailable.')
+        if (new Date(payload.expiresAt).getTime() <= Date.now()) {
+          setShareMessage('This share link has expired.')
+          setShareAssets([])
+          setShareAllowDownload(false)
+          setShareDeliveryId('')
+          setShareAssetPreviewUrls({})
+          setShareBusy(false)
+          return
+        }
+
+        setShareAssets(payload.assets ?? [])
+        setShareAllowDownload(Boolean(payload.allowDownload))
+        setShareDeliveryId(payload.deliveryId)
+      } catch (error) {
+        setShareMessage(error instanceof Error ? error.message : 'This share link is invalid or unavailable.')
         setShareAssets([])
         setShareAllowDownload(false)
         setShareDeliveryId('')
         setShareAssetPreviewUrls({})
-        setShareBusy(false)
-        return
       }
-
-      if (new Date(linkResult.data.expires_at).getTime() <= Date.now()) {
-        setShareMessage('This share link has expired.')
-        setShareAssets([])
-        setShareAllowDownload(false)
-        setShareDeliveryId('')
-        setShareAssetPreviewUrls({})
-        setShareBusy(false)
-        return
-      }
-
-      const assetsResult = await client
-        .from('assets')
-        .select('id, delivery_id, filename, mime_type, bytes, r2_object_key, created_at')
-        .eq('delivery_id', linkResult.data.delivery_id)
-        .order('created_at', { ascending: false })
-
-      if (assetsResult.error) {
-        setShareMessage(assetsResult.error.message)
-        setShareAssets([])
-        setShareAllowDownload(false)
-        setShareDeliveryId('')
-        setShareAssetPreviewUrls({})
-      } else {
-        setShareAssets((assetsResult.data ?? []) as DeliveryAsset[])
-        setShareAllowDownload(Boolean(linkResult.data.allow_download))
-        setShareDeliveryId(linkResult.data.delivery_id)
-      }
-
       setShareBusy(false)
     }
 
     void loadShareView()
-  }, [shareToken, view])
+  }, [shareToken, supabase, view])
 
   const handleSendOtp = async (event: FormEvent) => {
     event.preventDefault()
@@ -1810,12 +1793,20 @@ function App() {
     if (!supabase) return
     const reportError = role === 'admin' ? setAdminError : setCustomerError
     try {
-      const token = await getAccessToken()
-      if (!token) {
-        reportError('Login session expired. Please log in again.')
-        return
-      }
-      const endpoint = mode === 'view' && !options?.shareToken ? '/api/v1/media/preview-url' : '/api/v1/media/signed-url'
+      const token = options?.shareToken
+        ? ''
+        : await getAccessToken().then((accessToken) => {
+            if (!accessToken) {
+              reportError('Login session expired. Please log in again.')
+              return ''
+            }
+            return accessToken
+          })
+
+      if (!token && !options?.shareToken) return
+
+      const endpoint =
+        mode === 'view' && !options?.shareToken ? '/api/v1/media/preview-url' : '/api/v1/media/signed-url'
       const payload = await workerRequest<{ signedUrl?: string; url?: string }>(endpoint, token, {
         method: 'POST',
         body: { assetId, mode, shareToken: options?.shareToken },

@@ -1564,6 +1564,59 @@ app.get('/api/v1/deliveries/:deliveryId/gallery', async (c) => {
   }
 })
 
+app.get('/api/v1/share-links/:token/gallery', async (c) => {
+  try {
+    const token = c.req.param('token')
+    if (!token) return jsonError('token is required', 400)
+
+    const links = await supabaseRequest<
+      Array<{ delivery_id: string; allow_download: boolean; expires_at: string }>
+    >(
+      c.env,
+      `share_links?token=eq.${encodeURIComponent(token)}&select=delivery_id,allow_download,expires_at&limit=1`
+    )
+
+    const link = links[0]
+    if (!link) return jsonError('Invalid share token', 403)
+    if (new Date(link.expires_at).getTime() <= Date.now()) return jsonError('Share link expired', 403)
+
+    const assetRules = await getDeliveryAssetRules(c.env, link.delivery_id)
+    const visibleAssetIds = [...assetRules.values()]
+      .filter((rule) => rule.canView)
+      .map((rule) => rule.assetId)
+
+    const assets = visibleAssetIds.length
+      ? await supabaseRequest<
+          Array<{
+            id: string
+            delivery_id: string | null
+            filename: string
+            mime_type: string
+            bytes: number
+            r2_object_key: string
+            created_at: string
+          }>
+        >(
+          c.env,
+          `assets?or=(${visibleAssetIds.map((id) => `id.eq.${encodeURIComponent(id)}`).join(',')})&select=id,delivery_id,filename,mime_type,bytes,r2_object_key,created_at&order=created_at.desc`
+        )
+      : []
+
+    return c.json(
+      {
+        deliveryId: link.delivery_id,
+        allowDownload: link.allow_download,
+        expiresAt: link.expires_at,
+        assets: assets.filter((asset) => !asset.r2_object_key.startsWith('pending/')),
+      },
+      200,
+      responseHeaders(c)
+    )
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Share gallery load failed', 400)
+  }
+})
+
 app.post('/api/v1/share-links', async (c) => {
   try {
     const user = await getUserFromBearer(c.env, c.req.header('authorization'))
