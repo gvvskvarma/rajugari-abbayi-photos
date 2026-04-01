@@ -18,7 +18,6 @@ jobs:
       contents: read
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
     steps:
       - name: Checkout repository
@@ -29,23 +28,22 @@ jobs:
         with:
           version: latest
 
-      - name: Link Supabase project
+      - name: Push migrations to production
         run: |
-          if [ -z "$SUPABASE_PROJECT_ID" ]; then
-            echo "SUPABASE_PROJECT_ID secret is missing."
-            exit 1
-          fi
-
           if [ -z "$SUPABASE_DB_PASSWORD" ]; then
             echo "SUPABASE_DB_PASSWORD secret is missing."
             exit 1
           fi
 
-          supabase link --project-ref "$SUPABASE_PROJECT_ID" -p "$SUPABASE_DB_PASSWORD"
+          DB_PASSWORD_ENCODED="$(python3 - <<'PY'
+import os
+import urllib.parse
 
-      - name: Push migrations to production
-        run: |
-          SUPABASE_DB_PASSWORD="$SUPABASE_DB_PASSWORD" supabase db push
+print(urllib.parse.quote(os.environ["SUPABASE_DB_PASSWORD"], safe=""))
+PY
+)"
+          DB_URL="postgresql://postgres:${DB_PASSWORD_ENCODED}@db.ogcafgdhchzheennyzva.supabase.co:5432/postgres"
+          supabase db push --db-url "$DB_URL"
 
   deploy-worker:
     name: Deploy Cloudflare Worker

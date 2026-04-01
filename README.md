@@ -92,12 +92,11 @@ The repo is set up so a push to `main` drives the live stack in three layers:
 Required GitHub Actions secrets:
 
 - `SUPABASE_ACCESS_TOKEN`
-- `SUPABASE_PROJECT_ID`
 - `SUPABASE_DB_PASSWORD`
 - `CLOUDFLARE_API_TOKEN`
 
 The workflow lives in `.github/workflows/deploy-production.yml`.
-The Supabase migration job links the real project ref first, then pushes migrations with the database password env var.
+The Supabase migration job now pushes directly with a constructed database URL.
 
 ## Day 2 auth/admin artifacts
 
