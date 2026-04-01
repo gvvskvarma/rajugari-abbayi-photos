@@ -70,9 +70,7 @@ Required GitHub Actions secrets:
 - `SUPABASE_DB_PASSWORD`
 - `CLOUDFLARE_API_TOKEN`
 
-Tracked Supabase CLI config:
-
-- `supabase/config.toml`
+The migration job constructs the production database URL from the Supabase password secret and pushes directly with `supabase db push --db-url`.
 
 ### Manual fallback
 
