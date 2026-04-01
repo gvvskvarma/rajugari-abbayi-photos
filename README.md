@@ -81,24 +81,6 @@ In Vercel:
    - `VITE_FORMSPREE_ENDPOINT=https://formspree.io/f/mzdabzwy`
 4. Deploy.
 
-## Production release flow
-
-The repo is set up so a push to `main` drives the live stack in three layers:
-
-- Frontend: Vercel production deploy from the linked `main` branch
-- API: Cloudflare Worker deploy from GitHub Actions
-- Database: Supabase migration deploy from GitHub Actions
-
-Required GitHub Actions secrets:
-
-- `SUPABASE_ACCESS_TOKEN`
-- `SUPABASE_PROJECT_ID`
-- `SUPABASE_DB_PASSWORD`
-- `CLOUDFLARE_API_TOKEN`
-- `CLOUDFLARE_ACCOUNT_ID`
-
-The workflow lives in `.github/workflows/deploy-production.yml`.
-
 ## Day 2 auth/admin artifacts
 
 - Supabase migration: `supabase/migrations/20260310_day2_auth_roles_admin.sql`

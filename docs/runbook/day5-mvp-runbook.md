@@ -41,7 +41,6 @@ Apply Supabase migrations in order:
 3. `supabase/migrations/20260311_day3_upload_pipeline.sql`
 4. `supabase/migrations/20260311_day4_delivery_security.sql`
 5. `supabase/migrations/20260313_admin_activity.sql`
-6. `supabase/migrations/20260331_share_link_scopes.sql`
 
 ## Local run
 
@@ -56,25 +55,7 @@ npm run dev
 
 ## Production deploy
 
-### Git-backed release flow
-
-Pushes to `main` now trigger the production workflow in `.github/workflows/deploy-production.yml`:
-
-- Vercel handles the frontend deploy from the linked `main` branch
-- GitHub Actions runs the Supabase migration deploy
-- GitHub Actions deploys the Cloudflare Worker after migrations succeed
-
-Required GitHub Actions secrets:
-
-- `SUPABASE_ACCESS_TOKEN`
-- `SUPABASE_PROJECT_ID`
-- `SUPABASE_DB_PASSWORD`
-- `CLOUDFLARE_API_TOKEN`
-- `CLOUDFLARE_ACCOUNT_ID`
-
-### Manual fallback
-
-If the workflow secrets are not configured yet, deploy the runtime layers manually:
+### Worker
 
 ```bash
 cd worker
@@ -84,7 +65,11 @@ npm run deploy
 Expected route pattern:
 - `https://<worker-name>.<workers-subdomain>.workers.dev`
 
-Frontend production deploys are handled by the Vercel `main` branch integration.
+### Frontend
+
+```bash
+npx vercel deploy --prod --yes
+```
 
 ## Day 5 smoke checks
 
@@ -102,4 +87,3 @@ curl -I https://rajugariabbayishots.vercel.app/
 - Admin audit activity is persisted in `admin_activity_events`.
 - Basic route-level rate limits are active in Worker middleware.
 - Keep `.env` and `worker/.dev.vars` local-only; do not commit secrets.
-- The Supabase migration workflow is the authoritative place to deploy schema changes after `main` merges.
