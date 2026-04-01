@@ -2813,10 +2813,6 @@ function App() {
         <div className="work-block">
           <div className="section-head">
             <h2>Portrait stories</h2>
-            <p>
-              Three rotating collections, arranged like a contact sheet with more
-              room for each moment to breathe.
-            </p>
           </div>
           <div className="rotator-grid">
             <RotatingGallery
