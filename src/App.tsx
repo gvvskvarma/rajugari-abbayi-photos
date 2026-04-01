@@ -2776,20 +2776,38 @@ function App() {
           </p>
         </div>
 
-        <div className="grid">
-          {featuredShots.map((shot) => (
-            <div key={shot.image.key} className="shot">
+        <div className="landscape-showcase">
+          {featuredShots[0] && (
+            <article className="landscape-showcase-main">
               <ResponsiveImage
-                asset={shot.image}
-                alt={shot.title}
-                sizes="(max-width: 900px) 92vw, (max-width: 1200px) 44vw, 30vw"
+                asset={featuredShots[0].image}
+                alt={featuredShots[0].title}
+                sizes="(max-width: 900px) 92vw, 92vw"
+                loading="eager"
+                fetchPriority="high"
               />
-              <div className="shot-overlay">
-                <p>{shot.title}</p>
-                <span>{shot.tag}</span>
+              <div className="landscape-showcase-overlay">
+                <p>{featuredShots[0].title}</p>
+                <span>{featuredShots[0].tag}</span>
               </div>
-            </div>
-          ))}
+            </article>
+          )}
+
+          <div className="landscape-showcase-strip" aria-label="Additional landscape highlights">
+            {featuredShots.slice(1).map((shot) => (
+              <article key={shot.image.key} className="landscape-showcase-card">
+                <ResponsiveImage
+                  asset={shot.image}
+                  alt={shot.title}
+                  sizes="(max-width: 900px) 44vw, 22vw"
+                />
+                <div className="landscape-showcase-overlay">
+                  <p>{shot.title}</p>
+                  <span>{shot.tag}</span>
+                </div>
+              </article>
+            ))}
+          </div>
         </div>
 
         <div className="work-block">
