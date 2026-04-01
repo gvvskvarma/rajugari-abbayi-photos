@@ -929,8 +929,8 @@
 
 .customer-asset-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
 }
 
 .customer-asset-card {
@@ -938,9 +938,9 @@
   border-radius: 12px;
   border: 1px solid rgba(236, 232, 223, 0.14);
   background: rgba(11, 13, 19, 0.45);
-  padding: 14px;
+  padding: 16px;
   display: grid;
-  gap: 12px;
+  gap: 14px;
   min-width: 0;
   overflow: hidden;
 }

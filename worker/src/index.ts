@@ -4,6 +4,7 @@ import { Zip, ZipPassThrough } from 'fflate'
 
 type Role = 'admin' | 'customer'
 type Mode = 'view' | 'download'
+type MediaVariant = 'preview' | 'thumb'
 
 type UploadTokenPayload = {
   v: 1
@@ -1385,8 +1386,8 @@ app.post('/api/v1/media/signed-url', async (c) => {
 
 app.post('/api/v1/media/preview-url', async (c) => {
   try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    const body = await c.req.json<{ assetId: string }>()
+    const authHeader = c.req.header('authorization')
+    const body = await c.req.json<{ assetId: string; variant?: MediaVariant; shareToken?: string }>()
 
     if (!body.assetId) return jsonError('assetId is required', 400)
 
@@ -1411,7 +1412,21 @@ app.post('/api/v1/media/preview-url', async (c) => {
     const deliveryId = asset.delivery_id ?? deliveryAsset?.delivery_id
     if (!deliveryId || !deliveryAsset) return jsonError('Asset delivery mapping missing', 403)
 
-    await ensureDeliveryAccess(c.env, user, deliveryId, 'view')
+    if (body.shareToken) {
+      const links = await supabaseRequest<
+        Array<{ delivery_id: string; allow_download: boolean; expires_at: string }>
+      >(
+        c.env,
+        `share_links?token=eq.${encodeURIComponent(body.shareToken)}&select=delivery_id,allow_download,expires_at&limit=1`
+      )
+      const link = links[0]
+      if (!link) return jsonError('Invalid share token', 403)
+      if (new Date(link.expires_at).getTime() <= Date.now()) return jsonError('Share link expired', 403)
+      if (link.delivery_id !== deliveryId) return jsonError('Asset not in shared delivery', 403)
+    } else {
+      const user = await getUserFromBearer(c.env, authHeader)
+      await ensureDeliveryAccess(c.env, user, deliveryId, 'view')
+    }
 
     const token = await createPreviewToken(c.env.SUPABASE_SERVICE_ROLE_KEY, {
       v: 1,
@@ -1420,10 +1435,11 @@ app.post('/api/v1/media/preview-url', async (c) => {
       issuedAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
     })
+    const variant: MediaVariant = body.variant === 'thumb' ? 'thumb' : 'preview'
 
     return c.json(
       {
-        url: `${new URL(c.req.url).origin}/api/v1/media/preview?token=${encodeURIComponent(token)}`,
+        url: `${new URL(c.req.url).origin}/api/v1/media/${variant}?token=${encodeURIComponent(token)}`,
         expiresInSeconds: 300,
       },
       200,
@@ -1469,6 +1485,79 @@ app.get('/api/v1/media/preview', async (c) => {
     })
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Preview failed', 400)
+  }
+})
+
+app.get('/api/v1/media/thumb', async (c) => {
+  try {
+    const token = c.req.query('token')
+    if (!token) return jsonError('token is required', 400)
+
+    const payload = await verifyPreviewToken(c.env.SUPABASE_SERVICE_ROLE_KEY, token)
+    const assets = await supabaseRequest<
+      Array<{ id: string; delivery_id: string | null; r2_object_key: string; mime_type: string; filename: string }>
+    >(
+      c.env,
+      `assets?id=eq.${encodeURIComponent(payload.assetId)}&select=id,delivery_id,r2_object_key,mime_type,filename&limit=1`
+    )
+
+    const asset = assets[0]
+    if (!asset) return jsonError('Asset not found', 404)
+    if (asset.delivery_id !== payload.deliveryId) {
+      return jsonError('Preview token does not match this asset', 403)
+    }
+    if (!asset.mime_type.startsWith('image/')) {
+      return jsonError('Thumbnails are only available for image files', 400)
+    }
+
+    const signedUrl = await buildR2SignedUrl(c.env, 'GET', asset.r2_object_key, 300, 'view')
+
+    try {
+      const resized = await fetch(signedUrl, {
+        cf: {
+          image: {
+            width: 640,
+            height: 480,
+            fit: 'cover',
+            quality: 72,
+            format: 'webp',
+            metadata: 'none',
+            anim: false,
+          },
+        },
+      } as RequestInit)
+
+      if (!resized.ok) {
+        throw new Error(`Thumbnail generation failed (${resized.status})`)
+      }
+
+      return new Response(resized.body, {
+        status: 200,
+        headers: {
+          ...responseHeaders(c),
+          'content-type': resized.headers.get('content-type') ?? 'image/webp',
+          'cache-control': 'private, max-age=3600',
+          'content-disposition': 'inline',
+        },
+      })
+    } catch {
+      const object = await c.env.R2_MEDIA_BUCKET.get(asset.r2_object_key)
+      if (!object) {
+        return jsonError('File missing in storage for this asset. Re-upload required.', 404)
+      }
+
+      return new Response(object.body, {
+        status: 200,
+        headers: {
+          ...responseHeaders(c),
+          'content-type': object.httpMetadata?.contentType ?? asset.mime_type,
+          'cache-control': 'private, max-age=3600',
+          'content-disposition': 'inline',
+        },
+      })
+    }
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Thumbnail failed', 400)
   }
 })
 

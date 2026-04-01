@@ -686,13 +686,14 @@ function App() {
   const [customerBusy, setCustomerBusy] = useState(false)
   const [newShareLinks, setNewShareLinks] = useState<Record<string, string>>({})
   const [shareCopyState, setShareCopyState] = useState<Record<string, string>>({})
-  const [shareAllowDownload, setShareAllowDownload] = useState(false)
   const [shareDeliveryId, setShareDeliveryId] = useState('')
   const [shareExpiresAt, setShareExpiresAt] = useState('')
   const [sharePageCopyState, setSharePageCopyState] = useState('')
   const [shareAssetPreviewUrls, setShareAssetPreviewUrls] = useState<Record<string, string>>({})
+  const [shareAssetThumbnailUrls, setShareAssetThumbnailUrls] = useState<Record<string, string>>({})
   const [customerLightbox, setCustomerLightbox] = useState<CustomerLightboxState | null>(null)
   const [customerAssetPreviewUrls, setCustomerAssetPreviewUrls] = useState<Record<string, string>>({})
+  const [customerAssetThumbnailUrls, setCustomerAssetThumbnailUrls] = useState<Record<string, string>>({})
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const [uploadClientMode, setUploadClientMode] = useState<'create' | 'reuse'>('create')
@@ -892,6 +893,7 @@ function App() {
 
   const customerLightboxAsset = customerLightboxIndex >= 0 ? customerLightboxAssets[customerLightboxIndex] : null
   const customerPreviewUrls = view === 'share' ? shareAssetPreviewUrls : customerAssetPreviewUrls
+  const customerThumbnailUrls = view === 'share' ? shareAssetThumbnailUrls : customerAssetThumbnailUrls
 
   const adminClientById = useMemo(() => {
     return new Map(adminClients.map((client) => [client.id, client] as const))
@@ -1148,6 +1150,50 @@ function App() {
   useEffect(() => {
     if (!supabase || view !== 'my-pictures' || !session?.user.id || myDeliveries.length === 0) return
 
+    const missingThumbnailAssets = myDeliveries
+      .flatMap((delivery) => delivery.assets.map((asset) => ({ deliveryId: delivery.deliveryId, asset })))
+      .filter(
+        ({ asset }) => asset.mime_type.startsWith('image/') && !customerAssetThumbnailUrls[asset.id]
+      )
+
+    if (missingThumbnailAssets.length === 0) return
+
+    let cancelled = false
+
+    const loadThumbnailUrls = async () => {
+      const token = await getAccessToken()
+      if (!token) return
+
+      const entries = await Promise.all(
+        missingThumbnailAssets.map(async ({ asset }) => {
+          try {
+            const payload = await workerRequest<{ url: string }>('/api/v1/media/preview-url', token, {
+              method: 'POST',
+              body: { assetId: asset.id, variant: 'thumb' },
+            })
+            return [asset.id, payload.url] as const
+          } catch {
+            return null
+          }
+        })
+      )
+
+      if (cancelled) return
+      const thumbnailEntries = Object.fromEntries(
+        entries.filter((entry): entry is readonly [string, string] => entry !== null)
+      )
+      setCustomerAssetThumbnailUrls((current) => ({ ...current, ...thumbnailEntries }))
+    }
+
+    void loadThumbnailUrls()
+    return () => {
+      cancelled = true
+    }
+  }, [customerAssetThumbnailUrls, myDeliveries, role, session?.user.id, supabase, view])
+
+  useEffect(() => {
+    if (!supabase || view !== 'my-pictures' || !session?.user.id || myDeliveries.length === 0) return
+
     const missingPreviewAssets = myDeliveries
       .flatMap((delivery) => delivery.assets.map((asset) => ({ deliveryId: delivery.deliveryId, asset })))
       .filter(
@@ -1188,6 +1234,45 @@ function App() {
       cancelled = true
     }
   }, [customerAssetPreviewUrls, myDeliveries, role, session?.user.id, supabase, view])
+
+  useEffect(() => {
+    if (!supabase || view !== 'share' || !shareToken || shareAssets.length === 0) return
+
+    const missingThumbnailAssets = shareAssets.filter(
+      (asset) => asset.mime_type.startsWith('image/') && !shareAssetThumbnailUrls[asset.id]
+    )
+
+    if (missingThumbnailAssets.length === 0) return
+
+    let cancelled = false
+
+    const loadThumbnailUrls = async () => {
+      const entries = await Promise.all(
+        missingThumbnailAssets.map(async (asset) => {
+          try {
+            const payload = await workerRequest<{ url: string }>('/api/v1/media/preview-url', '', {
+              method: 'POST',
+              body: { assetId: asset.id, variant: 'thumb', shareToken },
+            })
+            return [asset.id, payload.url] as const
+          } catch {
+            return null
+          }
+        })
+      )
+
+      if (cancelled) return
+      const thumbnailEntries = Object.fromEntries(
+        entries.filter((entry): entry is readonly [string, string] => entry !== null)
+      )
+      setShareAssetThumbnailUrls((current) => ({ ...current, ...thumbnailEntries }))
+    }
+
+    void loadThumbnailUrls()
+    return () => {
+      cancelled = true
+    }
+  }, [shareAssetThumbnailUrls, shareAssets, shareToken, supabase, view])
 
   useEffect(() => {
     if (!supabase || view !== 'share' || !shareToken || shareAssets.length === 0) return
@@ -1522,11 +1607,11 @@ function App() {
     const loadShareView = async () => {
       setShareBusy(true)
       setShareMessage('')
-      setShareAllowDownload(false)
       setShareDeliveryId('')
       setShareExpiresAt('')
       setSharePageCopyState('')
       setShareAssetPreviewUrls({})
+      setShareAssetThumbnailUrls({})
 
       try {
         const payload = await workerRequest<{
@@ -1539,25 +1624,24 @@ function App() {
         if (new Date(payload.expiresAt).getTime() <= Date.now()) {
           setShareMessage('This share link has expired.')
           setShareAssets([])
-          setShareAllowDownload(false)
           setShareDeliveryId('')
           setShareExpiresAt('')
           setShareAssetPreviewUrls({})
+          setShareAssetThumbnailUrls({})
           setShareBusy(false)
           return
         }
 
         setShareAssets(payload.assets ?? [])
-        setShareAllowDownload(Boolean(payload.allowDownload))
         setShareDeliveryId(payload.deliveryId)
         setShareExpiresAt(payload.expiresAt)
       } catch (error) {
         setShareMessage(error instanceof Error ? error.message : 'This share link is invalid or unavailable.')
         setShareAssets([])
-        setShareAllowDownload(false)
         setShareDeliveryId('')
         setShareExpiresAt('')
         setShareAssetPreviewUrls({})
+        setShareAssetThumbnailUrls({})
       }
       setShareBusy(false)
     }
@@ -1607,9 +1691,11 @@ function App() {
     setAdminActivities([])
     setAdminActivityError('')
     setShareAssetPreviewUrls({})
+    setShareAssetThumbnailUrls({})
     setSharePageCopyState('')
     setShareExpiresAt('')
     setCustomerAssetPreviewUrls({})
+    setCustomerAssetThumbnailUrls({})
     window.location.hash = '#home'
   }
 
@@ -1726,7 +1812,7 @@ function App() {
   const renderCustomerLightbox = () => {
     if (!customerLightboxAsset || !customerLightbox) return null
 
-    const previewUrl = customerPreviewUrls[customerLightboxAsset.id]
+    const previewUrl = customerPreviewUrls[customerLightboxAsset.id] ?? customerThumbnailUrls[customerLightboxAsset.id]
     const canDownload = Boolean(customerLightboxAsset.canDownload)
     const showDownloadAction = view !== 'share'
 
@@ -2802,7 +2888,7 @@ function App() {
         <div className="portal-head">
           <div>
             <h2>My Pictures</h2>
-            <p>Media matched to <strong>{session.user.email}</strong>.</p>
+            <p>Media matched to <strong>{session.user.email}</strong>. Tap a photo to open it full screen.</p>
           </div>
           <div className="customer-summary-strip">
             <div className="admin-stat-card">
@@ -2875,10 +2961,15 @@ function App() {
                         type="button"
                         onClick={() => openCustomerLightbox(delivery.deliveryId, asset.id)}
                         aria-label={`Open ${getDisplayFileName(asset.filename)}`}
-                        disabled={!customerAssetPreviewUrls[asset.id]}
+                        disabled={!customerThumbnailUrls[asset.id]}
                       >
-                        {customerAssetPreviewUrls[asset.id] ? (
-                          <img src={customerAssetPreviewUrls[asset.id]} alt={getDisplayFileName(asset.filename)} loading="lazy" />
+                        {customerThumbnailUrls[asset.id] ? (
+                          <img
+                            src={customerThumbnailUrls[asset.id]}
+                            alt={getDisplayFileName(asset.filename)}
+                            loading="lazy"
+                            decoding="async"
+                          />
                         ) : (
                           <div className="customer-asset-thumb-fallback">
                             <span>IMG</span>
@@ -2894,22 +2985,20 @@ function App() {
                     )}
                     <div className="customer-asset-main">
                       <p className="customer-asset-name">{getDisplayFileName(asset.filename)}</p>
-                      <p className="portal-hint">{getAssetKind(asset.mime_type)}</p>
+                      {!asset.mime_type.startsWith('image/') && <p className="portal-hint">{getAssetKind(asset.mime_type)}</p>}
                     </div>
                     <div className="customer-asset-actions">
-                      <button
-                        className="button ghost"
-                        type="button"
-                        onClick={() => {
-                          if (asset.mime_type.startsWith('image/') && customerAssetPreviewUrls[asset.id]) {
-                            openCustomerLightbox(delivery.deliveryId, asset.id)
-                            return
-                          }
-                          void handleOpenAsset(asset.id, 'view')
-                        }}
-                      >
-                        Open
-                      </button>
+                      {!asset.mime_type.startsWith('image/') && (
+                        <button
+                          className="button ghost"
+                          type="button"
+                          onClick={() => {
+                            void handleOpenAsset(asset.id, 'view')
+                          }}
+                        >
+                          Open
+                        </button>
+                      )}
                       <button
                         className="button ghost"
                         type="button"
@@ -3710,7 +3799,7 @@ function App() {
       <div className="portal-head">
         <div>
           <h2>Shared Gallery</h2>
-          <p className="share-gallery-copy">This shared link is view-only. Open any file to preview it in place.</p>
+          <p className="share-gallery-copy">This shared link is view-only. Tap a file to preview it in place.</p>
         </div>
         <div className="customer-summary-strip">
           <div className="admin-stat-card">
@@ -3720,10 +3809,6 @@ function App() {
           <div className="admin-stat-card">
             <span>Images</span>
             <strong>{shareAssets.filter((asset) => asset.mime_type.startsWith('image/')).length}</strong>
-          </div>
-          <div className="admin-stat-card">
-            <span>Access</span>
-            <strong>{shareAllowDownload ? 'Preview only' : 'View only'}</strong>
           </div>
           <div className="admin-stat-card">
             <span>Expires</span>
@@ -3750,7 +3835,7 @@ function App() {
         <div className="customer-asset-grid">
           {shareAssets.map((asset) => {
             const isImage = asset.mime_type.startsWith('image/')
-            const previewUrl = shareAssetPreviewUrls[asset.id]
+            const thumbnailUrl = shareAssetThumbnailUrls[asset.id]
             const displayName = getDisplayFileName(asset.filename)
 
             return (
@@ -3761,10 +3846,10 @@ function App() {
                     type="button"
                     onClick={() => openCustomerLightbox(shareDeliveryId, asset.id)}
                     aria-label={`Open ${displayName}`}
-                    disabled={!previewUrl}
+                    disabled={!thumbnailUrl}
                   >
-                    {previewUrl ? (
-                      <img src={previewUrl} alt={displayName} loading="lazy" />
+                    {thumbnailUrl ? (
+                      <img src={thumbnailUrl} alt={displayName} loading="lazy" decoding="async" />
                     ) : (
                       <div className="customer-asset-thumb-fallback">
                         <span>IMG</span>
@@ -3780,23 +3865,21 @@ function App() {
                 )}
                 <div className="customer-asset-main">
                   <p className="customer-asset-name">{displayName}</p>
-                  <p className="portal-hint">{getAssetKind(asset.mime_type)}</p>
+                  {!isImage && <p className="portal-hint">{getAssetKind(asset.mime_type)}</p>}
                 </div>
-                <div className="customer-asset-actions">
-                  <button
-                    className="button ghost"
-                    type="button"
-                    onClick={() => {
-                      if (isImage && previewUrl) {
-                        openCustomerLightbox(shareDeliveryId, asset.id)
-                        return
-                      }
-                      void handleOpenAsset(asset.id, 'view', { shareToken })
-                    }}
-                  >
-                    Open
-                  </button>
-                </div>
+                {!isImage && (
+                  <div className="customer-asset-actions">
+                    <button
+                      className="button ghost"
+                      type="button"
+                      onClick={() => {
+                        void handleOpenAsset(asset.id, 'view', { shareToken })
+                      }}
+                    >
+                      Open
+                    </button>
+                  </div>
+                )}
               </article>
             )
           })}
