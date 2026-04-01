@@ -8,19 +8,19 @@
 
 .topbar {
   position: sticky;
-  top: 12px;
+  top: 10px;
   z-index: 40;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
+  gap: 16px;
   width: min(calc(100% - 24px), 1440px);
-  margin: 12px auto 0;
-  padding: 12px 18px;
-  border: 1px solid rgba(236, 232, 223, 0.12);
-  border-radius: 24px;
-  background: rgba(12, 14, 21, 0.78);
-  backdrop-filter: blur(18px) saturate(1.08);
+  margin: 10px auto 0;
+  padding: 10px 14px;
+  border: 1px solid rgba(236, 232, 223, 0.09);
+  border-radius: 999px;
+  background: rgba(12, 14, 21, 0.64);
+  backdrop-filter: blur(20px) saturate(1.08);
   box-shadow: var(--shadow-soft);
 }
 
@@ -38,9 +38,9 @@
 }
 
 .brand-mark {
-  width: 56px;
-  height: 56px;
-  border-radius: 16px;
+  width: 50px;
+  height: 50px;
+  border-radius: 14px;
   overflow: hidden;
   border: 1px solid var(--line-strong);
   box-shadow: var(--shadow-soft);
@@ -54,15 +54,15 @@
 }
 
 .brand-title {
-  font-size: 1.34rem;
+  font-size: 1.24rem;
   letter-spacing: 0.04em;
   line-height: 1.1;
   padding: 3px 10px 5px;
 }
 
 .brand-subtitle {
-  font-size: 0.9rem;
-  letter-spacing: 0.08em;
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
   color: rgba(236, 232, 223, 0.72);
   padding: 2px 9px 4px;
 }
@@ -85,15 +85,15 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 76px;
-  padding: 8px 12px;
+  min-width: 72px;
+  padding: 7px 11px;
   border-radius: 999px;
-  border: 1px solid rgba(236, 232, 223, 0.16);
-  background: rgba(236, 232, 223, 0.06);
-  color: rgba(246, 242, 234, 0.9);
-  font-size: 0.72rem;
+  border: 1px solid rgba(236, 232, 223, 0.12);
+  background: rgba(236, 232, 223, 0.035);
+  color: rgba(246, 242, 234, 0.88);
+  font-size: 0.68rem;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.13em;
   text-transform: uppercase;
   transition:
     transform 0.18s ease,
@@ -121,22 +121,22 @@
 }
 
 .login-icon {
-  min-width: 38px;
-  height: 38px;
-  padding: 0 10px;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 9px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   border-radius: 999px;
-  border: 1px solid rgba(236, 232, 223, 0.16);
-  background: rgba(236, 232, 223, 0.06);
-  color: rgba(246, 242, 234, 0.9);
+  border: 1px solid rgba(236, 232, 223, 0.12);
+  background: rgba(236, 232, 223, 0.035);
+  color: rgba(246, 242, 234, 0.88);
   cursor: pointer;
 }
 
 .login-label {
-  font-size: 0.64rem;
-  letter-spacing: 0.12em;
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
 }
 
 .login-icon:hover {
@@ -209,15 +209,15 @@
 .portal-section {
   position: relative;
   overflow: hidden;
-  border-radius: 28px;
-  border: 1px solid rgba(236, 232, 223, 0.12);
+  border-radius: 30px;
+  border: 1px solid rgba(236, 232, 223, 0.09);
   background:
-    linear-gradient(180deg, rgba(25, 27, 36, 0.92), rgba(17, 19, 27, 0.94)),
+    linear-gradient(180deg, rgba(25, 27, 36, 0.88), rgba(17, 19, 27, 0.92)),
     var(--panel);
   box-shadow: var(--shadow-soft);
-  padding: 28px;
+  padding: 30px;
   display: grid;
-  gap: 14px;
+  gap: 16px;
 }
 
 .portal-section::before {
@@ -236,8 +236,8 @@
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  padding-bottom: 18px;
-  border-bottom: 1px solid rgba(236, 232, 223, 0.08);
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(236, 232, 223, 0.06);
 }
 
 .portal-head > * {
@@ -283,9 +283,9 @@
 }
 
 .admin-panel {
-  border-radius: 20px;
-  border: 1px solid rgba(236, 232, 223, 0.1);
-  background: rgba(236, 232, 223, 0.035);
+  border-radius: 22px;
+  border: 1px solid rgba(236, 232, 223, 0.08);
+  background: rgba(236, 232, 223, 0.03);
   padding: 20px;
   display: grid;
   gap: 14px;
@@ -299,8 +299,8 @@
 
 .admin-toggle-button {
   border-radius: 999px;
-  border: 1px solid rgba(236, 232, 223, 0.24);
-  background: rgba(236, 232, 223, 0.09);
+  border: 1px solid rgba(236, 232, 223, 0.18);
+  background: rgba(236, 232, 223, 0.07);
   color: #efe7d7;
   padding: 11px 14px;
   font-size: 0.7rem;
@@ -391,7 +391,7 @@
   position: relative;
   overflow: hidden;
   border-radius: 22px;
-  border: 1px dashed rgba(236, 232, 223, 0.18);
+  border: 1px dashed rgba(236, 232, 223, 0.14);
   background:
     radial-gradient(circle at top left, rgba(209, 176, 127, 0.12), transparent 34%),
     rgba(236, 232, 223, 0.04);
@@ -485,9 +485,9 @@
 
 .admin-stat-card {
   border-radius: 18px;
-  border: 1px solid rgba(236, 232, 223, 0.1);
+  border: 1px solid rgba(236, 232, 223, 0.08);
   background:
-    linear-gradient(180deg, rgba(236, 232, 223, 0.05), rgba(236, 232, 223, 0.025));
+    linear-gradient(180deg, rgba(236, 232, 223, 0.04), rgba(236, 232, 223, 0.02));
   padding: 16px;
   display: grid;
   gap: 6px;
@@ -521,10 +521,10 @@
 }
 
 .admin-activity-panel {
-  border-radius: 20px;
-  border: 1px solid rgba(236, 232, 223, 0.1);
-  background: rgba(236, 232, 223, 0.035);
-  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(236, 232, 223, 0.08);
+  background: rgba(236, 232, 223, 0.03);
+  padding: 16px;
   display: grid;
   gap: 12px;
 }
@@ -663,10 +663,10 @@
 }
 
 .admin-client-form {
-  border-radius: 20px;
-  border: 1px solid rgba(236, 232, 223, 0.1);
+  border-radius: 22px;
+  border: 1px solid rgba(236, 232, 223, 0.08);
   background: rgba(209, 176, 127, 0.05);
-  padding: 20px;
+  padding: 18px;
   display: grid;
   gap: 14px;
   margin-top: 2px;
@@ -698,12 +698,12 @@
   gap: 14px;
   flex-wrap: wrap;
   margin-top: 2px;
-  padding: 12px 14px;
+  padding: 10px 12px;
   border-radius: 20px;
-  border: 1px solid rgba(236, 232, 223, 0.12);
-  background: rgba(14, 17, 24, 0.9);
+  border: 1px solid rgba(236, 232, 223, 0.08);
+  background: rgba(14, 17, 24, 0.86);
   backdrop-filter: blur(14px);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.26);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
 }
 
 .admin-bulk-actions-copy {
@@ -765,11 +765,10 @@
 }
 
 .admin-client-card {
-  border: 1px solid rgba(236, 232, 223, 0.1);
-  background:
-    linear-gradient(180deg, rgba(236, 232, 223, 0.05), rgba(236, 232, 223, 0.03));
+  border: 1px solid rgba(236, 232, 223, 0.08);
+  background: rgba(236, 232, 223, 0.03);
   border-radius: 18px;
-  padding: 18px;
+  padding: 16px;
   display: grid;
   gap: 12px;
   color: var(--ink);
@@ -843,10 +842,9 @@
 
 .admin-project-card {
   border-radius: 20px;
-  border: 1px solid rgba(236, 232, 223, 0.1);
-  background:
-    linear-gradient(180deg, rgba(236, 232, 223, 0.05), rgba(236, 232, 223, 0.03));
-  padding: 18px;
+  border: 1px solid rgba(236, 232, 223, 0.08);
+  background: rgba(236, 232, 223, 0.03);
+  padding: 16px;
   display: grid;
   gap: 14px;
   box-shadow: var(--shadow-soft);
@@ -869,9 +867,8 @@
 .admin-asset-card {
   position: relative;
   border-radius: 18px;
-  border: 1px solid rgba(236, 232, 223, 0.1);
-  background:
-    linear-gradient(180deg, rgba(18, 20, 28, 0.78), rgba(11, 13, 19, 0.5));
+  border: 1px solid rgba(236, 232, 223, 0.07);
+  background: rgba(18, 20, 28, 0.68);
   padding: 16px;
   display: grid;
   gap: 12px;
@@ -980,9 +977,8 @@
 .customer-asset-card {
   position: relative;
   border-radius: 18px;
-  border: 1px solid rgba(236, 232, 223, 0.1);
-  background:
-    linear-gradient(180deg, rgba(18, 20, 28, 0.78), rgba(11, 13, 19, 0.5));
+  border: 1px solid rgba(236, 232, 223, 0.07);
+  background: rgba(18, 20, 28, 0.68);
   padding: 16px;
   display: grid;
   gap: 14px;
@@ -1075,7 +1071,7 @@
   display: grid;
   gap: 16px;
   border-radius: 28px;
-  border: 1px solid rgba(236, 232, 223, 0.12);
+  border: 1px solid rgba(236, 232, 223, 0.08);
   background: rgba(11, 13, 19, 0.96);
   box-shadow: 0 36px 90px rgba(0, 0, 0, 0.55);
   padding: 20px;
@@ -1159,7 +1155,7 @@
   display: grid;
   gap: 16px;
   border-radius: 28px;
-  border: 1px solid rgba(236, 232, 223, 0.12);
+  border: 1px solid rgba(236, 232, 223, 0.08);
   background: rgba(11, 13, 19, 0.96);
   box-shadow: 0 36px 90px rgba(0, 0, 0, 0.55);
   padding: 20px;
@@ -1231,7 +1227,7 @@
 .admin-confirm-panel {
   width: min(100%, 560px);
   border-radius: 20px;
-  border: 1px solid rgba(200, 168, 121, 0.2);
+  border: 1px solid rgba(200, 168, 121, 0.16);
   background: rgba(18, 21, 29, 0.98);
   box-shadow: 0 24px 50px rgba(0, 0, 0, 0.45);
   padding: 24px;
@@ -1349,9 +1345,8 @@
 
 .delivery-card {
   border-radius: 20px;
-  border: 1px solid rgba(236, 232, 223, 0.1);
-  background:
-    linear-gradient(180deg, rgba(236, 232, 223, 0.05), rgba(236, 232, 223, 0.03));
+  border: 1px solid rgba(236, 232, 223, 0.08);
+  background: rgba(236, 232, 223, 0.03);
   padding: 18px;
   display: grid;
   gap: 12px;
@@ -1441,9 +1436,8 @@
   display: grid;
   gap: 12px;
   border-radius: 22px;
-  border: 1px solid rgba(236, 232, 223, 0.1);
-  background:
-    linear-gradient(180deg, rgba(236, 232, 223, 0.05), rgba(236, 232, 223, 0.03));
+  border: 1px solid rgba(236, 232, 223, 0.08);
+  background: rgba(236, 232, 223, 0.03);
   padding: 18px;
   box-shadow: var(--shadow-soft);
 }
@@ -1522,9 +1516,8 @@
   width: 100%;
   padding: 16px;
   border-radius: 18px;
-  border: 1px solid rgba(236, 232, 223, 0.1);
-  background:
-    linear-gradient(180deg, rgba(18, 20, 28, 0.78), rgba(11, 13, 19, 0.5));
+  border: 1px solid rgba(236, 232, 223, 0.07);
+  background: rgba(18, 20, 28, 0.68);
   color: inherit;
   cursor: pointer;
   transition:
@@ -1596,12 +1589,12 @@
 
 main {
   flex: 1;
-  width: min(1240px, 100%);
+  width: min(1320px, 100%);
   margin: 0 auto;
-  padding: 44px 5.5vw 104px;
+  padding: 40px 4.5vw 104px;
   display: flex;
   flex-direction: column;
-  gap: 86px;
+  gap: 88px;
 }
 
 main > section {
@@ -1610,9 +1603,9 @@ main > section {
 
 .hero {
   display: grid;
-  grid-template-columns: 1.02fr 1.08fr;
+  grid-template-columns: 0.96fr 1.12fr;
   align-items: stretch;
-  gap: 30px;
+  gap: 22px;
 }
 
 .hero-text {
@@ -1621,12 +1614,13 @@ main > section {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: clamp(22px, 3vw, 34px);
-  border-radius: 30px;
-  border: 1px solid rgba(236, 232, 223, 0.12);
+  padding: clamp(24px, 3.2vw, 40px);
+  min-height: clamp(520px, 66vh, 760px);
+  border-radius: 34px;
+  border: 1px solid rgba(236, 232, 223, 0.09);
   background:
-    linear-gradient(180deg, rgba(25, 27, 36, 0.72), rgba(16, 18, 25, 0.82)),
-    rgba(236, 232, 223, 0.03);
+    linear-gradient(180deg, rgba(25, 27, 36, 0.58), rgba(16, 18, 25, 0.88)),
+    rgba(236, 232, 223, 0.025);
   box-shadow: var(--shadow-soft);
   position: relative;
   overflow: hidden;
@@ -1638,8 +1632,8 @@ main > section {
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(circle at top right, rgba(209, 176, 127, 0.12), transparent 34%),
-    radial-gradient(circle at bottom left, rgba(255, 255, 255, 0.04), transparent 36%);
+    radial-gradient(circle at top right, rgba(209, 176, 127, 0.14), transparent 32%),
+    radial-gradient(circle at bottom left, rgba(255, 255, 255, 0.04), transparent 38%);
 }
 
 .hero-text > * {
@@ -1664,18 +1658,18 @@ main > section {
 .hero-text h1 {
   margin: 0 0 16px;
   font-family: 'Twigs', serif;
-  font-size: clamp(2.45rem, 5vw, 4.65rem);
-  line-height: 0.98;
+  font-size: clamp(2.5rem, 5.2vw, 4.9rem);
+  line-height: 0.96;
   letter-spacing: 0.01em;
   text-wrap: balance;
-  max-width: 11ch;
+  max-width: 10ch;
 }
 
 .lead {
   margin: 0;
-  max-width: 52ch;
+  max-width: 49ch;
   color: var(--ink-soft);
-  font-size: 1.05rem;
+  font-size: 1.02rem;
 }
 
 .hero-actions {
@@ -1750,16 +1744,16 @@ main > section {
 .hero-cards {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-auto-rows: 132px;
+  grid-auto-rows: 150px;
   grid-auto-flow: dense;
-  gap: 14px;
+  gap: 12px;
 }
 
 .hero-card {
   position: relative;
-  border-radius: 24px;
+  border-radius: 28px;
   overflow: hidden;
-  border: 1px solid rgba(236, 232, 223, 0.12);
+  border: 1px solid rgba(236, 232, 223, 0.09);
   box-shadow: var(--shadow-soft);
   background: #141821;
   min-height: 100%;
@@ -1783,7 +1777,7 @@ main > section {
   position: absolute;
   inset: 0;
   z-index: 2;
-  background: linear-gradient(170deg, rgba(10, 12, 18, 0.06), rgba(10, 12, 18, 0.62));
+  background: linear-gradient(170deg, rgba(10, 12, 18, 0.04), rgba(10, 12, 18, 0.66));
 }
 
 .hero-card-image {
@@ -1794,7 +1788,7 @@ main > section {
 
 .hero-card-overlay {
   position: absolute;
-  inset: auto 16px 16px;
+  inset: auto 18px 18px;
   z-index: 3;
   color: #f2ece1;
   text-shadow: 0 8px 20px rgba(0, 0, 0, 0.66);
@@ -1804,7 +1798,7 @@ main > section {
   margin: 0;
   font-family: 'Bodoni Moda', serif;
   letter-spacing: 0.03em;
-  font-size: 1.24rem;
+  font-size: 1.18rem;
 }
 
 .hero-card-overlay span {
@@ -1821,17 +1815,17 @@ main > section {
 .contact {
   position: relative;
   overflow: hidden;
-  border-radius: 28px;
-  border: 1px solid rgba(236, 232, 223, 0.12);
+  border-radius: 30px;
+  border: 1px solid rgba(236, 232, 223, 0.09);
   background:
-    linear-gradient(180deg, rgba(25, 27, 36, 0.92), rgba(17, 19, 27, 0.92)),
+    linear-gradient(180deg, rgba(25, 27, 36, 0.86), rgba(17, 19, 27, 0.9)),
     var(--panel);
   box-shadow: var(--shadow-soft);
 }
 
 .work,
 .about {
-  padding: 30px;
+  padding: 32px;
 }
 
 .work::before,
@@ -1864,7 +1858,7 @@ main > section {
 
 .section-head p {
   margin: 0;
-  max-width: 500px;
+  max-width: 520px;
   color: var(--ink-soft);
   line-height: 1.72;
 }
@@ -1873,33 +1867,62 @@ main > section {
   margin-top: 40px;
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 24px;
 }
 
 .grid {
   margin-top: 24px;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  grid-auto-rows: 240px;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-auto-rows: 92px;
   grid-auto-flow: dense;
-  gap: 18px;
+  gap: 14px;
 }
 
 .shot {
   position: relative;
-  border-radius: 20px;
+  border-radius: 24px;
   overflow: hidden;
-  border: 1px solid rgba(236, 232, 223, 0.1);
+  border: 1px solid rgba(236, 232, 223, 0.08);
   background: #11141d;
   box-shadow: var(--shadow-soft);
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
 }
 
-.shot:nth-child(3n) {
+.shot:hover {
+  transform: translateY(-2px);
+  border-color: rgba(209, 176, 127, 0.24);
+  box-shadow: var(--shadow);
+}
+
+.shot:nth-child(6n + 1) {
+  grid-column: span 7;
   grid-row: span 2;
 }
 
-.shot:nth-child(4n) {
-  grid-column: span 2;
+.shot:nth-child(6n + 2) {
+  grid-column: span 5;
+}
+
+.shot:nth-child(6n + 3) {
+  grid-column: span 4;
+}
+
+.shot:nth-child(6n + 4) {
+  grid-column: span 4;
+  grid-row: span 2;
+}
+
+.shot:nth-child(6n + 5) {
+  grid-column: span 4;
+}
+
+.shot:nth-child(6n + 6) {
+  grid-column: span 8;
+  grid-row: span 2;
 }
 
 .shot img {
@@ -1909,24 +1932,24 @@ main > section {
 .shot-overlay {
   position: absolute;
   inset: auto 0 0;
-  padding: 14px;
+  padding: 12px 12px 11px;
   display: flex;
   flex-direction: column;
   gap: 3px;
   color: #f2ece1;
-  background: linear-gradient(180deg, rgba(11, 13, 18, 0), rgba(11, 13, 18, 0.86));
+  background: linear-gradient(180deg, rgba(11, 13, 18, 0), rgba(11, 13, 18, 0.76));
 }
 
 .shot-overlay p {
   margin: 0;
   font-family: 'Bodoni Moda', serif;
   letter-spacing: 0.04em;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
 }
 
 .shot-overlay span {
-  font-size: 0.62rem;
-  letter-spacing: 0.16em;
+  font-size: 0.58rem;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   opacity: 0.84;
 }
@@ -1934,16 +1957,16 @@ main > section {
 .rotator-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(245px, 1fr));
-  gap: 18px;
+  gap: 14px;
 }
 
 .rotator-card {
   position: relative;
-  min-height: 352px;
-  border-radius: 20px;
+  min-height: 380px;
+  border-radius: 24px;
   overflow: hidden;
-  border: 1px solid rgba(236, 232, 223, 0.1);
-  background: #121620;
+  border: 1px solid rgba(236, 232, 223, 0.07);
+  background: rgba(18, 20, 28, 0.72);
   box-shadow: var(--shadow-soft);
 }
 
@@ -2012,7 +2035,7 @@ main > section {
 .about {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 28px;
+  gap: 24px;
 }
 
 .about h2,
@@ -2033,9 +2056,9 @@ main > section {
 
 .about-card,
 .contact-card {
-  border-radius: 20px;
-  border: 1px solid rgba(236, 232, 223, 0.1);
-  background: rgba(236, 232, 223, 0.04);
+  border-radius: 22px;
+  border: 1px solid rgba(236, 232, 223, 0.08);
+  background: rgba(236, 232, 223, 0.03);
   padding: 22px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
@@ -2060,7 +2083,7 @@ main > section {
   padding: 30px;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 28px;
+  gap: 24px;
 }
 
 .contact-actions {
@@ -2139,6 +2162,29 @@ main > section {
     grid-template-columns: 1fr;
   }
 
+  .grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-auto-rows: 126px;
+  }
+
+  .shot:nth-child(6n + 1) {
+    grid-column: span 4;
+    grid-row: span 2;
+  }
+
+  .shot:nth-child(6n + 2),
+  .shot:nth-child(6n + 3),
+  .shot:nth-child(6n + 5) {
+    grid-column: span 2;
+    grid-row: span 1;
+  }
+
+  .shot:nth-child(6n + 4),
+  .shot:nth-child(6n + 6) {
+    grid-column: span 3;
+    grid-row: span 2;
+  }
+
   .hero-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-auto-rows: 180px;
@@ -2152,24 +2198,21 @@ main > section {
   }
 
   .portal-section {
-    padding: 24px;
+    padding: 22px;
   }
 
   .work,
   .about,
   .contact {
-    padding: 22px;
+    padding: 20px;
   }
 
-  .shot:nth-child(4n) {
-    grid-column: span 1;
-  }
 }
 
 @media (max-width: 680px) {
   main {
-    padding: 30px 5.5vw 82px;
-    gap: 74px;
+    padding: 24px 4.5vw 72px;
+    gap: 62px;
   }
 
   .topbar {
@@ -2194,12 +2237,33 @@ main > section {
   }
 
   .portal-section {
-    padding: 20px;
+    padding: 16px;
     border-radius: 22px;
   }
 
   .hero-text {
-    padding: 20px;
+    min-height: 0;
+    padding: 18px;
+  }
+
+  .hero-text h1 {
+    font-size: clamp(2.15rem, 11vw, 3rem);
+  }
+
+  .lead {
+    font-size: 0.96rem;
+  }
+
+  .eyebrow {
+    margin-bottom: 12px;
+  }
+
+  .section-head h2 {
+    font-size: clamp(1.5rem, 7vw, 2rem);
+  }
+
+  .section-head p {
+    font-size: 0.96rem;
   }
 
   .hero-cards {
@@ -2251,7 +2315,7 @@ main > section {
 
   .admin-client-card,
   .admin-panel {
-    padding: 14px;
+    padding: 12px;
   }
 
   .admin-client-grid,
@@ -2293,11 +2357,16 @@ main > section {
 
   .grid {
     grid-template-columns: 1fr;
-    grid-auto-rows: 250px;
+    grid-auto-rows: 220px;
+    gap: 12px;
   }
 
-  .shot:nth-child(3n),
-  .shot:nth-child(4n) {
+  .shot:nth-child(6n + 1),
+  .shot:nth-child(6n + 2),
+  .shot:nth-child(6n + 3),
+  .shot:nth-child(6n + 4),
+  .shot:nth-child(6n + 5),
+  .shot:nth-child(6n + 6) {
     grid-row: span 1;
     grid-column: span 1;
   }
@@ -2310,7 +2379,7 @@ main > section {
   .about,
   .contact {
     border-radius: 18px;
-    padding: 18px;
+    padding: 16px;
   }
 
   .admin-confirm-modal {

@@ -23,12 +23,12 @@
   --ink-soft: rgba(236, 232, 223, 0.74);
   --paper: #0d0f15;
   --panel: rgba(22, 24, 33, 0.82);
-  --line: rgba(236, 232, 223, 0.14);
-  --line-strong: rgba(236, 232, 223, 0.26);
+  --line: rgba(236, 232, 223, 0.1);
+  --line-strong: rgba(236, 232, 223, 0.2);
   --accent: #d1b07f;
   --accent-soft: rgba(209, 176, 127, 0.18);
-  --shadow-soft: 0 12px 30px rgba(0, 0, 0, 0.28);
-  --shadow: 0 28px 60px rgba(0, 0, 0, 0.48);
+  --shadow-soft: 0 10px 26px rgba(0, 0, 0, 0.22);
+  --shadow: 0 24px 54px rgba(0, 0, 0, 0.42);
 }
 
 * {
@@ -40,10 +40,10 @@ body {
   min-height: 100vh;
   color: var(--ink);
   background:
-    radial-gradient(68% 68% at 18% -8%, rgba(209, 176, 127, 0.18) 0%, transparent 60%),
-    radial-gradient(60% 60% at 100% 0%, rgba(84, 106, 142, 0.22) 0%, transparent 66%),
+    radial-gradient(72% 72% at 14% -8%, rgba(209, 176, 127, 0.22) 0%, transparent 58%),
+    radial-gradient(62% 62% at 100% 0%, rgba(84, 106, 142, 0.18) 0%, transparent 64%),
     radial-gradient(40% 40% at 50% 12%, rgba(255, 255, 255, 0.04) 0%, transparent 58%),
-    linear-gradient(160deg, #151821 0%, #10131a 52%, #0b0d13 100%);
+    linear-gradient(160deg, #141721 0%, #10131a 50%, #0b0d13 100%);
 }
 
 a {

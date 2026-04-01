@@ -2771,8 +2771,8 @@ function App() {
         <div className="section-head">
           <h2>Landscapes</h2>
           <p>
-            A curated selection of my favorite scenes from the road. Each frame is a
-            slow, cinematic moment.
+            A quiet gallery of scenes from the road. Each frame is chosen to feel
+            collected rather than merely shown.
           </p>
         </div>
 
@@ -2796,8 +2796,8 @@ function App() {
           <div className="section-head">
             <h2>Portrait stories</h2>
             <p>
-              Three rotating collections for baby portraits, classic portraits,
-              and event moments.
+              Three rotating collections, arranged like a contact sheet with more
+              room for each moment to breathe.
             </p>
           </div>
           <div className="rotator-grid">
@@ -3412,7 +3412,7 @@ function App() {
           <div>
             <p className="eyebrow">Admin view</p>
             <h2>Client folders</h2>
-            <p>Open a client to review uploads, rename files, or delete assets.</p>
+            <p>Open a client to review folders and assets without the interface getting in the way.</p>
           </div>
           <button
             className="button ghost"
@@ -3508,11 +3508,11 @@ function App() {
     if (!client) {
       return (
         <section className="portal-section admin-screen">
-          <div className="portal-head admin-screen-head">
-            <div>
-              <p className="eyebrow">Client folder</p>
-              <h2>No client selected</h2>
-              <p>Pick a client from the folder list to view their uploads.</p>
+        <div className="portal-head admin-screen-head">
+          <div>
+            <p className="eyebrow">Client folder</p>
+            <h2>No client selected</h2>
+              <p>Pick a client from the folder list to view their work.</p>
             </div>
             <button className="button ghost" type="button" onClick={openAdminClients}>
               Back to folders
