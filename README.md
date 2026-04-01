@@ -96,7 +96,6 @@ Required GitHub Actions secrets:
 - `CLOUDFLARE_API_TOKEN`
 
 The workflow lives in `.github/workflows/deploy-production.yml`.
-The Supabase CLI project config is tracked at `supabase/config.toml`.
 
 ## Day 2 auth/admin artifacts
 

@@ -70,10 +70,6 @@ Required GitHub Actions secrets:
 - `SUPABASE_DB_PASSWORD`
 - `CLOUDFLARE_API_TOKEN`
 
-Tracked Supabase CLI config:
-
-- `supabase/config.toml`
-
 ### Manual fallback
 
 If the workflow secrets are not configured yet, deploy the runtime layers manually:
