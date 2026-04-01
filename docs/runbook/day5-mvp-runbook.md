@@ -55,6 +55,10 @@ npm run dev
 
 ## Production deploy
 
+### Frontend
+
+Vercel is connected to `main`, so frontend changes deploy automatically on push.
+
 ### Worker
 
 ```bash
@@ -70,6 +74,12 @@ Expected route pattern:
 ```bash
 npx vercel deploy --prod --yes
 ```
+
+Use the manual Vercel deploy only when you need an override or a one-off production push.
+
+### Database
+
+Apply Supabase migrations manually when the schema changes.
 
 ## Day 5 smoke checks
 

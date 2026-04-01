@@ -81,6 +81,11 @@ In Vercel:
    - `VITE_FORMSPREE_ENDPOINT=https://formspree.io/f/mzdabzwy`
 4. Deploy.
 
+Production behavior:
+- Frontend deploys automatically from `main` through Vercel.
+- API and database deploys are manual for now.
+- There is no GitHub Actions production workflow in the repo at the moment.
+
 ## Day 2 auth/admin artifacts
 
 - Supabase migration: `supabase/migrations/20260310_day2_auth_roles_admin.sql`
@@ -112,7 +117,7 @@ In Vercel:
   - `POST /api/v1/admin/activity`
 - Frontend: worker-backed admin activity feed in `src/App.tsx`
 
-## Day 5 hardening/release artifacts
+## Day 5 hardening artifacts
 
 - Runbook: `docs/runbook/day5-mvp-runbook.md`
 - Validation report: `docs/validation/day5-e2e-validation.md`
