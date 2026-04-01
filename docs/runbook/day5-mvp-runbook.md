@@ -67,10 +67,8 @@ Pushes to `main` now trigger the production workflow in `.github/workflows/deplo
 Required GitHub Actions secrets:
 
 - `SUPABASE_ACCESS_TOKEN`
-- `SUPABASE_PROJECT_ID`
 - `SUPABASE_DB_PASSWORD`
 - `CLOUDFLARE_API_TOKEN`
-- `CLOUDFLARE_ACCOUNT_ID`
 
 ### Manual fallback
 
