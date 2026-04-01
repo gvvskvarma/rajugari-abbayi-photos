@@ -28,6 +28,16 @@ type PreviewTokenPayload = {
   expiresAt: string
 }
 
+type PreviewAccessContext =
+  | {
+      kind: 'share'
+      context: ShareLinkContext
+    }
+  | {
+      kind: 'user'
+      user: User
+    }
+
 type Env = {
   R2_MEDIA_BUCKET: R2Bucket
   SUPABASE_URL: string
@@ -111,6 +121,12 @@ app.use('/api/*', async (c, next) => {
   const origin = resolveAllowedOrigin(c.env, c.req.header('Origin'))
   const ip = c.req.header('CF-Connecting-IP') ?? 'unknown'
   const path = new URL(c.req.url).pathname
+  const method = c.req.method
+
+  if (method === 'OPTIONS') {
+    return next()
+  }
+
   const routeKey = `${ip}:${path}`
   const current = routeRateLimits.get(routeKey)
   const now = Date.now()
@@ -400,6 +416,74 @@ const buildR2SignedUrl = async (
   return `https://${host}${canonicalUri}?${baseParams.toString()}`
 }
 
+const resolvePreviewAccessContext = async (
+  env: Env,
+  authHeader: string | undefined,
+  shareToken?: string
+): Promise<PreviewAccessContext> => {
+  if (shareToken) {
+    const context = await getShareLinkContext(env, shareToken)
+    if (!context) throw new Error('Invalid share token')
+    if (new Date(context.link.expires_at).getTime() <= Date.now()) {
+      throw new Error('Share link expired')
+    }
+    return { kind: 'share', context }
+  }
+
+  const user = await getUserFromBearer(env, authHeader)
+  return { kind: 'user', user }
+}
+
+const buildPreviewUrlForAsset = async (
+  env: Env,
+  origin: string,
+  access: PreviewAccessContext,
+  assetId: string,
+  variant: MediaVariant = 'preview'
+) => {
+  const assets = await supabaseRequest<
+    Array<{ id: string; delivery_id: string | null; r2_object_key: string; mime_type: string }>
+  >(env, `assets?id=eq.${encodeURIComponent(assetId)}&select=id,delivery_id,r2_object_key,mime_type&limit=1`)
+
+  const asset = assets[0]
+  if (!asset) throw new Error('Asset not found')
+  if (asset.r2_object_key.startsWith('pending/')) {
+    throw new Error('This file was never uploaded to storage. Re-upload it from Admin Upload.')
+  }
+
+  const deliveryAssetRows = await supabaseRequest<Array<{ delivery_id: string }>>(
+    env,
+    `delivery_assets?asset_id=eq.${encodeURIComponent(assetId)}&select=delivery_id&limit=1`
+  )
+  const deliveryAsset = deliveryAssetRows[0]
+  const deliveryId = asset.delivery_id ?? deliveryAsset?.delivery_id
+  if (!deliveryId || !deliveryAsset) throw new Error('Asset delivery mapping missing')
+
+  if (access.kind === 'share') {
+    if (access.context.link.delivery_id !== deliveryId) {
+      throw new Error('Asset not in shared delivery')
+    }
+    if (access.context.link.scope_type === 'selected' && !access.context.selectedAssetIds.has(asset.id)) {
+      throw new Error('Asset not in shared selection')
+    }
+  } else {
+    await ensureDeliveryAccess(env, access.user, deliveryId, 'view')
+  }
+
+  const token = await createPreviewToken(env.SUPABASE_SERVICE_ROLE_KEY, {
+    v: 1,
+    assetId: asset.id,
+    deliveryId,
+    issuedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+  })
+
+  return {
+    assetId: asset.id,
+    url: `${origin}/api/v1/media/${variant}?token=${encodeURIComponent(token)}`,
+  }
+}
+
 const ensureAdminAndOwnedDelivery = async (env: Env, user: User, deliveryId: string) => {
   if (user.role !== 'admin') throw new Error('Admin access required')
 
@@ -511,6 +595,21 @@ type DeliveryAssetRule = {
   canDownload: boolean
 }
 
+type ShareLinkScope = 'all' | 'selected'
+
+type ShareLinkRow = {
+  id: string
+  delivery_id: string
+  allow_download: boolean
+  expires_at: string
+  scope_type: ShareLinkScope
+}
+
+type ShareLinkContext = {
+  link: ShareLinkRow
+  selectedAssetIds: Set<string>
+}
+
 const getDeliveryAssetRules = async (
   env: Env,
   deliveryId: string
@@ -523,6 +622,30 @@ const getDeliveryAssetRules = async (
   return new Map(
     rows.map((row) => [row.asset_id, { assetId: row.asset_id, canView: true, canDownload: true }])
   )
+}
+
+const getShareLinkContext = async (env: Env, token: string): Promise<ShareLinkContext | null> => {
+  const links = await supabaseRequest<Array<ShareLinkRow>>(
+    env,
+    `share_links?token=eq.${encodeURIComponent(token)}&select=id,delivery_id,allow_download,expires_at,scope_type&limit=1`
+  )
+
+  const link = links[0]
+  if (!link) return null
+
+  const selectedAssetIds =
+    link.scope_type === 'selected'
+      ? new Set(
+          (
+            await supabaseRequest<Array<{ asset_id: string }>>(
+              env,
+              `share_link_assets?share_link_id=eq.${encodeURIComponent(link.id)}&select=asset_id`
+            )
+          ).map((row) => row.asset_id)
+        )
+      : new Set<string>()
+
+  return { link, selectedAssetIds }
 }
 
 const logDownloadEvent = async (
@@ -1322,19 +1445,14 @@ app.post('/api/v1/media/signed-url', async (c) => {
     if (!deliveryId || !deliveryAsset) return jsonError('Asset delivery mapping missing', 403)
 
     if (body.shareToken) {
-      const links = await supabaseRequest<
-        Array<{ delivery_id: string; allow_download: boolean; expires_at: string }>
-      >(
-        c.env,
-        `share_links?token=eq.${encodeURIComponent(
-          body.shareToken
-        )}&select=delivery_id,allow_download,expires_at&limit=1`
-      )
-      const link = links[0]
-      if (!link) return jsonError('Invalid share token', 403)
-      if (new Date(link.expires_at).getTime() <= Date.now()) return jsonError('Share link expired', 403)
-      if (link.delivery_id !== deliveryId) return jsonError('Asset not in shared delivery', 403)
-      if (mode === 'download' && !link.allow_download) return jsonError('Download not allowed', 403)
+      const context = await getShareLinkContext(c.env, body.shareToken)
+      if (!context) return jsonError('Invalid share token', 403)
+      if (new Date(context.link.expires_at).getTime() <= Date.now()) return jsonError('Share link expired', 403)
+      if (context.link.delivery_id !== deliveryId) return jsonError('Asset not in shared delivery', 403)
+      if (context.link.scope_type === 'selected' && !context.selectedAssetIds.has(asset.id)) {
+        return jsonError('Asset not in shared selection', 403)
+      }
+      if (mode === 'download' && !context.link.allow_download) return jsonError('Download not allowed', 403)
 
       if (mode === 'download') {
         const requesterIp = c.req.header('CF-Connecting-IP')
@@ -1391,62 +1509,41 @@ app.post('/api/v1/media/preview-url', async (c) => {
 
     if (!body.assetId) return jsonError('assetId is required', 400)
 
-    const assets = await supabaseRequest<
-      Array<{ id: string; delivery_id: string | null; r2_object_key: string; mime_type: string }>
-    >(
-      c.env,
-      `assets?id=eq.${encodeURIComponent(body.assetId)}&select=id,delivery_id,r2_object_key,mime_type&limit=1`
-    )
-
-    const asset = assets[0]
-    if (!asset) return jsonError('Asset not found', 404)
-    if (asset.r2_object_key.startsWith('pending/')) {
-      return jsonError('This file was never uploaded to storage. Re-upload it from Admin Upload.', 410)
-    }
-
-    const deliveryAssetRows = await supabaseRequest<Array<{ delivery_id: string }>>(
-      c.env,
-      `delivery_assets?asset_id=eq.${encodeURIComponent(body.assetId)}&select=delivery_id&limit=1`
-    )
-    const deliveryAsset = deliveryAssetRows[0]
-    const deliveryId = asset.delivery_id ?? deliveryAsset?.delivery_id
-    if (!deliveryId || !deliveryAsset) return jsonError('Asset delivery mapping missing', 403)
-
-    if (body.shareToken) {
-      const links = await supabaseRequest<
-        Array<{ delivery_id: string; allow_download: boolean; expires_at: string }>
-      >(
-        c.env,
-        `share_links?token=eq.${encodeURIComponent(body.shareToken)}&select=delivery_id,allow_download,expires_at&limit=1`
-      )
-      const link = links[0]
-      if (!link) return jsonError('Invalid share token', 403)
-      if (new Date(link.expires_at).getTime() <= Date.now()) return jsonError('Share link expired', 403)
-      if (link.delivery_id !== deliveryId) return jsonError('Asset not in shared delivery', 403)
-    } else {
-      const user = await getUserFromBearer(c.env, authHeader)
-      await ensureDeliveryAccess(c.env, user, deliveryId, 'view')
-    }
-
-    const token = await createPreviewToken(c.env.SUPABASE_SERVICE_ROLE_KEY, {
-      v: 1,
-      assetId: asset.id,
-      deliveryId,
-      issuedAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-    })
+    const access = await resolvePreviewAccessContext(c.env, authHeader, body.shareToken)
     const variant: MediaVariant = body.variant === 'thumb' ? 'thumb' : 'preview'
+    const payload = await buildPreviewUrlForAsset(c.env, new URL(c.req.url).origin, access, body.assetId, variant)
 
-    return c.json(
-      {
-        url: `${new URL(c.req.url).origin}/api/v1/media/${variant}?token=${encodeURIComponent(token)}`,
-        expiresInSeconds: 300,
-      },
-      200,
-      responseHeaders(c)
-    )
+    return c.json({ url: payload.url, expiresInSeconds: 300 }, 200, responseHeaders(c))
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Preview URL request failed', 400)
+  }
+})
+
+app.post('/api/v1/media/preview-url-batch', async (c) => {
+  try {
+    const authHeader = c.req.header('authorization')
+    const body = await c.req.json<{ assetIds: string[]; variant?: MediaVariant; shareToken?: string }>()
+
+    const assetIds = [...new Set((body.assetIds ?? []).map((assetId) => assetId.trim()).filter(Boolean))]
+    if (assetIds.length === 0) return jsonError('assetIds is required', 400)
+
+    const access = await resolvePreviewAccessContext(c.env, authHeader, body.shareToken)
+    const variant: MediaVariant = body.variant === 'thumb' ? 'thumb' : 'preview'
+    const origin = new URL(c.req.url).origin
+    const entries = await Promise.allSettled(
+      assetIds.map((assetId) => buildPreviewUrlForAsset(c.env, origin, access, assetId, variant))
+    )
+
+    const urls = Object.fromEntries(
+      entries.flatMap((entry) => {
+        if (entry.status !== 'fulfilled') return []
+        return [[entry.value.assetId, entry.value.url]] as const
+      })
+    )
+
+    return c.json({ urls, expiresInSeconds: 300 }, 200, responseHeaders(c))
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Preview URL batch request failed', 400)
   }
 })
 
@@ -1658,21 +1755,16 @@ app.get('/api/v1/share-links/:token/gallery', async (c) => {
     const token = c.req.param('token')
     if (!token) return jsonError('token is required', 400)
 
-    const links = await supabaseRequest<
-      Array<{ delivery_id: string; allow_download: boolean; expires_at: string }>
-    >(
-      c.env,
-      `share_links?token=eq.${encodeURIComponent(token)}&select=delivery_id,allow_download,expires_at&limit=1`
-    )
+    const context = await getShareLinkContext(c.env, token)
+    if (!context) return jsonError('Invalid share token', 403)
+    if (new Date(context.link.expires_at).getTime() <= Date.now()) return jsonError('Share link expired', 403)
 
-    const link = links[0]
-    if (!link) return jsonError('Invalid share token', 403)
-    if (new Date(link.expires_at).getTime() <= Date.now()) return jsonError('Share link expired', 403)
-
-    const assetRules = await getDeliveryAssetRules(c.env, link.delivery_id)
-    const visibleAssetIds = [...assetRules.values()]
-      .filter((rule) => rule.canView)
-      .map((rule) => rule.assetId)
+    const visibleAssetIds =
+      context.link.scope_type === 'selected'
+        ? [...context.selectedAssetIds]
+        : [...(await getDeliveryAssetRules(c.env, context.link.delivery_id)).values()]
+            .filter((rule) => rule.canView)
+            .map((rule) => rule.assetId)
 
     const assets = visibleAssetIds.length
       ? await supabaseRequest<
@@ -1693,10 +1785,14 @@ app.get('/api/v1/share-links/:token/gallery', async (c) => {
 
     return c.json(
       {
-        deliveryId: link.delivery_id,
-        allowDownload: link.allow_download,
-        expiresAt: link.expires_at,
-        assets: assets.filter((asset) => !asset.r2_object_key.startsWith('pending/')),
+        deliveryId: context.link.delivery_id,
+        scopeType: context.link.scope_type,
+        allowDownload: context.link.allow_download,
+        expiresAt: context.link.expires_at,
+        assets: assets.filter(
+          (asset) =>
+            asset.delivery_id === context.link.delivery_id && !asset.r2_object_key.startsWith('pending/')
+        ),
       },
       200,
       responseHeaders(c)
@@ -1709,7 +1805,12 @@ app.get('/api/v1/share-links/:token/gallery', async (c) => {
 app.post('/api/v1/share-links', async (c) => {
   try {
     const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    const body = await c.req.json<{ deliveryId: string; expiresInDays?: number }>()
+    const body = await c.req.json<{
+      deliveryId: string
+      expiresInDays?: number
+      scope?: ShareLinkScope
+      assetIds?: string[]
+    }>()
     if (!body.deliveryId) return jsonError('deliveryId is required', 400)
 
     const accessMode = await ensureDeliveryAccess(c.env, user, body.deliveryId, 'view')
@@ -1717,19 +1818,51 @@ app.post('/api/v1/share-links', async (c) => {
       return jsonError('Viewer accounts cannot create share links', 403)
     }
 
+    const assetIds = [...new Set((body.assetIds ?? []).map((assetId) => assetId.trim()).filter(Boolean))]
+    const scope: ShareLinkScope = body.scope === 'selected' || (body.scope !== 'all' && assetIds.length > 0) ? 'selected' : 'all'
+    if (scope === 'selected' && assetIds.length === 0) {
+      return jsonError('Select at least one file for a selected-files link', 400)
+    }
+    if (scope === 'all' && assetIds.length > 0) {
+      return jsonError('assetIds can only be used with selected-files links', 400)
+    }
+
+    let selectedAssets: Array<{ id: string; delivery_id: string | null; r2_object_key: string }> = []
+    if (scope === 'selected') {
+      selectedAssets = await supabaseRequest<Array<{ id: string; delivery_id: string | null; r2_object_key: string }>>(
+        c.env,
+        `assets?or=(${assetIds.map((id) => `id.eq.${encodeURIComponent(id)}`).join(',')})&select=id,delivery_id,r2_object_key`
+      )
+
+      if (selectedAssets.length !== assetIds.length) {
+        return jsonError('One or more selected files are unavailable', 404)
+      }
+
+      const selectedAssetMap = new Map(selectedAssets.map((asset) => [asset.id, asset]))
+      const invalidAssetId = assetIds.find((assetId) => {
+        const asset = selectedAssetMap.get(assetId)
+        return !asset || asset.delivery_id !== body.deliveryId || asset.r2_object_key.startsWith('pending/')
+      })
+
+      if (invalidAssetId) {
+        return jsonError('Selected files must belong to this folder and be fully uploaded', 400)
+      }
+    }
+
     const days = Math.min(30, Math.max(1, body.expiresInDays ?? 7))
     const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
     const token = crypto.randomUUID().replace(/-/g, '')
 
-    const inserted = await supabaseRequest<Array<{ token: string }>>(
+    const inserted = await supabaseRequest<Array<{ id: string; token: string; scope_type: ShareLinkScope }>>(
       c.env,
-      'share_links?select=token',
+      'share_links?select=id,token,scope_type',
       {
         method: 'POST',
         body: JSON.stringify({
           token,
           owner_profile_id: user.id,
           delivery_id: body.deliveryId,
+          scope_type: scope,
           access_mode: 'viewer',
           allow_download: false,
           expires_at: expiresAt,
@@ -1738,10 +1871,42 @@ app.post('/api/v1/share-links', async (c) => {
       true
     )
 
+    const shareLink = inserted[0]
+    if (!shareLink) return jsonError('Share link creation failed', 500)
+
+    if (scope === 'selected') {
+      try {
+        await supabaseRequest(
+          c.env,
+          'share_link_assets',
+          {
+            method: 'POST',
+            headers: { Prefer: 'return=minimal' },
+            body: JSON.stringify(
+              assetIds.map((assetId) => ({
+                share_link_id: shareLink.id,
+                asset_id: assetId,
+              }))
+            ),
+          },
+          true
+        )
+      } catch (error) {
+        await supabaseRequest(
+          c.env,
+          `share_links?id=eq.${encodeURIComponent(shareLink.id)}`,
+          { method: 'DELETE' },
+          true
+        )
+        throw error
+      }
+    }
+
     return c.json(
       {
-        token: inserted[0]?.token ?? token,
-        url: `${c.env.APP_ORIGIN}/#share/${inserted[0]?.token ?? token}`,
+        token: shareLink.token ?? token,
+        url: `${c.env.APP_ORIGIN}/#share/${shareLink.token ?? token}`,
+        scopeType: shareLink.scope_type ?? scope,
         expiresAt,
       },
       200,

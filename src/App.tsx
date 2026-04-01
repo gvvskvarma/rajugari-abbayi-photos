@@ -339,6 +339,7 @@ type GalleryShot = {
 
 type Role = 'admin' | 'customer'
 type AppView = 'home' | 'my-pictures' | 'upload' | 'share' | 'admin-clients' | 'admin-client'
+type ShareLinkScope = 'all' | 'selected'
 
 type DeliveryAsset = {
   id: string
@@ -688,12 +689,19 @@ function App() {
   const [customerError, setCustomerError] = useState('')
   const [customerBusy, setCustomerBusy] = useState(false)
   const [newShareLinks, setNewShareLinks] = useState<Record<string, string>>({})
+  const [newShareLinkScopes, setNewShareLinkScopes] = useState<Record<string, ShareLinkScope>>({})
   const [shareCopyState, setShareCopyState] = useState<Record<string, string>>({})
   const [shareDeliveryId, setShareDeliveryId] = useState('')
   const [shareExpiresAt, setShareExpiresAt] = useState('')
+  const [shareLinkScope, setShareLinkScope] = useState<ShareLinkScope>('all')
   const [sharePageCopyState, setSharePageCopyState] = useState('')
   const [shareAssetPreviewUrls, setShareAssetPreviewUrls] = useState<Record<string, string>>({})
   const [shareAssetThumbnailUrls, setShareAssetThumbnailUrls] = useState<Record<string, string>>({})
+  const [shareComposerDeliveryId, setShareComposerDeliveryId] = useState('')
+  const [shareComposerScope, setShareComposerScope] = useState<ShareLinkScope>('all')
+  const [shareComposerSelectedAssetIds, setShareComposerSelectedAssetIds] = useState<string[]>([])
+  const [shareComposerBusy, setShareComposerBusy] = useState(false)
+  const [shareComposerMessage, setShareComposerMessage] = useState('')
   const [customerLightbox, setCustomerLightbox] = useState<CustomerLightboxState | null>(null)
   const [customerAssetPreviewUrls, setCustomerAssetPreviewUrls] = useState<Record<string, string>>({})
   const [customerAssetThumbnailUrls, setCustomerAssetThumbnailUrls] = useState<Record<string, string>>({})
@@ -741,6 +749,45 @@ function App() {
   const [shareAssets, setShareAssets] = useState<DeliveryAsset[]>([])
   const [shareBusy, setShareBusy] = useState(false)
   const [shareMessage, setShareMessage] = useState('')
+
+  const shareComposerDelivery = useMemo(
+    () => myDeliveries.find((delivery) => delivery.deliveryId === shareComposerDeliveryId) ?? null,
+    [myDeliveries, shareComposerDeliveryId]
+  )
+  const shareComposerSelectedCount = shareComposerSelectedAssetIds.length
+  const shareComposerSelectedAssetSet = useMemo(
+    () => new Set(shareComposerSelectedAssetIds),
+    [shareComposerSelectedAssetIds]
+  )
+
+  const openShareComposer = (delivery: DeliveryCard) => {
+    setShareComposerDeliveryId(delivery.deliveryId)
+    setShareComposerScope('all')
+    setShareComposerSelectedAssetIds([])
+    setShareComposerBusy(false)
+    setShareComposerMessage('')
+  }
+
+  const closeShareComposer = () => {
+    setShareComposerDeliveryId('')
+    setShareComposerScope('all')
+    setShareComposerSelectedAssetIds([])
+    setShareComposerBusy(false)
+    setShareComposerMessage('')
+  }
+
+  const toggleShareComposerAsset = (assetId: string) => {
+    setShareComposerSelectedAssetIds((current) =>
+      current.includes(assetId) ? current.filter((currentId) => currentId !== assetId) : [...current, assetId]
+    )
+  }
+
+  const selectAllShareComposerAssets = () => {
+    if (!shareComposerDelivery) return
+    setShareComposerSelectedAssetIds(shareComposerDelivery.assets.map((asset) => asset.id))
+  }
+
+  const clearShareComposerSelection = () => setShareComposerSelectedAssetIds([])
 
   const loadAdminData = async () => {
     if (!supabase || !session?.user.id || role !== 'admin') return
@@ -1123,25 +1170,17 @@ function App() {
       const token = await getAccessToken()
       if (!token) return
 
-      const entries = await Promise.all(
-        missingPreviewAssets.map(async (asset) => {
-          try {
-            const payload = await workerRequest<{ url: string }>('/api/v1/media/preview-url', token, {
-              method: 'POST',
-              body: { assetId: asset.id },
-            })
-            return [asset.id, payload.url] as const
-          } catch {
-            return null
-          }
-        })
+      const payload = await workerRequest<{ urls: Record<string, string> }>(
+        '/api/v1/media/preview-url-batch',
+        token,
+        {
+          method: 'POST',
+          body: { assetIds: missingPreviewAssets.map((asset) => asset.id), variant: 'preview' },
+        }
       )
 
       if (cancelled) return
-      const previewEntries = Object.fromEntries(
-        entries.filter((entry): entry is readonly [string, string] => entry !== null)
-      )
-      setAdminAssetPreviewUrls((current) => ({ ...current, ...previewEntries }))
+      setAdminAssetPreviewUrls((current) => ({ ...current, ...(payload.urls ?? {}) }))
     }
 
     void loadPreviewUrls()
@@ -1167,25 +1206,13 @@ function App() {
       const token = await getAccessToken()
       if (!token) return
 
-      const entries = await Promise.all(
-        missingThumbnailAssets.map(async ({ asset }) => {
-          try {
-            const payload = await workerRequest<{ url: string }>('/api/v1/media/preview-url', token, {
-              method: 'POST',
-              body: { assetId: asset.id, variant: 'thumb' },
-            })
-            return [asset.id, payload.url] as const
-          } catch {
-            return null
-          }
-        })
-      )
+      const payload = await workerRequest<{ urls: Record<string, string> }>('/api/v1/media/preview-url-batch', token, {
+        method: 'POST',
+        body: { assetIds: missingThumbnailAssets.map(({ asset }) => asset.id), variant: 'thumb' },
+      })
 
       if (cancelled) return
-      const thumbnailEntries = Object.fromEntries(
-        entries.filter((entry): entry is readonly [string, string] => entry !== null)
-      )
-      setCustomerAssetThumbnailUrls((current) => ({ ...current, ...thumbnailEntries }))
+      setCustomerAssetThumbnailUrls((current) => ({ ...current, ...(payload.urls ?? {}) }))
     }
 
     void loadThumbnailUrls()
@@ -1193,50 +1220,6 @@ function App() {
       cancelled = true
     }
   }, [customerAssetThumbnailUrls, myDeliveries, role, session?.user.id, supabase, view])
-
-  useEffect(() => {
-    if (!supabase || view !== 'my-pictures' || !session?.user.id || myDeliveries.length === 0) return
-
-    const missingPreviewAssets = myDeliveries
-      .flatMap((delivery) => delivery.assets.map((asset) => ({ deliveryId: delivery.deliveryId, asset })))
-      .filter(
-        ({ asset }) => asset.mime_type.startsWith('image/') && !customerAssetPreviewUrls[asset.id]
-      )
-
-    if (missingPreviewAssets.length === 0) return
-
-    let cancelled = false
-
-    const loadPreviewUrls = async () => {
-      const token = await getAccessToken()
-      if (!token) return
-
-      const entries = await Promise.all(
-        missingPreviewAssets.map(async ({ asset }) => {
-          try {
-            const payload = await workerRequest<{ url: string }>('/api/v1/media/preview-url', token, {
-              method: 'POST',
-              body: { assetId: asset.id },
-            })
-            return [asset.id, payload.url] as const
-          } catch {
-            return null
-          }
-        })
-      )
-
-      if (cancelled) return
-      const previewEntries = Object.fromEntries(
-        entries.filter((entry): entry is readonly [string, string] => entry !== null)
-      )
-      setCustomerAssetPreviewUrls((current) => ({ ...current, ...previewEntries }))
-    }
-
-    void loadPreviewUrls()
-    return () => {
-      cancelled = true
-    }
-  }, [customerAssetPreviewUrls, myDeliveries, role, session?.user.id, supabase, view])
 
   useEffect(() => {
     if (!supabase || view !== 'share' || !shareToken || shareAssets.length === 0) return
@@ -1250,25 +1233,17 @@ function App() {
     let cancelled = false
 
     const loadThumbnailUrls = async () => {
-      const entries = await Promise.all(
-        missingThumbnailAssets.map(async (asset) => {
-          try {
-            const payload = await workerRequest<{ url: string }>('/api/v1/media/preview-url', '', {
-              method: 'POST',
-              body: { assetId: asset.id, variant: 'thumb', shareToken },
-            })
-            return [asset.id, payload.url] as const
-          } catch {
-            return null
-          }
-        })
+      const payload = await workerRequest<{ urls: Record<string, string> }>(
+        '/api/v1/media/preview-url-batch',
+        '',
+        {
+          method: 'POST',
+          body: { assetIds: missingThumbnailAssets.map((asset) => asset.id), variant: 'thumb', shareToken },
+        }
       )
 
       if (cancelled) return
-      const thumbnailEntries = Object.fromEntries(
-        entries.filter((entry): entry is readonly [string, string] => entry !== null)
-      )
-      setShareAssetThumbnailUrls((current) => ({ ...current, ...thumbnailEntries }))
+      setShareAssetThumbnailUrls((current) => ({ ...current, ...(payload.urls ?? {}) }))
     }
 
     void loadThumbnailUrls()
@@ -1278,48 +1253,51 @@ function App() {
   }, [shareAssetThumbnailUrls, shareAssets, shareToken, supabase, view])
 
   useEffect(() => {
-    if (!supabase || view !== 'share' || !shareToken || shareAssets.length === 0) return
-
-    const missingPreviewAssets = shareAssets.filter(
-      (asset) => asset.mime_type.startsWith('image/') && !shareAssetPreviewUrls[asset.id]
-    )
-
-    if (missingPreviewAssets.length === 0) return
+    if (!customerLightboxAsset) return
+    if (customerPreviewUrls[customerLightboxAsset.id]) return
 
     let cancelled = false
 
-    const loadPreviewUrls = async () => {
-      const entries = await Promise.all(
-        missingPreviewAssets.map(async (asset) => {
-          try {
-            const payload = await workerRequest<{ signedUrl?: string; url?: string }>(
-              '/api/v1/media/signed-url',
-              '',
-              {
+    const loadPreviewUrl = async () => {
+      try {
+        const payload =
+          view === 'share'
+            ? await workerRequest<{ signedUrl?: string; url?: string }>('/api/v1/media/signed-url', '', {
                 method: 'POST',
-                body: { assetId: asset.id, mode: 'view', shareToken },
-              }
-            )
-            const nextUrl = payload.url ?? payload.signedUrl
-            return nextUrl ? [asset.id, nextUrl] as const : null
-          } catch {
-            return null
-          }
-        })
-      )
+                body: { assetId: customerLightboxAsset.id, mode: 'view', shareToken },
+              })
+            : await (async () => {
+                if (!supabase || !session?.user.id) return null
+                const {
+                  data: { session: authSession },
+                } = await supabase.auth.getSession()
+                const token = authSession?.access_token ?? ''
+                if (!token) return null
+                return workerRequest<{ url: string }>('/api/v1/media/preview-url', token, {
+                  method: 'POST',
+                  body: { assetId: customerLightboxAsset.id },
+                })
+              })()
 
-      if (cancelled) return
-      const previewEntries = Object.fromEntries(
-        entries.filter((entry): entry is readonly [string, string] => entry !== null)
-      )
-      setShareAssetPreviewUrls((current) => ({ ...current, ...previewEntries }))
+        if (cancelled || !payload) return
+
+        const nextUrl = 'signedUrl' in payload ? payload.signedUrl ?? payload.url : payload.url
+        if (!nextUrl) return
+
+        setCustomerAssetPreviewUrls((current) => ({
+          ...current,
+          [customerLightboxAsset.id]: nextUrl,
+        }))
+      } catch {
+        // The lightbox can still fall back to the thumbnail while the preview URL is unavailable.
+      }
     }
 
-    void loadPreviewUrls()
+    void loadPreviewUrl()
     return () => {
       cancelled = true
     }
-  }, [shareAssetPreviewUrls, shareAssets, shareToken, supabase, view])
+  }, [customerLightboxAsset, customerPreviewUrls, session?.user.id, shareToken, supabase, view])
 
   useEffect(() => {
     if (!customerLightboxAsset) return
@@ -1619,6 +1597,7 @@ function App() {
       try {
         const payload = await workerRequest<{
           deliveryId: string
+          scopeType: ShareLinkScope
           allowDownload: boolean
           expiresAt: string
           assets: DeliveryAsset[]
@@ -1638,11 +1617,13 @@ function App() {
         setShareAssets(payload.assets ?? [])
         setShareDeliveryId(payload.deliveryId)
         setShareExpiresAt(payload.expiresAt)
+        setShareLinkScope(payload.scopeType ?? 'all')
       } catch (error) {
         setShareMessage(error instanceof Error ? error.message : 'This share link is invalid or unavailable.')
         setShareAssets([])
         setShareDeliveryId('')
         setShareExpiresAt('')
+        setShareLinkScope('all')
         setShareAssetPreviewUrls({})
         setShareAssetThumbnailUrls({})
       }
@@ -1751,26 +1732,41 @@ function App() {
     }
   }
 
-  const handleCreateShareLink = async (deliveryId: string) => {
-    if (!supabase || !session?.user.id) return
+  const handleCreateShareLink = async () => {
+    if (!supabase || !session?.user.id || !shareComposerDeliveryId) return
+    const deliveryId = shareComposerDeliveryId
+    const scope = shareComposerScope
+    const assetIds = scope === 'selected' ? [...new Set(shareComposerSelectedAssetIds)] : []
+
+    if (scope === 'selected' && assetIds.length === 0) {
+      setShareComposerMessage('Select at least one file before generating the link.')
+      return
+    }
+
     try {
+      setShareComposerBusy(true)
+      setShareComposerMessage('')
       const token = await getAccessToken()
       if (!token) {
-        setCustomerError('Login session expired. Please log in again.')
+        setShareComposerMessage('Login session expired. Please log in again.')
         return
       }
-      const payload = await workerRequest<{ url: string }>(
+      const payload = await workerRequest<{ url: string; scopeType: ShareLinkScope }>(
         '/api/v1/share-links',
         token,
         {
           method: 'POST',
-          body: { deliveryId, expiresInDays: 7 },
+          body: { deliveryId, expiresInDays: 7, scope, assetIds },
         }
       )
       setNewShareLinks((current) => ({ ...current, [deliveryId]: payload.url }))
+      setNewShareLinkScopes((current) => ({ ...current, [deliveryId]: payload.scopeType ?? scope }))
       setShareCopyState((current) => ({ ...current, [deliveryId]: '' }))
+      closeShareComposer()
     } catch (error) {
-      setCustomerError(error instanceof Error ? error.message : 'Unable to create share link')
+      setShareComposerMessage(error instanceof Error ? error.message : 'Unable to create share link')
+    } finally {
+      setShareComposerBusy(false)
     }
   }
 
@@ -2938,16 +2934,153 @@ function App() {
                     type="button"
                     disabled={delivery.accessMode === 'viewer'}
                     onClick={() => {
-                      void handleCreateShareLink(delivery.deliveryId)
+                      openShareComposer(delivery)
                     }}
                   >
-                    Create view-only link
+                    Create share link
                   </button>
                 </div>
               </div>
 
+              {shareComposerDeliveryId === delivery.deliveryId && shareComposerDelivery && (
+                <div className="share-link-composer">
+                  <div className="share-link-composer-head">
+                    <div>
+                      <p className="delivery-title">Create share link</p>
+                      <p className="delivery-expiry">Choose the full folder or a selected subset of files.</p>
+                    </div>
+                    <button className="button ghost" type="button" onClick={closeShareComposer}>
+                      Cancel
+                    </button>
+                  </div>
+
+                  <div className="share-link-scope-toggle" role="radiogroup" aria-label="Share scope">
+                    <label className={`share-link-scope-option ${shareComposerScope === 'all' ? 'is-selected' : ''}`}>
+                      <input
+                        type="radio"
+                        name={`share-scope-${delivery.deliveryId}`}
+                        checked={shareComposerScope === 'all'}
+                        onChange={() => {
+                          setShareComposerScope('all')
+                          clearShareComposerSelection()
+                          setShareComposerMessage('')
+                        }}
+                        disabled={shareComposerBusy}
+                      />
+                      <span>All files in this folder</span>
+                      <small>{delivery.assets.length} file{delivery.assets.length === 1 ? '' : 's'} included</small>
+                    </label>
+                    <label
+                      className={`share-link-scope-option ${shareComposerScope === 'selected' ? 'is-selected' : ''}`}
+                    >
+                      <input
+                        type="radio"
+                        name={`share-scope-${delivery.deliveryId}`}
+                        checked={shareComposerScope === 'selected'}
+                        onChange={() => {
+                          setShareComposerScope('selected')
+                          setShareComposerMessage('')
+                        }}
+                        disabled={shareComposerBusy}
+                      />
+                      <span>Selected files only</span>
+                      <small>{shareComposerSelectedCount} selected</small>
+                    </label>
+                  </div>
+
+                  {shareComposerScope === 'selected' && (
+                    <>
+                      <div className="share-link-composer-toolbar">
+                        <p className="portal-hint">Pick the exact files the recipient should see.</p>
+                        <div className="share-link-composer-actions">
+                          <button
+                            className="button ghost"
+                            type="button"
+                            onClick={selectAllShareComposerAssets}
+                            disabled={shareComposerBusy || delivery.assets.length === 0}
+                          >
+                            Select all
+                          </button>
+                          <button
+                            className="button ghost"
+                            type="button"
+                            onClick={clearShareComposerSelection}
+                            disabled={shareComposerBusy || shareComposerSelectedCount === 0}
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="share-link-selection-grid">
+                        {delivery.assets.map((asset) => {
+                          const isSelected = shareComposerSelectedAssetSet.has(asset.id)
+                          const isImage = asset.mime_type.startsWith('image/')
+                          const thumbnailUrl = customerThumbnailUrls[asset.id]
+                          const displayName = getDisplayFileName(asset.filename)
+
+                          return (
+                            <button
+                              key={asset.id}
+                              className={`share-link-selection-card ${isSelected ? 'is-selected' : ''}`}
+                              type="button"
+                              aria-pressed={isSelected}
+                              onClick={() => toggleShareComposerAsset(asset.id)}
+                              disabled={shareComposerBusy}
+                            >
+                              <span className="share-link-selection-check">{isSelected ? 'On' : ''}</span>
+                              {isImage ? (
+                                <div className="customer-asset-thumb">
+                                  {thumbnailUrl ? (
+                                    <img src={thumbnailUrl} alt={displayName} loading="lazy" decoding="async" />
+                                  ) : (
+                                    <div className="customer-asset-thumb-fallback">
+                                      <span>IMG</span>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="customer-asset-thumb">
+                                  <div className="customer-asset-thumb-fallback">
+                                    <span>{asset.mime_type.split('/')[0]?.slice(0, 1).toUpperCase() || 'F'}</span>
+                                  </div>
+                                </div>
+                              )}
+                              <div className="customer-asset-main">
+                                <p className="customer-asset-name">{displayName}</p>
+                                {!isImage && <p className="portal-hint">{getAssetKind(asset.mime_type)}</p>}
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </>
+                  )}
+
+                  {shareComposerMessage && <p className="portal-error">{shareComposerMessage}</p>}
+
+                  <div className="share-link-row">
+                    <button
+                      className="button"
+                      type="button"
+                      onClick={() => {
+                        void handleCreateShareLink()
+                      }}
+                      disabled={shareComposerBusy || (shareComposerScope === 'selected' && shareComposerSelectedCount === 0)}
+                    >
+                      {shareComposerBusy ? 'Generating...' : 'Generate link'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {newShareLinks[delivery.deliveryId] && (
                 <div className="share-link-row">
+                  <div className="share-link-meta">
+                    <span className="share-link-label">
+                      {newShareLinkScopes[delivery.deliveryId] === 'selected' ? 'Selected files only' : 'All files in this folder'}
+                    </span>
+                  </div>
                   <input className="share-link-input" value={newShareLinks[delivery.deliveryId]} readOnly />
                   <button
                     className="button ghost"
@@ -3808,9 +3941,17 @@ function App() {
       <div className="portal-head">
         <div>
           <h2>Shared Gallery</h2>
-          <p className="share-gallery-copy">This shared link is view-only. Tap a file to preview it in place.</p>
+          <p className="share-gallery-copy">
+            {shareLinkScope === 'selected'
+              ? 'This shared link includes selected files only. Tap a file to preview it in place.'
+              : 'This shared link is view-only. Tap a file to preview it in place.'}
+          </p>
         </div>
         <div className="customer-summary-strip">
+          <div className="admin-stat-card">
+            <span>Scope</span>
+            <strong>{shareLinkScope === 'selected' ? 'Selected files' : 'All files'}</strong>
+          </div>
           <div className="admin-stat-card">
             <span>Files</span>
             <strong>{shareAssets.length}</strong>

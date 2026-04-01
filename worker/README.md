@@ -10,7 +10,7 @@ Cloudflare Worker + Hono backend for secure upload/share delivery.
 - `POST /api/v1/upload/complete`
 - `GET /api/v1/deliveries/:deliveryId/gallery`
 - `POST /api/v1/media/signed-url`
-- `POST /api/v1/share-links`
+- `POST /api/v1/share-links` (full delivery or selected-file share scope)
 - `GET /api/v1/my-pictures`
 
 ## Security behavior
@@ -19,6 +19,7 @@ Cloudflare Worker + Hono backend for secure upload/share delivery.
 - Admin-only upload URL issuing.
 - Upload sessions are tokenized and expire in 15 minutes.
 - Per-file delivery access rules are enforced from `delivery_assets`.
+- Share links can scope to all files or a selected subset through `share_link_assets`.
 - Download URL issuance writes `download_events` logs.
 - Viewer share links cannot request download mode.
 - Signed URLs are short-lived (5 to 15 minutes).

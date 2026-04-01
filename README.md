@@ -68,7 +68,7 @@ Day 2-4 delivery/auth baseline artifacts:
 - `/#home`: portfolio page (unchanged)
 - `/#my-pictures`: customer delivery view (email OTP login required)
 - `/#upload`: admin upload page (admin role required)
-- `/#share/<token>`: view-only share link
+- `/#share/<token>`: scoped view-only share link for a full delivery or selected files
 
 ## Deploy on Vercel
 
@@ -122,3 +122,9 @@ In Vercel:
   - global API error middleware
 - Frontend hardening:
   - API request timeout and clearer network/timeout error messages
+
+## Day 5 share-link scope artifacts
+
+- Supabase migration: `supabase/migrations/20260331_share_link_scopes.sql`
+- API contract updates: `docs/api/day4-delivery-contract.md`
+- Frontend: share link composer with `All files` / `Selected files only` scope selection in `src/App.tsx`

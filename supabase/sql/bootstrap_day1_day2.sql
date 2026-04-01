@@ -290,6 +290,8 @@ begin
 end
 $$;
 
+create type public.share_scope as enum ('all', 'selected');
+
 create table if not exists public.admin_allowlist (
   email text primary key,
   created_at timestamptz not null default now()
@@ -311,10 +313,18 @@ create table if not exists public.share_links (
   token text not null unique,
   owner_profile_id uuid not null references public.profiles(id) on delete cascade,
   delivery_id uuid not null references public.deliveries(id) on delete cascade,
+  scope_type public.share_scope not null default 'all',
   access_mode public.access_mode not null default 'viewer',
   allow_download boolean not null default false,
   expires_at timestamptz not null,
   created_at timestamptz not null default now()
+);
+
+create table if not exists public.share_link_assets (
+  share_link_id uuid not null references public.share_links(id) on delete cascade,
+  asset_id uuid not null references public.assets(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (share_link_id, asset_id)
 );
 
 alter table public.assets
@@ -324,6 +334,8 @@ create index if not exists assets_delivery_idx on public.assets(delivery_id);
 create index if not exists delivery_recipients_delivery_idx on public.delivery_recipients(delivery_id);
 create index if not exists delivery_recipients_email_idx on public.delivery_recipients(lower(email));
 create index if not exists share_links_token_idx on public.share_links(token);
+create index if not exists share_link_assets_share_link_idx on public.share_link_assets(share_link_id);
+create index if not exists share_link_assets_asset_idx on public.share_link_assets(asset_id);
 
 create or replace function public.current_user_email()
 returns text
