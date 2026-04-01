@@ -1773,9 +1773,31 @@ app.get('/api/v1/my-pictures', async (c) => {
       return c.json({ deliveries: [] }, 200, responseHeaders(c))
     }
 
-    const deliveries = await Promise.all(
+    const deliveryIds = [...new Set(activeRecipients.map((row) => row.delivery_id))]
+    const deliveryRows = await supabaseRequest<
+      Array<{ id: string; project_id: string | null }>
+    >(
+      c.env,
+      `deliveries?id=in.(${deliveryIds.map((id) => encodeURIComponent(id)).join(',')})&select=id,project_id`
+    )
+    const projectIds = [...new Set(deliveryRows.map((row) => row.project_id).filter((value): value is string => Boolean(value)))]
+    const projects = projectIds.length
+      ? await supabaseRequest<Array<{ id: string; name: string; status: string }>>(
+          c.env,
+          `projects?id=in.(${projectIds.map((id) => encodeURIComponent(id)).join(',')})&select=id,name,status`
+        )
+      : []
+
+    const deliveryToProject = new Map(
+      deliveryRows.map((delivery) => [delivery.id, delivery.project_id ?? null] as const)
+    )
+    const projectById = new Map(projects.map((project) => [project.id, project] as const))
+
+    const deliveryPayloads = await Promise.all(
       activeRecipients.map(async (recipient) => {
         const deliveryId = recipient.delivery_id
+        const projectId = deliveryToProject.get(deliveryId) ?? null
+        const project = projectId ? projectById.get(projectId) ?? null : null
         const assetRules = await getDeliveryAssetRules(c.env, deliveryId)
         const visibleAssetIds = [...assetRules.values()]
           .filter((rule) => rule.canView)
@@ -1784,6 +1806,8 @@ app.get('/api/v1/my-pictures', async (c) => {
         if (visibleAssetIds.length === 0) {
           return {
             deliveryId,
+            projectName: project?.name ?? null,
+            projectStatus: project?.status ?? null,
             accessMode: recipient.access_mode,
             expiresAt: recipient.expires_at,
             assets: [],
@@ -1801,6 +1825,8 @@ app.get('/api/v1/my-pictures', async (c) => {
 
         return {
           deliveryId,
+          projectName: project?.name ?? null,
+          projectStatus: project?.status ?? null,
           accessMode: recipient.access_mode,
           expiresAt: recipient.expires_at,
           assets: uploadedAssets.map((asset) => ({
@@ -1814,7 +1840,7 @@ app.get('/api/v1/my-pictures', async (c) => {
 
     return c.json(
       {
-        deliveries,
+        deliveries: deliveryPayloads,
       },
       200,
       responseHeaders(c)
