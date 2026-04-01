@@ -1782,9 +1782,16 @@ app.get('/api/v1/my-pictures', async (c) => {
     )
     const projectIds = [...new Set(deliveryRows.map((row) => row.project_id).filter((value): value is string => Boolean(value)))]
     const projects = projectIds.length
-      ? await supabaseRequest<Array<{ id: string; name: string; status: string }>>(
+      ? await supabaseRequest<Array<{ id: string; client_id: string | null; name: string; status: string }>>(
           c.env,
-          `projects?id=in.(${projectIds.map((id) => encodeURIComponent(id)).join(',')})&select=id,name,status`
+          `projects?id=in.(${projectIds.map((id) => encodeURIComponent(id)).join(',')})&select=id,client_id,name,status`
+        )
+      : []
+    const clientIds = [...new Set(projects.map((project) => project.client_id).filter((value): value is string => Boolean(value)))]
+    const clients = clientIds.length
+      ? await supabaseRequest<Array<{ id: string; full_name: string }>>(
+          c.env,
+          `clients?id=in.(${clientIds.map((id) => encodeURIComponent(id)).join(',')})&select=id,full_name`
         )
       : []
 
@@ -1792,12 +1799,16 @@ app.get('/api/v1/my-pictures', async (c) => {
       deliveryRows.map((delivery) => [delivery.id, delivery.project_id ?? null] as const)
     )
     const projectById = new Map(projects.map((project) => [project.id, project] as const))
+    const projectClientById = new Map(projects.map((project) => [project.id, project.client_id ?? null] as const))
+    const clientById = new Map(clients.map((client) => [client.id, client] as const))
 
     const deliveryPayloads = await Promise.all(
       activeRecipients.map(async (recipient) => {
         const deliveryId = recipient.delivery_id
         const projectId = deliveryToProject.get(deliveryId) ?? null
         const project = projectId ? projectById.get(projectId) ?? null : null
+        const clientId = projectId ? projectClientById.get(projectId) ?? null : null
+        const client = clientId ? clientById.get(clientId) ?? null : null
         const assetRules = await getDeliveryAssetRules(c.env, deliveryId)
         const visibleAssetIds = [...assetRules.values()]
           .filter((rule) => rule.canView)
@@ -1807,6 +1818,7 @@ app.get('/api/v1/my-pictures', async (c) => {
           return {
             deliveryId,
             projectName: project?.name ?? null,
+            clientName: client?.full_name ?? null,
             projectStatus: project?.status ?? null,
             accessMode: recipient.access_mode,
             expiresAt: recipient.expires_at,
@@ -1826,6 +1838,7 @@ app.get('/api/v1/my-pictures', async (c) => {
         return {
           deliveryId,
           projectName: project?.name ?? null,
+          clientName: client?.full_name ?? null,
           projectStatus: project?.status ?? null,
           accessMode: recipient.access_mode,
           expiresAt: recipient.expires_at,

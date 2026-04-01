@@ -355,6 +355,7 @@ type DeliveryAsset = {
 type DeliveryCard = {
   deliveryId: string
   projectName?: string | null
+  clientName?: string | null
   projectStatus?: string | null
   expiresAt: string | null
   firstViewedAt?: string | null
@@ -2919,7 +2920,7 @@ function App() {
             <article key={delivery.deliveryId} className="delivery-card">
               <div className="delivery-header">
                 <div>
-                  <p className="delivery-title">{delivery.projectName || `Delivery ${delivery.deliveryId.slice(0, 8)}`}</p>
+                  <p className="delivery-title">{delivery.projectName || delivery.clientName || 'Your gallery'}</p>
                   <p className="delivery-expiry">
                     {delivery.projectStatus
                       ? delivery.projectStatus.charAt(0).toUpperCase() + delivery.projectStatus.slice(1)
