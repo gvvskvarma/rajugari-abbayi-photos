@@ -23,7 +23,6 @@ import type {
 } from './types'
 import {
   createResponsiveAsset,
-  getPrimaryPreloadSource,
   ResponsiveImage,
 } from './lib/media.tsx'
 import {
@@ -46,13 +45,9 @@ import {
 } from './lib/helpers'
 import { useAuth } from './hooks/useAuth'
 import { useFocusTrap } from './hooks/useFocusTrap'
-
-const instagramUrl =
-  'https://www.instagram.com/rajugari_abbayi_photography?igsh=azYxaHdwYmdhaTh0&utm_source=qr'
-const personalInstagramUrl =
-  'https://www.instagram.com/rajugari_abbayi?igsh=MTB3MHk4ODZxODM5dg%3D%3D&utm_source=qr'
-
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/+$/, '')
+import { instagramUrl, personalInstagramUrl } from './lib/constants'
+import { RotatingGallery } from './components/RotatingGallery.tsx'
+import { workerRequest, loadWorkerBlob, triggerBrowserDownload } from './hooks/useApi'
 
 const landscapePaths = [
   'project-rga/landscapes/RGA02744.jpg',
@@ -132,109 +127,6 @@ const heroPortrait = createResponsiveAsset('project-rga/potraits/events/RGA03248
 const heroLandscape = featuredShots[0]?.image
 const heroTravel = featuredShots[4]?.image ?? featuredShots[2]?.image
 
-
-type RotatingGalleryProps = {
-  title: string
-  subtitle: string
-  images: ResponsiveAsset[]
-  cycleStep: number
-}
-
-const RotatingGallery = ({
-  title,
-  subtitle,
-  images,
-  cycleStep,
-}: RotatingGalleryProps) => {
-  const [displayIndex, setDisplayIndex] = useState(0)
-  const [incomingIndex, setIncomingIndex] = useState<number | null>(null)
-  const [isTransitioning, setIsTransitioning] = useState(false)
-
-  useEffect(() => {
-    if (images.length === 0) {
-      setDisplayIndex(0)
-      setIncomingIndex(null)
-      setIsTransitioning(false)
-      return
-    }
-    setDisplayIndex((current) => current % images.length)
-  }, [images.length])
-
-  useEffect(() => {
-    if (images.length === 0 || isTransitioning || incomingIndex !== null) return
-    const nextIndex = cycleStep % images.length
-    if (nextIndex === displayIndex) return
-
-    let canceled = false
-    const preloadImage = new Image()
-    preloadImage.src = getPrimaryPreloadSource(images[nextIndex])
-
-    const beginTransition = () => {
-      if (canceled) return
-      setIncomingIndex(nextIndex)
-      setIsTransitioning(true)
-    }
-
-    if (typeof preloadImage.decode === 'function') {
-      preloadImage.decode().then(beginTransition).catch(beginTransition)
-    } else {
-      preloadImage.onload = beginTransition
-      preloadImage.onerror = beginTransition
-    }
-
-    return () => {
-      canceled = true
-    }
-  }, [cycleStep, displayIndex, images, incomingIndex, isTransitioning])
-
-  useEffect(() => {
-    if (!isTransitioning || incomingIndex === null) return
-    const timeout = window.setTimeout(() => {
-      setDisplayIndex(incomingIndex % images.length)
-      setIncomingIndex(null)
-      setIsTransitioning(false)
-    }, 520)
-    return () => window.clearTimeout(timeout)
-  }, [images.length, incomingIndex, isTransitioning])
-
-  const active = images.length > 0 ? images[displayIndex % images.length] : undefined
-  const incoming =
-    incomingIndex !== null && images.length > 0 ? images[incomingIndex % images.length] : undefined
-
-  return (
-    <div className="rotator">
-      <div className="rotator-card">
-        {active ? (
-          <div className="rotator-image-stack">
-            <ResponsiveImage
-              asset={active}
-              alt={title}
-              className="rotator-image"
-              sizes="(max-width: 900px) 92vw, 33vw"
-            />
-            {incoming && isTransitioning && (
-              <ResponsiveImage
-                asset={incoming}
-                alt={title}
-                className="rotator-image rotator-image-enter"
-                sizes="(max-width: 900px) 92vw, 33vw"
-              />
-            )}
-          </div>
-        ) : (
-          <div className="rotator-placeholder">
-            <p>Add {title} photos</p>
-            <span>Add files to project-rga folders</span>
-          </div>
-        )}
-        <div className="rotator-overlay">
-          <p>{title}</p>
-          <span>{subtitle}</span>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 function App() {
   const [cycleStep, setCycleStep] = useState(0)
@@ -1018,43 +910,6 @@ function App() {
     }
   }
 
-  const workerRequest = async <T,>(
-    path: string,
-    token: string,
-    options?: {
-      method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
-      body?: unknown
-    }
-  ): Promise<T> => {
-    if (!apiBaseUrl) {
-      throw new Error('Set VITE_API_BASE_URL to enable gallery APIs.')
-    }
-    const response = await fetch(`${apiBaseUrl}${path}`, {
-      method: options?.method ?? 'GET',
-      headers: {
-        authorization: `Bearer ${token}`,
-        'content-type': 'application/json',
-      },
-      body: options?.body ? JSON.stringify(options.body) : undefined,
-    })
-    const text = await response.text()
-    let payload: Record<string, unknown> = {}
-    if (text.trim()) {
-      try {
-        payload = JSON.parse(text) as Record<string, unknown>
-      } catch {
-        if (response.ok) {
-          throw new Error(`Unexpected response from server: ${text.slice(0, 120)}`)
-        }
-      }
-    }
-    if (!response.ok) {
-      const maybeError = payload.error as { message?: string } | undefined
-      throw new Error(maybeError?.message ?? (text.trim() || 'Request failed'))
-    }
-    return payload as T
-  }
-
   useEffect(() => {
     if (!supabase || view !== 'my-pictures' || !session?.user.email) return
 
@@ -1409,53 +1264,6 @@ function App() {
     } catch (error) {
       reportError(error instanceof Error ? error.message : 'Unable to open file')
     }
-  }
-
-  const triggerBrowserDownload = (blob: Blob, filename: string) => {
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = filename
-    anchor.rel = 'noopener noreferrer'
-    document.body.appendChild(anchor)
-    anchor.click()
-    anchor.remove()
-    // Keep the blob URL alive long enough for the browser to finish persisting
-    // larger archives before we release the backing object.
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
-  }
-
-  const loadWorkerBlob = async (
-    path: string,
-    token: string,
-    options?: { method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown }
-  ) => {
-    if (!apiBaseUrl) {
-      throw new Error('Set VITE_API_BASE_URL to enable gallery APIs.')
-    }
-
-    const response = await fetch(`${apiBaseUrl}${path}`, {
-      method: options?.method ?? 'GET',
-      headers: {
-        authorization: `Bearer ${token}`,
-        'content-type': 'application/json',
-      },
-      body: options?.body ? JSON.stringify(options.body) : undefined,
-    })
-
-    if (!response.ok) {
-      const text = await response.text()
-      let message = text.trim() || 'Request failed'
-      try {
-        const payload = JSON.parse(text) as { error?: { message?: string } }
-        message = payload.error?.message ?? message
-      } catch {
-        // Keep the raw text fallback.
-      }
-      throw new Error(message)
-    }
-
-    return response.blob()
   }
 
   const openAdminLightbox = async (projectId: string, assetId: string) => {
