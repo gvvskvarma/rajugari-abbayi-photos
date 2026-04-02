@@ -4,7 +4,6 @@ import './App.css'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import type {
   UploadItem,
-  ResponsiveAsset,
   GalleryShot,
   AppView,
   ShareLinkScope,
