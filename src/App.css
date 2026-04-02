@@ -2475,3 +2475,52 @@ main > section {
   }
 
 }
+
+@media (max-width: 420px) {
+  .topbar {
+    width: min(calc(100% - 8px), 100%);
+    margin-top: 6px;
+    padding: 8px 8px;
+    gap: 6px;
+  }
+
+  .brand {
+    gap: 8px;
+  }
+
+  .brand-mark {
+    width: 38px;
+    height: 38px;
+  }
+
+  .brand-title {
+    font-size: 0.92rem;
+    padding: 2px 8px 4px;
+  }
+
+  .brand-subtitle {
+    font-size: 0.66rem;
+    padding: 1px 8px 3px;
+  }
+
+  .nav a {
+    min-width: 58px;
+    padding: 5px 8px;
+    font-size: 0.58rem;
+    letter-spacing: 0.11em;
+  }
+
+  .topbar-right {
+    gap: 6px;
+  }
+
+  .login-icon {
+    min-height: 38px;
+    padding: 7px 10px;
+  }
+
+  .login-label {
+    max-width: 10ch;
+    font-size: 0.55rem;
+  }
+}
