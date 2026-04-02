@@ -1858,6 +1858,7 @@ app.post('/api/v1/share-links', async (c) => {
       'share_links?select=id,token,scope_type',
       {
         method: 'POST',
+        headers: { Prefer: 'return=representation' },
         body: JSON.stringify({
           token,
           owner_profile_id: user.id,
