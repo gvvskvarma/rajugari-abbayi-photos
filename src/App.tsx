@@ -2,454 +2,56 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, DragEvent, FormEvent } from 'react'
 import './App.css'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
+import type {
+  UploadItem,
+  ResponsiveAsset,
+  GalleryShot,
+  AppView,
+  ShareLinkScope,
+  DeliveryAsset,
+  DeliveryCard,
+  CustomerLightboxState,
+  AdminClient,
+  AdminProject,
+  AdminAsset,
+  AdminClientSummary,
+  AdminProjectView,
+  AdminLightboxState,
+  DeleteConfirmationState,
+  AdminActivityKind,
+  AdminActivityItem,
+} from './types'
+import {
+  createResponsiveAsset,
+  getPrimaryPreloadSource,
+  ResponsiveImage,
+} from './lib/media.tsx'
+import {
+  dedupeUploadItems,
+  buildUploadQueueGroups,
+  getDisplayFileName,
+  sanitizeDownloadName,
+  collectDroppedUploadItems,
+} from './lib/upload'
+import {
+  ADMIN_ACTIVITY_LIMIT,
+  ADMIN_PROJECT_CHUNK_SIZE,
+  getAssetKind,
+  readViewFromHash,
+  readAdminClientIdFromHash,
+  readShareTokenFromHash,
+  daysRemainingText,
+  randomToken,
+} from './lib/helpers'
+import { useAuth } from './hooks/useAuth'
+import { useFocusTrap } from './hooks/useFocusTrap'
 
 const instagramUrl =
   'https://www.instagram.com/rajugari_abbayi_photography?igsh=azYxaHdwYmdhaTh0&utm_source=qr'
 const personalInstagramUrl =
   'https://www.instagram.com/rajugari_abbayi?igsh=MTB3MHk4ODZxODM5dg%3D%3D&utm_source=qr'
 
-const mediaBaseUrl = (import.meta.env.VITE_MEDIA_BASE_URL ?? '').trim().replace(/\/+$/, '')
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/+$/, '')
-
-const toFirstName = (value?: string) => {
-  const cleaned = (value ?? '').trim()
-  if (!cleaned) return ''
-  const firstToken = cleaned.split(/[\s._-]+/)[0] ?? ''
-  if (!firstToken) return ''
-  return firstToken.charAt(0).toUpperCase() + firstToken.slice(1).toLowerCase()
-}
-
-const localMediaAssetUrls = import.meta.glob(
-  '/project-rga/optimized/**/*.{jpg,jpeg,JPG,JPEG,png,PNG,webp,WEBP}',
-  {
-    eager: true,
-    import: 'default',
-    query: '?url',
-  }
-) as Record<string, string>
-
-const normalizeMediaPath = (path: string) => path.replace(/^\/+/, '')
-
-const toRemoteMediaUrl = (path: string) => {
-  if (!mediaBaseUrl) return undefined
-  if (/^https?:\/\//.test(path)) return path
-  return `${mediaBaseUrl}/${normalizeMediaPath(path)}`
-}
-
-const toLocalMediaUrl = (path: string) => {
-  const key = `/${normalizeMediaPath(path)}`
-  return localMediaAssetUrls[key]
-}
-
-const buildSrcSet = (variants: Array<{ url?: string; width: number }>) => {
-  const srcSet = variants
-    .filter((variant): variant is { url: string; width: number } => Boolean(variant.url))
-    .map((variant) => `${variant.url} ${variant.width}w`)
-    .join(', ')
-  return srcSet || undefined
-}
-
-const uniqueSources = (sources: Array<{ src?: string; srcSet?: string }>) => {
-  const seen = new Set<string>()
-  return sources
-    .filter((source): source is { src: string; srcSet?: string } => Boolean(source.src))
-    .filter((source) => {
-      if (seen.has(source.src)) return false
-      seen.add(source.src)
-      return true
-    })
-}
-
-type UploadItem = {
-  file: File
-  path: string
-}
-
-type UploadQueueGroup = {
-  key: string
-  label: string
-  count: number
-  isFolder: boolean
-  items: UploadItem[]
-}
-
-type FileSystemEntryLike = {
-  isFile: boolean
-  isDirectory: boolean
-  name: string
-  fullPath: string
-}
-
-type FileSystemFileEntryLike = FileSystemEntryLike & {
-  file: (success: (file: File) => void, error?: (error: unknown) => void) => void
-}
-
-type FileSystemDirectoryReaderLike = {
-  readEntries: (success: (entries: FileSystemEntryLike[]) => void, error?: (error: unknown) => void) => void
-}
-
-type FileSystemDirectoryEntryLike = FileSystemEntryLike & {
-  createReader: () => FileSystemDirectoryReaderLike
-}
-
-type DataTransferItemWithEntry = DataTransferItem & {
-  webkitGetAsEntry?: () => FileSystemEntryLike | null
-}
-
-const normalizeUploadPath = (path: string, fallbackName: string) => {
-  const cleaned = path.trim().replace(/^\/+/, '')
-  return cleaned || fallbackName
-}
-
-const uploadItemKey = (item: UploadItem) => `${item.path}::${item.file.size}::${item.file.lastModified}`
-
-const dedupeUploadItems = (items: UploadItem[]) => {
-  const seen = new Set<string>()
-  return items.filter((item) => {
-    const key = uploadItemKey(item)
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-}
-
-const normalizeUploadItemPath = (path: string) => path.trim().replace(/^\/+/, '')
-
-const buildUploadQueueGroups = (items: UploadItem[]) => {
-  const groups = new Map<string, UploadItem[]>()
-  const order: string[] = []
-
-  for (const item of items) {
-    const normalizedPath = normalizeUploadItemPath(item.path)
-    const segments = normalizedPath.split('/').filter(Boolean)
-    const key = segments.length > 1 ? `folder:${segments[0]}` : `file:${normalizedPath}`
-    if (!groups.has(key)) order.push(key)
-
-    const current = groups.get(key) ?? []
-    current.push({
-      ...item,
-      path: normalizedPath,
-    })
-    groups.set(key, current)
-  }
-
-  return order.map((key): UploadQueueGroup => {
-    const groupItems = groups.get(key) ?? []
-    const firstItem = groupItems[0]
-    const firstSegments = firstItem ? firstItem.path.split('/').filter(Boolean) : []
-    const isFolder = firstSegments.length > 1
-    const displayLabel = isFolder ? (key.replace(/^folder:/, '') || firstItem?.path || key) : firstItem?.path ?? key
-
-    return {
-      key,
-      label: displayLabel,
-      count: groupItems.length,
-      isFolder,
-      items: groupItems,
-    }
-  })
-}
-
-const getDisplayFileName = (value: string) => {
-  const cleaned = value.trim().replace(/\/+$/, '')
-  const segments = cleaned.split('/').filter(Boolean)
-  return segments[segments.length - 1] || cleaned
-}
-
-const sanitizeDownloadName = (value: string) => {
-  const cleaned = getDisplayFileName(value).replace(/[^a-zA-Z0-9._-]/g, '_')
-  return cleaned || 'download'
-}
-
-const readDirectoryEntries = async (directoryEntry: FileSystemDirectoryEntryLike) => {
-  const reader = directoryEntry.createReader()
-  const entries: FileSystemEntryLike[] = []
-
-  while (true) {
-    const batch = await new Promise<FileSystemEntryLike[]>((resolve, reject) => {
-      reader.readEntries(resolve, reject)
-    })
-    if (!batch.length) break
-    entries.push(...batch)
-  }
-
-  return entries
-}
-
-const collectEntryUploadItems = async (entry: FileSystemEntryLike): Promise<UploadItem[]> => {
-  if (entry.isFile) {
-    const fileEntry = entry as FileSystemFileEntryLike
-    const file = await new Promise<File>((resolve, reject) => {
-      fileEntry.file(resolve, reject)
-    })
-    return [{ file, path: normalizeUploadPath(entry.fullPath, file.name) }]
-  }
-
-  if (entry.isDirectory) {
-    const directoryEntry = entry as FileSystemDirectoryEntryLike
-    const children = await readDirectoryEntries(directoryEntry)
-    const nested = await Promise.all(children.map((child) => collectEntryUploadItems(child)))
-    return nested.flat()
-  }
-
-  return []
-}
-
-const collectDroppedUploadItems = async (dataTransfer: DataTransfer): Promise<UploadItem[]> => {
-  const items = Array.from(dataTransfer.items ?? [])
-
-  if (!items.length) {
-    return Array.from(dataTransfer.files ?? []).map((file) => ({
-      file,
-      path: file.name,
-    }))
-  }
-
-  const collected = await Promise.all(
-    items.map(async (item) => {
-      const entry = (item as DataTransferItemWithEntry).webkitGetAsEntry?.()
-      if (entry) {
-        return collectEntryUploadItems(entry)
-      }
-
-      const file = item.getAsFile()
-      return file
-        ? [
-            {
-              file,
-              path: file.name,
-            },
-          ]
-        : []
-    })
-  )
-
-  const flattened = collected.flat()
-  if (flattened.length) {
-    return flattened
-  }
-
-  return Array.from(dataTransfer.files ?? []).map((file) => ({
-    file,
-    path: file.name,
-  }))
-}
-
-type ResponsiveAsset = {
-  key: string
-  sources: Array<{
-    src: string
-    srcSet?: string
-  }>
-}
-
-const createResponsiveAsset = (originalPath: string): ResponsiveAsset => {
-  const normalizedPath = normalizeMediaPath(originalPath)
-  const optimizedBase = normalizedPath
-    .replace(/^project-rga\//, 'project-rga/optimized/')
-    .replace(/\.[^.]+$/, '')
-
-  const remote640 = toRemoteMediaUrl(`${optimizedBase}-640.jpg`)
-  const remote1200 = toRemoteMediaUrl(`${optimizedBase}-1200.jpg`)
-  const remote1800 = toRemoteMediaUrl(`${optimizedBase}-1800.jpg`)
-
-  const local640 = toLocalMediaUrl(`${optimizedBase}-640.jpg`)
-  const local1200 = toLocalMediaUrl(`${optimizedBase}-1200.jpg`)
-  const local1800 = toLocalMediaUrl(`${optimizedBase}-1800.jpg`)
-
-  const remoteSrcSet = buildSrcSet([
-    { url: remote640, width: 640 },
-    { url: remote1200, width: 1200 },
-    { url: remote1800, width: 1800 },
-  ])
-
-  const localSrcSet = buildSrcSet([
-    { url: local640, width: 640 },
-    { url: local1200, width: 1200 },
-    { url: local1800, width: 1800 },
-  ])
-
-  const sources = uniqueSources([
-    { src: remote640, srcSet: remoteSrcSet },
-    { src: local640, srcSet: localSrcSet },
-    { src: remote1200 },
-    { src: local1200 },
-    { src: remote1800 },
-    { src: local1800 },
-  ])
-
-  return {
-    key: normalizedPath,
-    sources,
-  }
-}
-
-type ResponsiveImageProps = {
-  asset: ResponsiveAsset
-  alt: string
-  className?: string
-  sizes: string
-  loading?: 'eager' | 'lazy'
-  fetchPriority?: 'high' | 'low' | 'auto'
-}
-
-const ResponsiveImage = ({
-  asset,
-  alt,
-  className,
-  sizes,
-  loading = 'lazy',
-  fetchPriority = 'auto',
-}: ResponsiveImageProps) => {
-  const candidates = useMemo(() => asset.sources, [asset.sources])
-
-  const [candidateIndex, setCandidateIndex] = useState(0)
-
-  useEffect(() => {
-    setCandidateIndex(0)
-  }, [asset])
-
-  const candidate = candidates[Math.min(candidateIndex, Math.max(candidates.length - 1, 0))]
-  if (!candidate) return null
-
-  return (
-    <img
-      className={className}
-      src={candidate.src}
-      srcSet={candidate.srcSet}
-      sizes={candidate.srcSet ? sizes : undefined}
-      alt={alt}
-      loading={loading}
-      fetchPriority={fetchPriority}
-      decoding="async"
-      onError={() =>
-        setCandidateIndex((current) => Math.min(current + 1, Math.max(candidates.length - 1, 0)))
-      }
-    />
-  )
-}
-
-type GalleryShot = {
-  image: ResponsiveAsset
-  title: string
-  tag: string
-}
-
-type Role = 'admin' | 'customer'
-type AppView = 'home' | 'my-pictures' | 'upload' | 'share' | 'admin-clients' | 'admin-client'
-type ShareLinkScope = 'all' | 'selected'
-
-type DeliveryAsset = {
-  id: string
-  filename: string
-  mime_type: string
-  bytes: number
-  delivery_id?: string
-  r2_object_key?: string
-  created_at?: string
-  canView?: boolean
-  canDownload?: boolean
-}
-
-type DeliveryCard = {
-  deliveryId: string
-  projectName?: string | null
-  clientName?: string | null
-  projectStatus?: string | null
-  expiresAt: string | null
-  firstViewedAt?: string | null
-  accessMode?: 'owner' | 'viewer' | 'admin'
-  assets: DeliveryAsset[]
-}
-
-type CustomerLightboxState = {
-  deliveryId: string
-  assetId: string
-}
-
-type AdminClient = {
-  id: string
-  full_name: string
-  email: string
-  phone: string | null
-  notes: string | null
-  created_at: string
-  updated_at: string
-}
-
-type AdminProject = {
-  id: string
-  client_id: string
-  name: string
-  description: string | null
-  shoot_date: string | null
-  location: string | null
-  status: string
-  created_at: string
-  updated_at: string
-}
-
-type AdminAsset = {
-  id: string
-  project_id: string
-  delivery_id: string | null
-  filename: string
-  mime_type: string
-  bytes: number
-  r2_object_key: string
-  created_at: string
-}
-
-type AdminClientSummary = AdminClient & {
-  projects: AdminProject[]
-  assets: AdminAsset[]
-  projectCount: number
-  assetCount: number
-  latestUpdatedAt: string
-}
-
-type AdminProjectView = {
-  project: AdminProject
-  totalAssets: number
-  visibleAssets: AdminAsset[]
-  latestActivityAt: string
-}
-
-type AdminLightboxState = {
-  projectId: string
-  assetId: string
-}
-
-type DeleteConfirmationState = {
-  title: string
-  description: string
-  confirmLabel: string
-  progressLabel: string
-  onConfirm: () => Promise<void>
-}
-
-type AdminActivityKind = 'upload' | 'download' | 'delete' | 'edit' | 'create'
-
-type AdminActivityItem = {
-  id: string
-  kind: AdminActivityKind
-  title: string
-  detail: string
-  createdAt: string
-  clientId?: string | null
-  projectId?: string | null
-  assetId?: string | null
-  metadata?: Record<string, unknown>
-}
-
-const ADMIN_ACTIVITY_LIMIT = 24
-const ADMIN_PROJECT_CHUNK_SIZE = 12
-
-const getAssetKind = (mimeType: string) => {
-  if (mimeType.startsWith('image/')) return 'images'
-  if (mimeType.startsWith('video/')) return 'videos'
-  return 'other'
-}
 
 const landscapePaths = [
   'project-rga/landscapes/RGA02744.jpg',
@@ -529,43 +131,6 @@ const heroPortrait = createResponsiveAsset('project-rga/potraits/events/RGA03248
 const heroLandscape = featuredShots[0]?.image
 const heroTravel = featuredShots[4]?.image ?? featuredShots[2]?.image
 
-const getPrimaryPreloadSource = (asset: ResponsiveAsset) => asset.sources[0]?.src ?? ''
-
-const readViewFromHash = () => {
-  const hash = window.location.hash || '#home'
-  if (hash.startsWith('#share/')) return 'share'
-  if (hash === '#my-pictures') return 'my-pictures'
-  if (hash === '#upload') return 'upload'
-  if (hash.startsWith('#admin-clients/')) return 'admin-client'
-  if (hash === '#admin-clients' || hash === '#admin-work') return 'admin-clients'
-  return 'home'
-}
-
-const readAdminClientIdFromHash = () => {
-  const hash = window.location.hash || ''
-  if (!hash.startsWith('#admin-clients/')) return ''
-  return hash.replace('#admin-clients/', '').split('/')[0]?.trim() ?? ''
-}
-
-const readShareTokenFromHash = () => {
-  const hash = window.location.hash || ''
-  if (!hash.startsWith('#share/')) return ''
-  return hash.replace('#share/', '').trim()
-}
-
-const daysRemainingText = (expiresAt: string | null) => {
-  if (!expiresAt) return 'Not started'
-  const diffMs = new Date(expiresAt).getTime() - Date.now()
-  if (diffMs <= 0) return 'Expired'
-  const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
-  return `Expires in ${days} day${days === 1 ? '' : 's'}`
-}
-
-const randomToken = () => {
-  const buffer = new Uint8Array(24)
-  crypto.getRandomValues(buffer)
-  return Array.from(buffer, (b) => b.toString(16).padStart(2, '0')).join('')
-}
 
 type RotatingGalleryProps = {
   title: string
@@ -672,15 +237,38 @@ const RotatingGallery = ({
 
 function App() {
   const [cycleStep, setCycleStep] = useState(0)
-  const [authMenuOpen, setAuthMenuOpen] = useState(false)
-  const [emailInput, setEmailInput] = useState('')
-  const [authCode, setAuthCode] = useState('')
-  const [authCodeReady, setAuthCodeReady] = useState(false)
-  const [authMessage, setAuthMessage] = useState('')
-  const [authBusy, setAuthBusy] = useState(false)
-  const [profileDisplayName, setProfileDisplayName] = useState('')
-  const [session, setSession] = useState<{ user: { id: string; email?: string } } | null>(null)
-  const [role, setRole] = useState<Role>('customer')
+  const {
+    session,
+    role,
+    profileDisplayName,
+    loginLabel,
+    authMenuOpen,
+    setAuthMenuOpen,
+    emailInput,
+    setEmailInput,
+    authCode,
+    setAuthCode,
+    authCodeReady,
+    authMessage,
+    authBusy,
+    handleSendOtp,
+    handleVerifyOtp,
+    handleSignOut,
+    getAccessToken,
+  } = useAuth({
+    onSignOut: () => {
+      setMyDeliveries([])
+      setNewShareLinks({})
+      setAdminActivities([])
+      setAdminActivityError('')
+      setShareAssetPreviewUrls({})
+      setShareAssetThumbnailUrls({})
+      setSharePageCopyState('')
+      setShareExpiresAt('')
+      setCustomerAssetPreviewUrls({})
+      setCustomerAssetThumbnailUrls({})
+    },
+  })
 
   const [view, setView] = useState<AppView>(readViewFromHash())
   const [shareToken, setShareToken] = useState(readShareTokenFromHash())
@@ -745,6 +333,10 @@ function App() {
   const [adminProjectRenderLimits, setAdminProjectRenderLimits] = useState<Record<string, number>>({})
   const adminLightboxTouchStartRef = useRef<number | null>(null)
   const customerLightboxTouchStartRef = useRef<number | null>(null)
+
+  const customerLightboxTrapRef = useFocusTrap(Boolean(customerLightbox))
+  const adminLightboxTrapRef = useFocusTrap(Boolean(adminLightbox))
+  const deleteConfirmationTrapRef = useFocusTrap(Boolean(deleteConfirmation))
 
   const [shareAssets, setShareAssets] = useState<DeliveryAsset[]>([])
   const [shareBusy, setShareBusy] = useState(false)
@@ -962,6 +554,7 @@ function App() {
   const uploadQueueGroups = useMemo(() => buildUploadQueueGroups(uploadItems), [uploadItems])
 
   useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
     const id = window.setInterval(() => {
       setCycleStep((current) => current + 1)
     }, 2000)
@@ -977,76 +570,6 @@ function App() {
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
-
-  useEffect(() => {
-    if (!supabase) return
-    const client = supabase
-
-    const boot = async () => {
-      const { data } = await client.auth.getSession()
-      const nextSession = data.session
-      if (!nextSession?.user) {
-        setSession(null)
-        setRole('customer')
-        setProfileDisplayName('')
-        return
-      }
-      setSession({ user: { id: nextSession.user.id, email: nextSession.user.email ?? undefined } })
-    }
-
-    void boot()
-
-    const { data: listener } = client.auth.onAuthStateChange((_event, nextSession) => {
-      if (!nextSession?.user) {
-        setSession(null)
-        setRole('customer')
-        setProfileDisplayName('')
-        return
-      }
-      setSession({ user: { id: nextSession.user.id, email: nextSession.user.email ?? undefined } })
-    })
-
-    return () => {
-      listener.subscription.unsubscribe()
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!session) return
-    setAuthMenuOpen(false)
-    setAuthCode('')
-    setAuthCodeReady(false)
-    setAuthMessage('')
-  }, [session?.user.id])
-
-  useEffect(() => {
-    if (!supabase || !session?.user.id) return
-    const client = supabase
-
-    const fetchRole = async () => {
-      const { data } = await client
-        .from('profiles')
-        .select('role, display_name')
-        .eq('id', session.user.id)
-        .single()
-
-      if (!data) {
-        setRole('customer')
-        setProfileDisplayName('')
-        return
-      }
-
-      setRole(data.role === 'admin' ? 'admin' : 'customer')
-      setProfileDisplayName(data.display_name ?? '')
-    }
-
-    void fetchRole()
-  }, [session?.user.id])
-
-  const loginLabel = useMemo(() => {
-    if (!session) return 'LOGIN'
-    return toFirstName(profileDisplayName) || toFirstName(session.user.email) || 'LOGIN'
-  }, [profileDisplayName, session])
 
   const filteredAdminClients = adminClients.filter((client) => {
     const query = adminClientSearch.trim().toLowerCase()
@@ -1495,14 +1018,6 @@ function App() {
     }
   }
 
-  const getAccessToken = async () => {
-    if (!supabase) return ''
-    const {
-      data: { session: authSession },
-    } = await supabase.auth.getSession()
-    return authSession?.access_token ?? ''
-  }
-
   const workerRequest = async <T,>(
     path: string,
     token: string,
@@ -1641,97 +1156,6 @@ function App() {
     void loadShareView()
   }, [shareToken, supabase, view])
 
-  const handleSendOtp = async (event: FormEvent) => {
-    event.preventDefault()
-    if (!supabase) {
-      setAuthMessage('Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env to enable login.')
-      return
-    }
-
-    const email = emailInput.trim().toLowerCase()
-    if (!email) {
-      setAuthMessage('Enter an email address first.')
-      return
-    }
-
-    setAuthBusy(true)
-    setAuthMessage('')
-    setAuthCode('')
-    setAuthCodeReady(false)
-
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        shouldCreateUser: true,
-      },
-    })
-
-    if (error) {
-      setAuthMessage(error.message)
-    } else {
-      setAuthMessage('Code sent. Open email on any device and enter the code here.')
-      setAuthCodeReady(true)
-    }
-
-    setAuthBusy(false)
-  }
-
-  const handleVerifyOtp = async (event: FormEvent) => {
-    event.preventDefault()
-    if (!supabase) {
-      setAuthMessage('Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env to enable login.')
-      return
-    }
-
-    const email = emailInput.trim().toLowerCase()
-    const token = authCode.trim().replace(/\s+/g, '')
-    if (!email) {
-      setAuthMessage('Enter an email address first.')
-      return
-    }
-    if (!token) {
-      setAuthMessage('Enter the code from your email.')
-      return
-    }
-
-    setAuthBusy(true)
-    setAuthMessage('')
-
-    const { error } = await supabase.auth.verifyOtp({
-      email,
-      token,
-      type: 'email',
-    })
-
-    if (error) {
-      setAuthMessage(error.message)
-    } else {
-      setAuthMessage('Code verified. Finishing login...')
-    }
-
-    setAuthBusy(false)
-  }
-
-  const handleSignOut = async () => {
-    if (!supabase) return
-    await supabase.auth.signOut()
-    setAuthMenuOpen(false)
-    setAuthCode('')
-    setAuthCodeReady(false)
-    setAuthMessage('')
-    setMyDeliveries([])
-    setNewShareLinks({})
-    setAdminActivities([])
-    setAdminActivityError('')
-    setShareAssetPreviewUrls({})
-    setShareAssetThumbnailUrls({})
-    setSharePageCopyState('')
-    setShareExpiresAt('')
-    setCustomerAssetPreviewUrls({})
-    setCustomerAssetThumbnailUrls({})
-    window.location.hash = '#home'
-  }
-
   const appendUploadItems = (items: UploadItem[]) => {
     setUploadItems((current) => dedupeUploadItems([...current, ...items]))
   }
@@ -1866,6 +1290,7 @@ function App() {
 
     return (
       <div
+        ref={customerLightboxTrapRef}
         className="customer-lightbox"
         role="dialog"
         aria-modal="true"
@@ -3926,6 +3351,7 @@ function App() {
 
         {adminLightboxAsset && adminLightbox && (
           <div
+            ref={adminLightboxTrapRef}
             className="admin-lightbox"
             role="dialog"
             aria-modal="true"
@@ -4105,6 +3531,7 @@ function App() {
 
   return (
     <div className="page">
+      <a href="#main-content" className="skip-link">Skip to content</a>
       <header className="topbar">
         <div className="brand">
           <a className="brand-mark" href="#home" aria-label="Go to top">
@@ -4219,7 +3646,7 @@ function App() {
         </div>
       </header>
 
-      <main>
+      <main id="main-content">
         {view === 'home' && renderHomeSections()}
         {view === 'my-pictures' && renderMyPictures()}
         {view === 'upload' && renderUpload()}
@@ -4230,6 +3657,7 @@ function App() {
 
       {deleteConfirmation && (
         <div
+          ref={deleteConfirmationTrapRef}
           className="admin-confirm-modal"
           role="dialog"
           aria-modal="true"
