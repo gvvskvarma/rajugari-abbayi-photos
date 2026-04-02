@@ -489,123 +489,64 @@ export function MyPicturesPage() {
                   </button>
                 </div>
 
-                <div className="share-link-scope-toggle" role="radiogroup" aria-label="Share scope">
-                  <label className={`share-link-scope-option ${shareComposerScope === 'all' ? 'is-selected' : ''}`}>
-                    <input
-                      type="radio"
-                      name={`share-scope-${delivery.deliveryId}`}
-                      checked={shareComposerScope === 'all'}
-                      onChange={() => {
-                        setShareComposerScope('all')
-                        clearShareComposerSelection()
-                        setShareComposerMessage('')
-                      }}
-                      disabled={shareComposerBusy}
-                    />
-                    <span>All files in this folder</span>
-                    <small>{delivery.assets.length} file{delivery.assets.length === 1 ? '' : 's'} included</small>
-                  </label>
-                  <label
-                    className={`share-link-scope-option ${shareComposerScope === 'selected' ? 'is-selected' : ''}`}
-                  >
-                    <input
-                      type="radio"
-                      name={`share-scope-${delivery.deliveryId}`}
-                      checked={shareComposerScope === 'selected'}
-                      onChange={() => {
-                        setShareComposerScope('selected')
-                        setShareComposerMessage('')
-                      }}
-                      disabled={shareComposerBusy}
-                    />
-                    <span>Selected files only</span>
-                    <small>{shareComposerSelectedCount} selected</small>
-                  </label>
+                <div className="share-link-composer-controls">
+                  <div className="share-link-scope-toggle" role="radiogroup" aria-label="Share scope">
+                    <label className={`share-link-scope-option ${shareComposerScope === 'all' ? 'is-selected' : ''}`}>
+                      <input
+                        type="radio"
+                        name={`share-scope-${delivery.deliveryId}`}
+                        checked={shareComposerScope === 'all'}
+                        onChange={() => {
+                          setShareComposerScope('all')
+                          clearShareComposerSelection()
+                          setShareComposerMessage('')
+                        }}
+                        disabled={shareComposerBusy}
+                      />
+                      <span>All files</span>
+                    </label>
+                    <label className={`share-link-scope-option ${shareComposerScope === 'selected' ? 'is-selected' : ''}`}>
+                      <input
+                        type="radio"
+                        name={`share-scope-${delivery.deliveryId}`}
+                        checked={shareComposerScope === 'selected'}
+                        onChange={() => {
+                          setShareComposerScope('selected')
+                          setShareComposerMessage('')
+                        }}
+                        disabled={shareComposerBusy}
+                      />
+                      <span>Selected ({shareComposerSelectedCount})</span>
+                    </label>
+                  </div>
+
+                  <div className="share-link-composer-row">
+                    {shareComposerScope === 'selected' && (
+                      <>
+                        <button className="button ghost" type="button" onClick={selectAllShareComposerAssets} disabled={shareComposerBusy}>
+                          Select all
+                        </button>
+                        <button className="button ghost" type="button" onClick={clearShareComposerSelection} disabled={shareComposerBusy || shareComposerSelectedCount === 0}>
+                          Clear
+                        </button>
+                      </>
+                    )}
+                    <button
+                      className="button primary"
+                      type="button"
+                      onClick={() => { void handleCreateShareLink() }}
+                      disabled={shareComposerBusy || (shareComposerScope === 'selected' && shareComposerSelectedCount === 0)}
+                    >
+                      {shareComposerBusy ? 'Generating...' : 'Generate link'}
+                    </button>
+                  </div>
                 </div>
 
                 {shareComposerScope === 'selected' && (
-                  <>
-                    <div className="share-link-composer-toolbar">
-                      <p className="portal-hint">Pick the exact files the recipient should see.</p>
-                      <div className="share-link-composer-actions">
-                        <button
-                          className="button ghost"
-                          type="button"
-                          onClick={selectAllShareComposerAssets}
-                          disabled={shareComposerBusy || delivery.assets.length === 0}
-                        >
-                          Select all
-                        </button>
-                        <button
-                          className="button ghost"
-                          type="button"
-                          onClick={clearShareComposerSelection}
-                          disabled={shareComposerBusy || shareComposerSelectedCount === 0}
-                        >
-                          Clear
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="share-link-selection-grid">
-                      {delivery.assets.map((asset) => {
-                        const isSelected = shareComposerSelectedAssetSet.has(asset.id)
-                        const isImage = asset.mime_type.startsWith('image/')
-                        const thumbnailUrl = customerThumbnailUrls[asset.id]
-                        const displayName = getDisplayFileName(asset.filename)
-
-                        return (
-                          <button
-                            key={asset.id}
-                            className={`share-link-selection-card ${isSelected ? 'is-selected' : ''}`}
-                            type="button"
-                            aria-pressed={isSelected}
-                            onClick={() => toggleShareComposerAsset(asset.id)}
-                            disabled={shareComposerBusy}
-                          >
-                            <span className="share-link-selection-check">{isSelected ? 'On' : ''}</span>
-                            {isImage ? (
-                              <div className="customer-asset-thumb">
-                                {thumbnailUrl ? (
-                                  <img src={thumbnailUrl} alt={displayName} loading="lazy" decoding="async" />
-                                ) : (
-                                  <div className="customer-asset-thumb-fallback">
-                                    <span>IMG</span>
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="customer-asset-thumb">
-                                <div className="customer-asset-thumb-fallback">
-                                  <span>{asset.mime_type.split('/')[0]?.slice(0, 1).toUpperCase() || 'F'}</span>
-                                </div>
-                              </div>
-                            )}
-                            <div className="customer-asset-main">
-                              <p className="customer-asset-name">{displayName}</p>
-                              {!isImage && <p className="portal-hint">{getAssetKind(asset.mime_type)}</p>}
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </>
+                  <p className="portal-hint">Tap photos below to select them for the share link.</p>
                 )}
 
                 {shareComposerMessage && <p className="portal-error">{shareComposerMessage}</p>}
-
-                <div className="share-link-row">
-                  <button
-                    className="button"
-                    type="button"
-                    onClick={() => {
-                      void handleCreateShareLink()
-                    }}
-                    disabled={shareComposerBusy || (shareComposerScope === 'selected' && shareComposerSelectedCount === 0)}
-                  >
-                    {shareComposerBusy ? 'Generating...' : 'Generate link'}
-                  </button>
-                </div>
               </div>
             )}
 
@@ -630,65 +571,69 @@ export function MyPicturesPage() {
             )}
 
             <div className="customer-asset-grid">
-              {delivery.assets.map((asset) => (
-                <article key={asset.id} className="customer-asset-card">
-                  {asset.mime_type.startsWith('image/') ? (
-                    <button
-                      className="customer-asset-thumb customer-asset-thumb-button"
-                      type="button"
-                      onClick={() => openCustomerLightbox(delivery.deliveryId, asset.id)}
-                      aria-label={`Open ${getDisplayFileName(asset.filename)}`}
-                      disabled={!customerThumbnailUrls[asset.id]}
-                    >
-                      {customerThumbnailUrls[asset.id] ? (
-                        <img
-                          src={customerThumbnailUrls[asset.id]}
-                          alt={getDisplayFileName(asset.filename)}
-                          loading="lazy"
-                          decoding="async"
-                        />
-                      ) : (
-                        <div className="customer-asset-thumb-fallback">
-                          <span>IMG</span>
-                        </div>
-                      )}
-                    </button>
-                  ) : (
-                    <div className="customer-asset-thumb">
-                      <div className="customer-asset-thumb-fallback">
-                        <span>{asset.mime_type.split('/')[0]?.slice(0, 1).toUpperCase() || 'F'}</span>
-                      </div>
-                    </div>
-                  )}
-                  <div className="customer-asset-main">
-                    <p className="customer-asset-name">{getDisplayFileName(asset.filename)}</p>
-                    {!asset.mime_type.startsWith('image/') && <p className="portal-hint">{getAssetKind(asset.mime_type)}</p>}
-                  </div>
-                  <div className="customer-asset-actions">
-                    {!asset.mime_type.startsWith('image/') && (
+              {delivery.assets.map((asset) => {
+                const isSelectMode = shareComposerDeliveryId === delivery.deliveryId && shareComposerScope === 'selected'
+                const isSelected = isSelectMode && shareComposerSelectedAssetSet.has(asset.id)
+                const displayName = getDisplayFileName(asset.filename)
+                const isImage = asset.mime_type.startsWith('image/')
+                const thumbnailUrl = customerThumbnailUrls[asset.id]
+
+                return (
+                  <article key={asset.id} className={`customer-asset-card ${isSelected ? 'is-selected' : ''}`}>
+                    {isSelectMode && (
                       <button
-                        className="button ghost"
+                        className="customer-asset-select-overlay"
                         type="button"
-                        onClick={() => {
-                          void handleOpenAsset(asset.id, 'view')
-                        }}
+                        aria-pressed={isSelected}
+                        onClick={() => toggleShareComposerAsset(asset.id)}
+                        disabled={shareComposerBusy}
                       >
-                        Open
+                        <span className="customer-asset-check">{isSelected ? '✓' : ''}</span>
+                        <span className="sr-only">Select {displayName}</span>
                       </button>
                     )}
-                    <button
-                      className="button ghost"
-                      type="button"
-                      disabled={!asset.canDownload}
-                      onClick={() => {
-                        void handleOpenAsset(asset.id, 'download')
-                      }}
-                    >
-                      Download
-                    </button>
-                  </div>
-                </article>
-              ))}
+                    {isImage ? (
+                      <button
+                        className="customer-asset-thumb customer-asset-thumb-button"
+                        type="button"
+                        onClick={() => isSelectMode ? toggleShareComposerAsset(asset.id) : openCustomerLightbox(delivery.deliveryId, asset.id)}
+                        aria-label={isSelectMode ? `Select ${displayName}` : `Open ${displayName}`}
+                        disabled={!isSelectMode && !thumbnailUrl}
+                      >
+                        {thumbnailUrl ? (
+                          <img src={thumbnailUrl} alt={displayName} loading="lazy" decoding="async" />
+                        ) : (
+                          <div className="customer-asset-thumb-fallback">
+                            <span>IMG</span>
+                          </div>
+                        )}
+                      </button>
+                    ) : (
+                      <div className="customer-asset-thumb">
+                        <div className="customer-asset-thumb-fallback">
+                          <span>{asset.mime_type.split('/')[0]?.slice(0, 1).toUpperCase() || 'F'}</span>
+                        </div>
+                      </div>
+                    )}
+                    <div className="customer-asset-main">
+                      <p className="customer-asset-name">{displayName}</p>
+                      {!isImage && <p className="portal-hint">{getAssetKind(asset.mime_type)}</p>}
+                    </div>
+                    {!isSelectMode && (
+                      <div className="customer-asset-actions">
+                        {!isImage && (
+                          <button className="button ghost" type="button" onClick={() => { void handleOpenAsset(asset.id, 'view') }}>
+                            Open
+                          </button>
+                        )}
+                        <button className="button ghost" type="button" disabled={!asset.canDownload} onClick={() => { void handleOpenAsset(asset.id, 'download') }}>
+                          Download
+                        </button>
+                      </div>
+                    )}
+                  </article>
+                )
+              })}
             </div>
           </article>
         ))}
