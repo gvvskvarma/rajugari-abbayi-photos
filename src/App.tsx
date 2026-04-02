@@ -9,8 +9,6 @@ const personalInstagramUrl =
   'https://www.instagram.com/rajugari_abbayi?igsh=MTB3MHk4ODZxODM5dg%3D%3D&utm_source=qr'
 
 const mediaBaseUrl = (import.meta.env.VITE_MEDIA_BASE_URL ?? '').trim().replace(/\/+$/, '')
-const authRedirectUrl =
-  (import.meta.env.VITE_AUTH_REDIRECT_URL ?? '').trim() || 'https://rajugariabbayishots.vercel.app'
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/+$/, '')
 
 const toFirstName = (value?: string) => {
@@ -676,7 +674,6 @@ function App() {
   const [cycleStep, setCycleStep] = useState(0)
   const [authMenuOpen, setAuthMenuOpen] = useState(false)
   const [emailInput, setEmailInput] = useState('')
-  const [authMode, setAuthMode] = useState<'link' | 'code'>('link')
   const [authCode, setAuthCode] = useState('')
   const [authCodeReady, setAuthCodeReady] = useState(false)
   const [authMessage, setAuthMessage] = useState('')
@@ -1660,30 +1657,20 @@ function App() {
     setAuthBusy(true)
     setAuthMessage('')
     setAuthCode('')
+    setAuthCodeReady(false)
 
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options:
-        authMode === 'link'
-          ? {
-              shouldCreateUser: true,
-              emailRedirectTo: authRedirectUrl,
-            }
-          : {
-              shouldCreateUser: true,
-            },
+      options: {
+        shouldCreateUser: true,
+      },
     })
 
     if (error) {
       setAuthMessage(error.message)
     } else {
-      if (authMode === 'link') {
-        setAuthMessage('Magic link sent. Open your email on the same device or another device.')
-        setAuthCodeReady(false)
-      } else {
-        setAuthMessage('Code sent. Open email on any device and enter the code here.')
-        setAuthCodeReady(true)
-      }
+      setAuthMessage('Code sent. Open email on any device and enter the code here.')
+      setAuthCodeReady(true)
     }
 
     setAuthBusy(false)
@@ -1729,7 +1716,6 @@ function App() {
     if (!supabase) return
     await supabase.auth.signOut()
     setAuthMenuOpen(false)
-    setAuthMode('link')
     setAuthCode('')
     setAuthCodeReady(false)
     setAuthMessage('')
@@ -4183,38 +4169,9 @@ function App() {
                   </>
                 ) : (
                   <>
-                    <div className="auth-mode-toggle" role="tablist" aria-label="Choose login method">
-                      <button
-                        className={`auth-mode-button ${authMode === 'link' ? 'is-active' : ''}`}
-                        type="button"
-                        onClick={() => {
-                          setAuthMode('link')
-                          setAuthCode('')
-                          setAuthCodeReady(false)
-                          setAuthMessage('')
-                        }}
-                      >
-                        Magic link
-                      </button>
-                      <button
-                        className={`auth-mode-button ${authMode === 'code' ? 'is-active' : ''}`}
-                        type="button"
-                        onClick={() => {
-                          setAuthMode('code')
-                          setAuthCode('')
-                          setAuthCodeReady(false)
-                          setAuthMessage('')
-                        }}
-                      >
-                        Use code
-                      </button>
-                    </div>
-
-                    {authMode === 'code' && !authCodeReady && (
-                      <p className="auth-note">
-                        Code login needs the Supabase email template to send a one-time code.
-                      </p>
-                    )}
+                    <p className="auth-note">
+                      Code login needs the Supabase email template to send a one-time code.
+                    </p>
 
                     <form className="auth-form" onSubmit={handleSendOtp}>
                       <label>
@@ -4228,17 +4185,11 @@ function App() {
                         />
                       </label>
                       <button className="button primary" type="submit" disabled={authBusy}>
-                        {authBusy
-                          ? 'Sending...'
-                          : authMode === 'link'
-                            ? 'Send Magic Link'
-                            : authCodeReady
-                              ? 'Resend Code'
-                              : 'Send Code'}
+                        {authBusy ? 'Sending...' : authCodeReady ? 'Resend Code' : 'Send Code'}
                       </button>
                     </form>
 
-                    {authMode === 'code' && authCodeReady && (
+                    {authCodeReady && (
                       <form className="auth-form auth-code-form" onSubmit={handleVerifyOtp}>
                         <label>
                           Code
