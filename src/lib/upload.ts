@@ -24,7 +24,7 @@ export const dedupeUploadItems = (items: UploadItem[]) => {
   })
 }
 
-const normalizeUploadItemPath = (path: string) => path.trim().replace(/^\/+/, '')
+export const normalizeUploadItemPath = (path: string) => path.trim().replace(/^\/+/, '')
 
 export const buildUploadQueueGroups = (items: UploadItem[]) => {
   const groups = new Map<string, UploadItem[]>()
