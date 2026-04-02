@@ -1318,15 +1318,38 @@
 .share-link-composer-controls {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
+}
+
+.share-link-composer-controls .share-link-scope-toggle {
+  display: flex;
+  gap: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(236, 232, 223, 0.15);
+}
+
+.share-link-composer-controls .share-link-scope-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 0;
+  font-size: 0.85rem;
+  min-width: 0;
+}
+
+.share-link-composer-controls .share-link-scope-option small {
+  display: none;
 }
 
 .share-link-composer-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
 }
 
 .customer-asset-card {

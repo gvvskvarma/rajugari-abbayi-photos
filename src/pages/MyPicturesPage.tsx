@@ -479,16 +479,6 @@ export function MyPicturesPage() {
 
             {shareComposerDeliveryId === delivery.deliveryId && shareComposerDelivery && (
               <div className="share-link-composer">
-                <div className="share-link-composer-head">
-                  <div>
-                    <p className="delivery-title">Create share link</p>
-                    <p className="delivery-expiry">Choose the full folder or a selected subset of files.</p>
-                  </div>
-                  <button className="button ghost" type="button" onClick={closeShareComposer}>
-                    Cancel
-                  </button>
-                </div>
-
                 <div className="share-link-composer-controls">
                   <div className="share-link-scope-toggle" role="radiogroup" aria-label="Share scope">
                     <label className={`share-link-scope-option ${shareComposerScope === 'all' ? 'is-selected' : ''}`}>
@@ -538,6 +528,9 @@ export function MyPicturesPage() {
                       disabled={shareComposerBusy || (shareComposerScope === 'selected' && shareComposerSelectedCount === 0)}
                     >
                       {shareComposerBusy ? 'Generating...' : 'Generate link'}
+                    </button>
+                    <button className="button ghost" type="button" onClick={closeShareComposer}>
+                      Cancel
                     </button>
                   </div>
                 </div>
