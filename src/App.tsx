@@ -1,28 +1,34 @@
+import { lazy, Suspense } from 'react'
 import { createHashRouter, RouterProvider } from 'react-router-dom'
 import './App.css'
 import { Layout } from './components/Layout.tsx'
 import { LegacyRedirect } from './components/LegacyRedirect.tsx'
-import { HomePage } from './pages/HomePage.tsx'
-import { BookPage } from './pages/BookPage.tsx'
-import { MyPicturesPage } from './pages/MyPicturesPage.tsx'
-import { UploadPage } from './pages/UploadPage.tsx'
-import { AdminClientsPage } from './pages/AdminClientsPage.tsx'
-import { AdminClientDetailPage } from './pages/AdminClientDetailPage.tsx'
-import { ShareViewPage } from './pages/ShareViewPage.tsx'
+
+const HomePage = lazy(() => import('./pages/HomePage.tsx').then((m) => ({ default: m.HomePage })))
+const BookPage = lazy(() => import('./pages/BookPage.tsx').then((m) => ({ default: m.BookPage })))
+const MyPicturesPage = lazy(() => import('./pages/MyPicturesPage.tsx').then((m) => ({ default: m.MyPicturesPage })))
+const UploadPage = lazy(() => import('./pages/UploadPage.tsx').then((m) => ({ default: m.UploadPage })))
+const AdminClientsPage = lazy(() => import('./pages/AdminClientsPage.tsx').then((m) => ({ default: m.AdminClientsPage })))
+const AdminClientDetailPage = lazy(() => import('./pages/AdminClientDetailPage.tsx').then((m) => ({ default: m.AdminClientDetailPage })))
+const ShareViewPage = lazy(() => import('./pages/ShareViewPage.tsx').then((m) => ({ default: m.ShareViewPage })))
+
+function LazyPage({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={<div className="portal-section"><p className="portal-hint">Loading...</p></div>}>{children}</Suspense>
+}
 
 const router = createHashRouter([
   {
     element: <Layout />,
     children: [
-      { path: '/', element: <HomePage /> },
-      { path: '/work', element: <HomePage sectionId="work" /> },
-      { path: '/about', element: <HomePage sectionId="about" /> },
-      { path: '/book', element: <BookPage /> },
-      { path: '/my-pictures', element: <MyPicturesPage /> },
-      { path: '/upload', element: <UploadPage /> },
-      { path: '/admin/clients', element: <AdminClientsPage /> },
-      { path: '/admin/clients/:clientId', element: <AdminClientDetailPage /> },
-      { path: '/share/:token', element: <ShareViewPage /> },
+      { path: '/', element: <LazyPage><HomePage /></LazyPage> },
+      { path: '/work', element: <LazyPage><HomePage sectionId="work" /></LazyPage> },
+      { path: '/about', element: <LazyPage><HomePage sectionId="about" /></LazyPage> },
+      { path: '/book', element: <LazyPage><BookPage /></LazyPage> },
+      { path: '/my-pictures', element: <LazyPage><MyPicturesPage /></LazyPage> },
+      { path: '/upload', element: <LazyPage><UploadPage /></LazyPage> },
+      { path: '/admin/clients', element: <LazyPage><AdminClientsPage /></LazyPage> },
+      { path: '/admin/clients/:clientId', element: <LazyPage><AdminClientDetailPage /></LazyPage> },
+      { path: '/share/:token', element: <LazyPage><ShareViewPage /></LazyPage> },
       { path: '*', element: <LegacyRedirect /> },
     ],
   },
