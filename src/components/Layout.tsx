@@ -3,6 +3,7 @@ import '../App.css'
 import { isSupabaseConfigured } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { personalInstagramUrl } from '../lib/constants'
+import { AdminDataProvider } from '../context/AdminDataContext.tsx'
 
 export function Layout() {
   const {
@@ -141,7 +142,9 @@ export function Layout() {
       </header>
 
       <main id="main-content">
-        <Outlet />
+        <AdminDataProvider>
+          <Outlet />
+        </AdminDataProvider>
       </main>
 
       <footer className="footer">
