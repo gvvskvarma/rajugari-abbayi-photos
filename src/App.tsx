@@ -4161,7 +4161,8 @@ function App() {
                 {session ? (
                   <>
                     <p className="auth-note">
-                      Logged in as <strong>{session.user.email}</strong> ({role})
+                      Logged in as <strong>{session.user.email}</strong>
+                      {role === 'admin' && ' (Admin)'}
                     </p>
                     <button className="button ghost" type="button" onClick={() => void handleSignOut()}>
                       Logout
