@@ -412,8 +412,8 @@ const buildR2SignedUrl = async (
   const kSigning = await hmacSha256(kService, 'aws4_request')
   const signature = toHex(await hmacSha256(kSigning, stringToSign).then((x) => x.buffer))
 
-  baseParams.set('X-Amz-Signature', signature)
-  return `https://${host}${canonicalUri}?${baseParams.toString()}`
+  const finalParams = `${canonicalQuery}&${encodeURIComponent('X-Amz-Signature')}=${signature}`
+  return `https://${host}${canonicalUri}?${finalParams}`
 }
 
 const resolvePreviewAccessContext = async (
