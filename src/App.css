@@ -2239,9 +2239,13 @@ main > section {
 
   .topbar-right {
     width: 100%;
-    justify-content: flex-start;
+    flex-direction: column;
+    align-items: stretch;
     gap: 8px;
-    flex-wrap: wrap;
+  }
+
+  .auth-box {
+    width: 100%;
   }
 
   .auth-menu {
@@ -2301,6 +2305,22 @@ main > section {
 
   .hero-actions .button {
     width: 100%;
+  }
+
+  .login-icon {
+    width: 100%;
+    justify-content: center;
+    gap: 8px;
+    min-height: 40px;
+    padding: 8px 12px;
+  }
+
+  .login-label {
+    max-width: 16ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.58rem;
   }
 
   .hero-cards {
