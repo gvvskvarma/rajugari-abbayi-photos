@@ -159,9 +159,52 @@
   padding: 14px;
 }
 
+.auth-mode-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.auth-mode-button {
+  border: 1px solid rgba(236, 232, 223, 0.16);
+  border-radius: 999px;
+  background: rgba(236, 232, 223, 0.05);
+  color: rgba(246, 242, 234, 0.86);
+  padding: 9px 12px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.auth-mode-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(209, 176, 127, 0.82);
+  background: linear-gradient(120deg, rgba(230, 207, 170, 0.96), rgba(209, 176, 127, 0.96));
+  color: #0f1118;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.22);
+}
+
+.auth-mode-button.is-active {
+  border-color: rgba(209, 176, 127, 0.8);
+  background: rgba(209, 176, 127, 0.15);
+  color: #f6f2ea;
+}
+
 .auth-form {
   display: grid;
   gap: 8px;
+}
+
+.auth-code-form {
+  padding-top: 2px;
 }
 
 .auth-form label,
@@ -2512,6 +2555,10 @@ main > section {
 
   .topbar-right {
     gap: 6px;
+  }
+
+  .auth-mode-toggle {
+    grid-template-columns: 1fr;
   }
 
   .login-icon {

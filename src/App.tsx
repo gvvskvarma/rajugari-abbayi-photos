@@ -676,6 +676,9 @@ function App() {
   const [cycleStep, setCycleStep] = useState(0)
   const [authMenuOpen, setAuthMenuOpen] = useState(false)
   const [emailInput, setEmailInput] = useState('')
+  const [authMode, setAuthMode] = useState<'link' | 'code'>('link')
+  const [authCode, setAuthCode] = useState('')
+  const [authCodeReady, setAuthCodeReady] = useState(false)
   const [authMessage, setAuthMessage] = useState('')
   const [authBusy, setAuthBusy] = useState(false)
   const [profileDisplayName, setProfileDisplayName] = useState('')
@@ -1010,6 +1013,14 @@ function App() {
       listener.subscription.unsubscribe()
     }
   }, [])
+
+  useEffect(() => {
+    if (!session) return
+    setAuthMenuOpen(false)
+    setAuthCode('')
+    setAuthCodeReady(false)
+    setAuthMessage('')
+  }, [session?.user.id])
 
   useEffect(() => {
     if (!supabase || !session?.user.id) return
@@ -1648,19 +1659,67 @@ function App() {
 
     setAuthBusy(true)
     setAuthMessage('')
+    setAuthCode('')
 
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: {
-        shouldCreateUser: true,
-        emailRedirectTo: authRedirectUrl,
-      },
+      options:
+        authMode === 'link'
+          ? {
+              shouldCreateUser: true,
+              emailRedirectTo: authRedirectUrl,
+            }
+          : {
+              shouldCreateUser: true,
+            },
     })
 
     if (error) {
       setAuthMessage(error.message)
     } else {
-      setAuthMessage('Magic link sent. Open your email to log in.')
+      if (authMode === 'link') {
+        setAuthMessage('Magic link sent. Open your email on the same device or another device.')
+        setAuthCodeReady(false)
+      } else {
+        setAuthMessage('Code sent. Open email on any device and enter the code here.')
+        setAuthCodeReady(true)
+      }
+    }
+
+    setAuthBusy(false)
+  }
+
+  const handleVerifyOtp = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!supabase) {
+      setAuthMessage('Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env to enable login.')
+      return
+    }
+
+    const email = emailInput.trim().toLowerCase()
+    const token = authCode.trim().replace(/\s+/g, '')
+    if (!email) {
+      setAuthMessage('Enter an email address first.')
+      return
+    }
+    if (!token) {
+      setAuthMessage('Enter the code from your email.')
+      return
+    }
+
+    setAuthBusy(true)
+    setAuthMessage('')
+
+    const { error } = await supabase.auth.verifyOtp({
+      email,
+      token,
+      type: 'email',
+    })
+
+    if (error) {
+      setAuthMessage(error.message)
+    } else {
+      setAuthMessage('Code verified. Finishing login...')
     }
 
     setAuthBusy(false)
@@ -1670,6 +1729,10 @@ function App() {
     if (!supabase) return
     await supabase.auth.signOut()
     setAuthMenuOpen(false)
+    setAuthMode('link')
+    setAuthCode('')
+    setAuthCodeReady(false)
+    setAuthMessage('')
     setMyDeliveries([])
     setNewShareLinks({})
     setAdminActivities([])
@@ -4120,6 +4183,39 @@ function App() {
                   </>
                 ) : (
                   <>
+                    <div className="auth-mode-toggle" role="tablist" aria-label="Choose login method">
+                      <button
+                        className={`auth-mode-button ${authMode === 'link' ? 'is-active' : ''}`}
+                        type="button"
+                        onClick={() => {
+                          setAuthMode('link')
+                          setAuthCode('')
+                          setAuthCodeReady(false)
+                          setAuthMessage('')
+                        }}
+                      >
+                        Magic link
+                      </button>
+                      <button
+                        className={`auth-mode-button ${authMode === 'code' ? 'is-active' : ''}`}
+                        type="button"
+                        onClick={() => {
+                          setAuthMode('code')
+                          setAuthCode('')
+                          setAuthCodeReady(false)
+                          setAuthMessage('')
+                        }}
+                      >
+                        Use code
+                      </button>
+                    </div>
+
+                    {authMode === 'code' && !authCodeReady && (
+                      <p className="auth-note">
+                        Code login needs the Supabase email template to send a one-time code.
+                      </p>
+                    )}
+
                     <form className="auth-form" onSubmit={handleSendOtp}>
                       <label>
                         Email
@@ -4132,9 +4228,35 @@ function App() {
                         />
                       </label>
                       <button className="button primary" type="submit" disabled={authBusy}>
-                        {authBusy ? 'Sending...' : 'Send Magic Link'}
+                        {authBusy
+                          ? 'Sending...'
+                          : authMode === 'link'
+                            ? 'Send Magic Link'
+                            : authCodeReady
+                              ? 'Resend Code'
+                              : 'Send Code'}
                       </button>
                     </form>
+
+                    {authMode === 'code' && authCodeReady && (
+                      <form className="auth-form auth-code-form" onSubmit={handleVerifyOtp}>
+                        <label>
+                          Code
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            autoComplete="one-time-code"
+                            value={authCode}
+                            onChange={(event) => setAuthCode(event.target.value)}
+                            placeholder="123456"
+                            required
+                          />
+                        </label>
+                        <button className="button primary" type="submit" disabled={authBusy}>
+                          {authBusy ? 'Verifying...' : 'Verify Code'}
+                        </button>
+                      </form>
+                    )}
                   </>
                 )}
 
