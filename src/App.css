@@ -2142,10 +2142,12 @@ main > section {
 
 @media (max-width: 980px) {
   .topbar {
-    top: 8px;
     width: min(calc(100% - 16px), 1440px);
+    margin-top: 8px;
     align-items: flex-start;
     flex-direction: column;
+    gap: 12px;
+    padding: 9px 12px;
   }
 
   .topbar-right {
@@ -2155,11 +2157,13 @@ main > section {
 
   .hero {
     grid-template-columns: 1fr;
+    gap: 18px;
   }
 
   .hero-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-auto-rows: 180px;
+    grid-auto-rows: 170px;
+    gap: 12px;
   }
 
   .hero-card.tall,
@@ -2170,38 +2174,74 @@ main > section {
   }
 
   .portal-section {
-    padding: 22px;
+    padding: 20px;
   }
 
   .work,
   .about,
   .contact {
-    padding: 20px;
+    padding: 18px;
   }
+
+  .work-block {
+    margin-top: 34px;
+  }
+
   .landscape-showcase-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
   }
 }
 
 @media (max-width: 680px) {
   main {
-    padding: 22px 4vw 70px;
-    gap: 56px;
+    padding: 18px 4vw 60px;
+    gap: 48px;
   }
 
   .topbar {
+    margin-top: 8px;
     width: min(calc(100% - 12px), 100%);
-    padding: 10px 12px;
-    border-radius: 20px;
+    padding: 8px 10px;
+    border-radius: 18px;
+    gap: 8px;
+  }
+
+  .brand {
+    gap: 10px;
+  }
+
+  .brand-mark {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
   }
 
   .brand-title {
-    font-size: 1.12rem;
+    font-size: 1rem;
+  }
+
+  .brand-subtitle {
+    font-size: 0.72rem;
   }
 
   .nav {
     width: 100%;
+    justify-content: center;
+    gap: 4px;
+  }
+
+  .nav a {
+    min-width: 66px;
+    padding: 6px 9px;
+    font-size: 0.62rem;
+  }
+
+  .topbar-right {
+    width: 100%;
     justify-content: flex-start;
+    gap: 8px;
+    flex-wrap: wrap;
   }
 
   .auth-menu {
@@ -2211,24 +2251,24 @@ main > section {
   }
 
   .portal-section {
-    padding: 16px;
-    border-radius: 22px;
+    padding: 14px;
+    border-radius: 20px;
   }
 
   .hero-text {
     min-height: 0;
-    padding: 16px;
+    padding: 14px;
   }
 
   .hero-text h1 {
-    font-size: clamp(1.9rem, 10vw, 2.6rem);
-    max-width: 9ch;
-    margin-bottom: 12px;
+    font-size: clamp(1.75rem, 10vw, 2.3rem);
+    max-width: 8.5ch;
+    margin-bottom: 10px;
   }
 
   .lead {
-    font-size: 0.92rem;
-    line-height: 1.6;
+    font-size: 0.9rem;
+    line-height: 1.55;
   }
 
   .eyebrow {
@@ -2238,23 +2278,25 @@ main > section {
   }
 
   .section-head h2 {
-    font-size: clamp(1.35rem, 6.5vw, 1.8rem);
+    font-size: clamp(1.25rem, 6vw, 1.7rem);
   }
 
   .section-head p {
-    font-size: 0.9rem;
-    line-height: 1.62;
+    font-size: 0.88rem;
+    line-height: 1.58;
   }
 
   .section-head {
     flex-direction: column;
     align-items: flex-start;
+    gap: 8px;
   }
 
   .hero-actions {
-    margin-top: 22px;
+    margin-top: 18px;
     flex-direction: column;
     width: 100%;
+    gap: 10px;
   }
 
   .hero-actions .button {
@@ -2263,25 +2305,26 @@ main > section {
 
   .hero-cards {
     grid-template-columns: 1fr;
-    grid-auto-rows: 190px;
-    gap: 10px;
+    grid-auto-rows: 170px;
+    gap: 8px;
   }
 
   .landscape-showcase {
-    gap: 10px;
+    gap: 8px;
+    margin-top: 18px;
   }
 
   .landscape-showcase-main {
-    aspect-ratio: 4 / 3;
+    aspect-ratio: 3 / 2;
   }
 
   .landscape-showcase-strip {
     grid-template-columns: 1fr;
-    gap: 10px;
+    gap: 8px;
   }
 
   .landscape-showcase-card {
-    aspect-ratio: 16 / 10;
+    aspect-ratio: 4 / 3;
   }
 
   .hero-card.tall,
@@ -2375,18 +2418,24 @@ main > section {
   .work,
   .about,
   .contact {
-    border-radius: 18px;
-    padding: 16px;
+    border-radius: 16px;
+    padding: 14px;
   }
 
-  .rotator-card {
-    min-height: 300px;
+  .about-card,
+  .contact-card {
+    padding: 16px;
   }
 
   .admin-client-card,
   .admin-project-card,
-  .customer-asset-card {
-    padding: 14px;
+  .customer-asset-card,
+  .admin-panel {
+    padding: 12px;
+  }
+
+  .rotator-card {
+    min-height: 260px;
   }
 
   .admin-confirm-modal {
@@ -2394,7 +2443,7 @@ main > section {
   }
 
   .admin-confirm-panel {
-    padding: 18px;
+    padding: 16px;
   }
 
   .admin-confirm-actions {
