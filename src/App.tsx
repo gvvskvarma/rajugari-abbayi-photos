@@ -32,6 +32,7 @@ import {
   getDisplayFileName,
   sanitizeDownloadName,
   collectDroppedUploadItems,
+  normalizeUploadItemPath,
 } from './lib/upload'
 import {
   ADMIN_ACTIVITY_LIMIT,
@@ -240,7 +241,6 @@ function App() {
   const {
     session,
     role,
-    profileDisplayName,
     loginLabel,
     authMenuOpen,
     setAuthMenuOpen,
