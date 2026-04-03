@@ -1,28 +1,39 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import type { CustomerLightboxState, DeliveryAsset, ShareLinkScope } from '../types'
+import type { CustomerLightboxState } from '../types'
 import { workerRequest } from '../hooks/useApi'
 import { getDisplayFileName } from '../lib/upload'
 import { getAssetKind, daysRemainingText } from '../lib/helpers'
 import { CustomerLightbox } from '../components/CustomerLightbox'
 import { SkeletonGrid } from '../components/Skeleton'
+import { useShareGallery } from '../hooks/queries/useShareGallery'
+import { useThumbnailBatch } from '../hooks/queries/useThumbnailBatch'
+import { usePreviewUrl } from '../hooks/queries/usePreviewUrl'
 
 export function ShareViewPage() {
   const { token } = useParams<{ token: string }>()
 
-  // ── Share view state ────────────────────────────────────────────────
-  const [shareAssets, setShareAssets] = useState<DeliveryAsset[]>([])
-  const [shareBusy, setShareBusy] = useState(false)
-  const [shareMessage, setShareMessage] = useState('')
-  const [shareDeliveryId, setShareDeliveryId] = useState('')
-  const [shareExpiresAt, setShareExpiresAt] = useState('')
-  const [shareLinkScope, setShareLinkScope] = useState<ShareLinkScope>('all')
-  const [sharePageCopyState, setSharePageCopyState] = useState('')
-  const [shareAssetPreviewUrls, setShareAssetPreviewUrls] = useState<Record<string, string>>({})
-  const [shareAssetThumbnailUrls, setShareAssetThumbnailUrls] = useState<Record<string, string>>({})
+  // ── Share gallery query ────────────────────────────────────────────
+  const galleryQuery = useShareGallery(token)
+  const shareAssets = galleryQuery.data?.assets ?? []
+  const shareDeliveryId = galleryQuery.data?.deliveryId ?? ''
+  const shareExpiresAt = galleryQuery.data?.expiresAt ?? ''
+  const shareLinkScope = galleryQuery.data?.scopeType ?? 'all'
+  const shareBusy = galleryQuery.isLoading
+  const shareMessage = galleryQuery.error instanceof Error ? galleryQuery.error.message : galleryQuery.error ? 'This share link is invalid or unavailable.' : ''
+
+  // ── Thumbnail batch query ──────────────────────────────────────────
+  const imageAssetIds = useMemo(
+    () => shareAssets.filter((a) => a.mime_type.startsWith('image/')).map((a) => a.id),
+    [shareAssets],
+  )
+  const thumbnailQuery = useThumbnailBatch(imageAssetIds, { shareToken: token })
+  const shareAssetThumbnailUrls = thumbnailQuery.data ?? {}
 
   // ── Customer lightbox state ─────────────────────────────────────────
   const [customerLightbox, setCustomerLightbox] = useState<CustomerLightboxState | null>(null)
+  const [sharePageCopyState, setSharePageCopyState] = useState('')
+  const [shareMessage2, setShareMessage2] = useState('')
 
   // ── Computed values ─────────────────────────────────────────────────
   const customerLightboxAssets = useMemo(() => {
@@ -36,130 +47,11 @@ export function ShareViewPage() {
   }, [customerLightbox, customerLightboxAssets])
 
   const customerLightboxAsset = customerLightboxIndex >= 0 ? customerLightboxAssets[customerLightboxIndex] : null
-  const customerPreviewUrls = shareAssetPreviewUrls
-  const customerThumbnailUrls = shareAssetThumbnailUrls
 
-  // ── Share view data loading ─────────────────────────────────────────
-  useEffect(() => {
-    if (!token) return
+  // ── Preview URL query (for lightbox) ───────────────────────────────
+  const previewQuery = usePreviewUrl(customerLightboxAsset?.id ?? '', { shareToken: token })
 
-    const loadShareView = async () => {
-      setShareBusy(true)
-      setShareMessage('')
-      setShareDeliveryId('')
-      setShareExpiresAt('')
-      setSharePageCopyState('')
-      setShareAssetPreviewUrls({})
-      setShareAssetThumbnailUrls({})
-
-      try {
-        const payload = await workerRequest<{
-          deliveryId: string
-          scopeType: ShareLinkScope
-          allowDownload: boolean
-          expiresAt: string
-          assets: DeliveryAsset[]
-        }>(`/api/v1/share-links/${encodeURIComponent(token)}/gallery`, '')
-
-        if (new Date(payload.expiresAt).getTime() <= Date.now()) {
-          setShareMessage('This share link has expired.')
-          setShareAssets([])
-          setShareDeliveryId('')
-          setShareExpiresAt('')
-          setShareAssetPreviewUrls({})
-          setShareAssetThumbnailUrls({})
-          setShareBusy(false)
-          return
-        }
-
-        setShareAssets(payload.assets ?? [])
-        setShareDeliveryId(payload.deliveryId)
-        setShareExpiresAt(payload.expiresAt)
-        setShareLinkScope(payload.scopeType ?? 'all')
-      } catch (error) {
-        setShareMessage(error instanceof Error ? error.message : 'This share link is invalid or unavailable.')
-        setShareAssets([])
-        setShareDeliveryId('')
-        setShareExpiresAt('')
-        setShareLinkScope('all')
-        setShareAssetPreviewUrls({})
-        setShareAssetThumbnailUrls({})
-      }
-      setShareBusy(false)
-    }
-
-    void loadShareView()
-  }, [token])
-
-  // ── Share thumbnail loading ─────────────────────────────────────────
-  useEffect(() => {
-    if (!token || shareAssets.length === 0) return
-
-    const missingThumbnailAssets = shareAssets.filter(
-      (asset) => asset.mime_type.startsWith('image/') && !shareAssetThumbnailUrls[asset.id],
-    )
-
-    if (missingThumbnailAssets.length === 0) return
-
-    let cancelled = false
-
-    const loadThumbnailUrls = async () => {
-      const payload = await workerRequest<{ urls: Record<string, string> }>(
-        '/api/v1/media/preview-url-batch',
-        '',
-        {
-          method: 'POST',
-          body: { assetIds: missingThumbnailAssets.map((asset) => asset.id), variant: 'thumb', shareToken: token },
-        },
-      )
-
-      if (cancelled) return
-      setShareAssetThumbnailUrls((current) => ({ ...current, ...(payload.urls ?? {}) }))
-    }
-
-    void loadThumbnailUrls()
-    return () => {
-      cancelled = true
-    }
-  }, [shareAssetThumbnailUrls, shareAssets, token])
-
-  // ── Customer lightbox preview URL loading ───────────────────────────
-  useEffect(() => {
-    if (!customerLightboxAsset) return
-    if (customerPreviewUrls[customerLightboxAsset.id]) return
-
-    let cancelled = false
-
-    const loadPreviewUrl = async () => {
-      try {
-        const payload = await workerRequest<{ signedUrl?: string; url?: string }>(
-          '/api/v1/media/signed-url',
-          '',
-          {
-            method: 'POST',
-            body: { assetId: customerLightboxAsset.id, mode: 'view', shareToken: token },
-          },
-        )
-
-        if (cancelled) return
-
-        const nextUrl = payload.signedUrl ?? payload.url
-        if (!nextUrl) return
-
-        setShareAssetPreviewUrls((current) => ({
-          ...current,
-          [customerLightboxAsset.id]: nextUrl,
-        }))
-      } catch {
-        // The lightbox can still fall back to the thumbnail while the preview URL is unavailable.
-      }
-    }
-
-    void loadPreviewUrl()
-    return () => {
-      cancelled = true
-    }
-  }, [customerLightboxAsset, customerPreviewUrls, token])
+  const displayMessage = shareMessage || shareMessage2
 
   // ── Handlers ────────────────────────────────────────────────────────
   const handleCopySharedGalleryLink = async () => {
@@ -184,7 +76,7 @@ export function ShareViewPage() {
       if (!nextUrl) throw new Error('Missing asset URL')
       window.open(nextUrl, '_blank', 'noopener,noreferrer')
     } catch (error) {
-      setShareMessage(error instanceof Error ? error.message : 'Unable to open file')
+      setShareMessage2(error instanceof Error ? error.message : 'Unable to open file')
     }
   }
 
@@ -244,13 +136,13 @@ export function ShareViewPage() {
       </div>
 
       {shareBusy && <SkeletonGrid count={8} />}
-      {shareMessage && <p className="portal-error">{shareMessage}</p>}
+      {displayMessage && <p className="portal-error">{displayMessage}</p>}
 
-      {!shareBusy && !shareMessage && shareAssets.length === 0 && (
+      {!shareBusy && !displayMessage && shareAssets.length === 0 && (
         <p className="portal-hint">No files are available in this shared gallery yet.</p>
       )}
 
-      {!shareBusy && !shareMessage && shareAssets.length > 0 && (
+      {!shareBusy && !displayMessage && shareAssets.length > 0 && (
         <div className="customer-asset-grid">
           {shareAssets.map((asset) => {
             const isImage = asset.mime_type.startsWith('image/')
@@ -308,8 +200,8 @@ export function ShareViewPage() {
       {customerLightboxAsset && customerLightbox && (
         <CustomerLightbox
           asset={customerLightboxAsset}
-          previewUrl={customerPreviewUrls[customerLightboxAsset.id]}
-          thumbnailUrl={customerThumbnailUrls[customerLightboxAsset.id]}
+          previewUrl={previewQuery.data ?? undefined}
+          thumbnailUrl={shareAssetThumbnailUrls[customerLightboxAsset.id]}
           index={customerLightboxIndex}
           total={customerLightboxAssets.length}
           onClose={closeCustomerLightbox}

@@ -1,25 +1,40 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { CustomerLightboxState, DeliveryCard, ShareLinkScope } from '../types'
+import { useMemo, useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import type { CustomerLightboxState, ShareLinkScope } from '../types'
 import { useAuth } from '../hooks/useAuth'
-import { workerRequest, loadWorkerBlob, triggerBrowserDownload } from '../hooks/useApi'
+import { loadWorkerBlob, triggerBrowserDownload, workerRequest } from '../hooks/useApi'
 import { getDisplayFileName, sanitizeDownloadName } from '../lib/upload'
 import { getAssetKind } from '../lib/helpers'
-import { supabase } from '../lib/supabase'
+import { useMyDeliveries } from '../hooks/queries/useMyDeliveries'
+import { useThumbnailBatch } from '../hooks/queries/useThumbnailBatch'
+import { usePreviewUrl } from '../hooks/queries/usePreviewUrl'
 import { CustomerLightbox } from '../components/CustomerLightbox'
 import { SkeletonCardList } from '../components/Skeleton'
 
 export function MyPicturesPage() {
   const { session, getAccessToken } = useAuth()
+  const email = session?.user.email
 
-  // ── Customer delivery state ──────────────────────────────────────────
-  const [myDeliveries, setMyDeliveries] = useState<DeliveryCard[]>([])
-  const [customerError, setCustomerError] = useState('')
-  const [customerBusy, setCustomerBusy] = useState(false)
+  // ── Query hooks ───────────────────────────────────────────────────────
+  const deliveriesQuery = useMyDeliveries(email)
+  const myDeliveries = deliveriesQuery.data ?? []
+
+  // Collect all image asset IDs for thumbnail batch loading
+  const imageAssetIds = useMemo(
+    () =>
+      myDeliveries
+        .flatMap((d) => d.assets)
+        .filter((a) => a.mime_type.startsWith('image/'))
+        .map((a) => a.id),
+    [myDeliveries],
+  )
+
+  const thumbnailQuery = useThumbnailBatch(imageAssetIds, { getAccessToken })
+  const customerThumbnailUrls = thumbnailQuery.data ?? {}
 
   // ── Unified selection state ──────────────────────────────────────────
   const [selectDeliveryId, setSelectDeliveryId] = useState('')
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([])
-  const [actionBusy, setActionBusy] = useState(false)
   const [actionMessage, setActionMessage] = useState('')
 
   // ── Share link result state ──────────────────────────────────────────
@@ -29,8 +44,10 @@ export function MyPicturesPage() {
 
   // ── Lightbox state ───────────────────────────────────────────────────
   const [customerLightbox, setCustomerLightbox] = useState<CustomerLightboxState | null>(null)
-  const [customerAssetPreviewUrls, setCustomerAssetPreviewUrls] = useState<Record<string, string>>({})
-  const [customerAssetThumbnailUrls, setCustomerAssetThumbnailUrls] = useState<Record<string, string>>({})
+
+  // Preview URL for the active lightbox asset
+  const lightboxAssetId = customerLightbox?.assetId ?? ''
+  const previewQuery = usePreviewUrl(lightboxAssetId, { getAccessToken })
 
   // ── Computed values ──────────────────────────────────────────────────
   const selectedAssetSet = useMemo(() => new Set(selectedAssetIds), [selectedAssetIds])
@@ -53,107 +70,108 @@ export function MyPicturesPage() {
   }, [customerLightbox, customerLightboxAssets])
 
   const customerLightboxAsset = customerLightboxIndex >= 0 ? customerLightboxAssets[customerLightboxIndex] : null
-  const customerPreviewUrls = customerAssetPreviewUrls
-  const customerThumbnailUrls = customerAssetThumbnailUrls
 
-  // ── Effects ──────────────────────────────────────────────────────────
+  const customerPreviewUrls: Record<string, string> = useMemo(() => {
+    if (!lightboxAssetId || !previewQuery.data) return {}
+    return { [lightboxAssetId]: previewQuery.data }
+  }, [lightboxAssetId, previewQuery.data])
 
-  // Load customer delivery data
-  useEffect(() => {
-    if (!supabase || !session?.user.email) return
+  // Derive loading/error from query states
+  const customerBusy = deliveriesQuery.isLoading
+  const customerError = deliveriesQuery.error
+    ? deliveriesQuery.error instanceof Error
+      ? deliveriesQuery.error.message
+      : 'Failed to load deliveries'
+    : ''
 
-    const loadCustomerData = async () => {
-      setCustomerBusy(true)
-      setCustomerError('')
-      try {
-        const token = await getAccessToken()
-        if (!token) {
-          setCustomerError('Login session expired. Please log in again.')
-          setMyDeliveries([])
-          setCustomerBusy(false)
-          return
-        }
-        const payload = await workerRequest<{ deliveries: DeliveryCard[] }>('/api/v1/my-pictures', token)
-        setMyDeliveries(payload.deliveries ?? [])
-      } catch (error) {
-        setCustomerError(error instanceof Error ? error.message : 'Failed to load deliveries')
-      } finally {
-        setCustomerBusy(false)
-      }
-    }
+  // ── Mutations ────────────────────────────────────────────────────────
 
-    void loadCustomerData()
-  }, [session?.user.email])
-
-  // Load customer thumbnails (batch)
-  useEffect(() => {
-    if (!supabase || !session?.user.id || myDeliveries.length === 0) return
-
-    const missingThumbnailAssets = myDeliveries
-      .flatMap((delivery) => delivery.assets.map((asset) => ({ deliveryId: delivery.deliveryId, asset })))
-      .filter(
-        ({ asset }) => asset.mime_type.startsWith('image/') && !customerAssetThumbnailUrls[asset.id],
-      )
-
-    if (missingThumbnailAssets.length === 0) return
-
-    let cancelled = false
-
-    const loadThumbnailUrls = async () => {
+  const downloadAllMutation = useMutation({
+    mutationFn: async (deliveryId: string) => {
       const token = await getAccessToken()
-      if (!token) return
-
-      const payload = await workerRequest<{ urls: Record<string, string> }>('/api/v1/media/preview-url-batch', token, {
+      if (!token) throw new Error('Login session expired. Please log in again.')
+      const delivery = myDeliveries.find((d) => d.deliveryId === deliveryId)
+      const blob = await loadWorkerBlob(`/api/v1/deliveries/${deliveryId}/download`, token, {
         method: 'POST',
-        body: { assetIds: missingThumbnailAssets.map(({ asset }) => asset.id), variant: 'thumb' },
+        body: {},
       })
+      const name = sanitizeDownloadName(delivery?.projectName || delivery?.clientName || 'photos')
+      triggerBrowserDownload(blob, `${name}.zip`)
+    },
+    onError: (error: Error) => {
+      setActionMessage(error.message)
+    },
+  })
 
-      if (cancelled) return
-      setCustomerAssetThumbnailUrls((current) => ({ ...current, ...(payload.urls ?? {}) }))
-    }
+  const downloadSelectedMutation = useMutation({
+    mutationFn: async ({ deliveryId, assetIds }: { deliveryId: string; assetIds: string[] }) => {
+      const token = await getAccessToken()
+      if (!token) throw new Error('Login session expired. Please log in again.')
+      const delivery = myDeliveries.find((d) => d.deliveryId === deliveryId)
+      const blob = await loadWorkerBlob(`/api/v1/deliveries/${deliveryId}/download`, token, {
+        method: 'POST',
+        body: { assetIds },
+      })
+      const name = sanitizeDownloadName(delivery?.projectName || delivery?.clientName || 'photos')
+      triggerBrowserDownload(blob, `${name}-selected.zip`)
+    },
+    onSuccess: () => exitSelectMode(),
+    onError: (error: Error) => {
+      setActionMessage(error.message)
+    },
+  })
 
-    void loadThumbnailUrls()
-    return () => {
-      cancelled = true
-    }
-  }, [customerAssetThumbnailUrls, myDeliveries, session?.user.id])
+  const shareAllMutation = useMutation({
+    mutationFn: async (deliveryId: string) => {
+      const token = await getAccessToken()
+      if (!token) throw new Error('Login session expired. Please log in again.')
+      const payload = await workerRequest<{ url: string; scopeType: ShareLinkScope }>(
+        '/api/v1/share-links',
+        token,
+        { method: 'POST', body: { deliveryId, expiresInDays: 7, scope: 'all', assetIds: [] } },
+      )
+      return { deliveryId, url: payload.url, scopeType: payload.scopeType ?? 'all' as ShareLinkScope }
+    },
+    onSuccess: ({ deliveryId, url, scopeType }) => {
+      setNewShareLinks((current) => ({ ...current, [deliveryId]: url }))
+      setNewShareLinkScopes((current) => ({ ...current, [deliveryId]: scopeType }))
+      setShareCopyState((current) => ({ ...current, [deliveryId]: '' }))
+    },
+    onError: (error: Error) => {
+      setActionMessage(error.message)
+    },
+  })
 
-  // Load lightbox preview URL
-  useEffect(() => {
-    if (!customerLightboxAsset) return
-    if (customerPreviewUrls[customerLightboxAsset.id]) return
-
-    let cancelled = false
-
-    const loadPreviewUrl = async () => {
-      try {
-        if (!supabase || !session?.user.id) return
-        const token = await getAccessToken()
-        if (!token) return
-        const payload = await workerRequest<{ url: string }>('/api/v1/media/preview-url', token, {
+  const shareSelectedMutation = useMutation({
+    mutationFn: async ({ deliveryId, assetIds }: { deliveryId: string; assetIds: string[] }) => {
+      const token = await getAccessToken()
+      if (!token) throw new Error('Login session expired. Please log in again.')
+      const payload = await workerRequest<{ url: string; scopeType: ShareLinkScope }>(
+        '/api/v1/share-links',
+        token,
+        {
           method: 'POST',
-          body: { assetId: customerLightboxAsset.id },
-        })
+          body: { deliveryId, expiresInDays: 7, scope: 'selected', assetIds: [...new Set(assetIds)] },
+        },
+      )
+      return { deliveryId, url: payload.url, scopeType: payload.scopeType ?? 'selected' as ShareLinkScope }
+    },
+    onSuccess: ({ deliveryId, url, scopeType }) => {
+      setNewShareLinks((current) => ({ ...current, [deliveryId]: url }))
+      setNewShareLinkScopes((current) => ({ ...current, [deliveryId]: scopeType }))
+      setShareCopyState((current) => ({ ...current, [deliveryId]: '' }))
+      exitSelectMode()
+    },
+    onError: (error: Error) => {
+      setActionMessage(error.message)
+    },
+  })
 
-        if (cancelled || !payload) return
-
-        const nextUrl = payload.url
-        if (!nextUrl) return
-
-        setCustomerAssetPreviewUrls((current) => ({
-          ...current,
-          [customerLightboxAsset.id]: nextUrl,
-        }))
-      } catch {
-        // The lightbox can still fall back to the thumbnail while the preview URL is unavailable.
-      }
-    }
-
-    void loadPreviewUrl()
-    return () => {
-      cancelled = true
-    }
-  }, [customerLightboxAsset, customerPreviewUrls, session?.user.id])
+  const actionBusy =
+    downloadAllMutation.isPending ||
+    downloadSelectedMutation.isPending ||
+    shareAllMutation.isPending ||
+    shareSelectedMutation.isPending
 
   // ── Unified selection handlers ──────────────────────────────────────
 
@@ -185,107 +203,24 @@ export function MyPicturesPage() {
 
   // ── Download handlers ───────────────────────────────────────────────
 
-  const handleDownloadAll = async (deliveryId: string) => {
-    try {
-      const token = await getAccessToken()
-      if (!token) {
-        setCustomerError('Login session expired. Please log in again.')
-        return
-      }
-      setActionBusy(true)
-      const delivery = myDeliveries.find((d) => d.deliveryId === deliveryId)
-      const blob = await loadWorkerBlob(`/api/v1/deliveries/${deliveryId}/download`, token, {
-        method: 'POST',
-        body: {},
-      })
-      const name = sanitizeDownloadName(delivery?.projectName || delivery?.clientName || 'photos')
-      triggerBrowserDownload(blob, `${name}.zip`)
-    } catch (error) {
-      setCustomerError(error instanceof Error ? error.message : 'Download failed')
-    } finally {
-      setActionBusy(false)
-    }
+  const handleDownloadAll = (deliveryId: string) => {
+    downloadAllMutation.mutate(deliveryId)
   }
 
-  const handleDownloadSelected = async () => {
+  const handleDownloadSelected = () => {
     if (selectedAssetIds.length === 0 || !selectDeliveryId) return
-    try {
-      const token = await getAccessToken()
-      if (!token) {
-        setCustomerError('Login session expired. Please log in again.')
-        return
-      }
-      setActionBusy(true)
-      const delivery = myDeliveries.find((d) => d.deliveryId === selectDeliveryId)
-      const blob = await loadWorkerBlob(`/api/v1/deliveries/${selectDeliveryId}/download`, token, {
-        method: 'POST',
-        body: { assetIds: selectedAssetIds },
-      })
-      const name = sanitizeDownloadName(delivery?.projectName || delivery?.clientName || 'photos')
-      triggerBrowserDownload(blob, `${name}-selected.zip`)
-      exitSelectMode()
-    } catch (error) {
-      setCustomerError(error instanceof Error ? error.message : 'Download failed')
-    } finally {
-      setActionBusy(false)
-    }
+    downloadSelectedMutation.mutate({ deliveryId: selectDeliveryId, assetIds: selectedAssetIds })
   }
 
   // ── Share link handlers ─────────────────────────────────────────────
 
-  const handleShareAll = async (deliveryId: string) => {
-    if (!supabase || !session?.user.id) return
-    try {
-      setActionBusy(true)
-      setActionMessage('')
-      const token = await getAccessToken()
-      if (!token) {
-        setCustomerError('Login session expired. Please log in again.')
-        return
-      }
-      const payload = await workerRequest<{ url: string; scopeType: ShareLinkScope }>(
-        '/api/v1/share-links',
-        token,
-        { method: 'POST', body: { deliveryId, expiresInDays: 7, scope: 'all', assetIds: [] } },
-      )
-      setNewShareLinks((current) => ({ ...current, [deliveryId]: payload.url }))
-      setNewShareLinkScopes((current) => ({ ...current, [deliveryId]: payload.scopeType ?? 'all' }))
-      setShareCopyState((current) => ({ ...current, [deliveryId]: '' }))
-    } catch (error) {
-      setCustomerError(error instanceof Error ? error.message : 'Unable to create share link')
-    } finally {
-      setActionBusy(false)
-    }
+  const handleShareAll = (deliveryId: string) => {
+    shareAllMutation.mutate(deliveryId)
   }
 
-  const handleShareSelected = async () => {
+  const handleShareSelected = () => {
     if (selectedAssetIds.length === 0 || !selectDeliveryId) return
-    if (!supabase || !session?.user.id) return
-    try {
-      setActionBusy(true)
-      setActionMessage('')
-      const token = await getAccessToken()
-      if (!token) {
-        setCustomerError('Login session expired. Please log in again.')
-        return
-      }
-      const payload = await workerRequest<{ url: string; scopeType: ShareLinkScope }>(
-        '/api/v1/share-links',
-        token,
-        {
-          method: 'POST',
-          body: { deliveryId: selectDeliveryId, expiresInDays: 7, scope: 'selected', assetIds: [...new Set(selectedAssetIds)] },
-        },
-      )
-      setNewShareLinks((current) => ({ ...current, [selectDeliveryId]: payload.url }))
-      setNewShareLinkScopes((current) => ({ ...current, [selectDeliveryId]: payload.scopeType ?? 'selected' }))
-      setShareCopyState((current) => ({ ...current, [selectDeliveryId]: '' }))
-      exitSelectMode()
-    } catch (error) {
-      setCustomerError(error instanceof Error ? error.message : 'Unable to create share link')
-    } finally {
-      setActionBusy(false)
-    }
+    shareSelectedMutation.mutate({ deliveryId: selectDeliveryId, assetIds: selectedAssetIds })
   }
 
   const handleCopyShareLink = async (deliveryId: string) => {
@@ -302,11 +237,10 @@ export function MyPicturesPage() {
   // ── Asset open handler ───────────────────────────────────────────────
 
   const handleOpenAsset = async (assetId: string, mode: 'view' | 'download') => {
-    if (!supabase) return
     try {
       const token = await getAccessToken()
       if (!token) {
-        setCustomerError('Login session expired. Please log in again.')
+        setActionMessage('Login session expired. Please log in again.')
         return
       }
 
@@ -319,7 +253,7 @@ export function MyPicturesPage() {
       if (!nextUrl) throw new Error('Missing asset URL')
       window.open(nextUrl, '_blank', 'noopener,noreferrer')
     } catch (error) {
-      setCustomerError(error instanceof Error ? error.message : 'Unable to open file')
+      setActionMessage(error instanceof Error ? error.message : 'Unable to open file')
     }
   }
 
@@ -343,7 +277,7 @@ export function MyPicturesPage() {
 
   // ── Auth guard ───────────────────────────────────────────────────────
 
-  if (!session?.user.email) {
+  if (!email) {
     return (
       <section className="portal-section">
         <h2>My Pictures</h2>
@@ -359,7 +293,7 @@ export function MyPicturesPage() {
       <div className="portal-head">
         <div>
           <h2>My Pictures</h2>
-          <p>Media matched to <strong>{session.user.email}</strong>. Tap a photo to open it full screen.</p>
+          <p>Media matched to <strong>{email}</strong>. Tap a photo to open it full screen.</p>
         </div>
         <div className="customer-summary-strip">
           <div className="admin-stat-card">
@@ -422,7 +356,7 @@ export function MyPicturesPage() {
                       <button
                         className="button ghost"
                         type="button"
-                        onClick={() => { void handleDownloadSelected() }}
+                        onClick={handleDownloadSelected}
                         disabled={actionBusy || selectedCount === 0}
                       >
                         {actionBusy ? 'Working...' : `Download selected (${selectedCount})`}
@@ -430,7 +364,7 @@ export function MyPicturesPage() {
                       <button
                         className="button ghost"
                         type="button"
-                        onClick={() => { void handleShareSelected() }}
+                        onClick={handleShareSelected}
                         disabled={actionBusy || selectedCount === 0}
                       >
                         {actionBusy ? 'Working...' : `Create share link with selected files (${selectedCount})`}
@@ -445,7 +379,7 @@ export function MyPicturesPage() {
                         className="button ghost"
                         type="button"
                         disabled={actionBusy}
-                        onClick={() => { void handleDownloadAll(delivery.deliveryId) }}
+                        onClick={() => handleDownloadAll(delivery.deliveryId)}
                       >
                         Download all
                       </button>
@@ -461,7 +395,7 @@ export function MyPicturesPage() {
                         className="button ghost"
                         type="button"
                         disabled={actionBusy}
-                        onClick={() => { void handleShareAll(delivery.deliveryId) }}
+                        onClick={() => handleShareAll(delivery.deliveryId)}
                       >
                         Share all
                       </button>

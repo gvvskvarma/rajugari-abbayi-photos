@@ -1,16 +1,13 @@
-import { useCallback, useEffect, useReducer, useState } from 'react'
-import type { AdminActivityItem } from '../types'
+import { useCallback, useState } from 'react'
+import type { AdminActivityItem, AdminActivityKind } from '../types'
 import { useAuth } from '../hooks/useAuth'
-import { workerRequest } from '../hooks/useApi'
 import { useAdminData } from '../context/AdminDataContext.tsx'
-import { ADMIN_ACTIVITY_LIMIT } from '../lib/helpers'
-import { supabase } from '../lib/supabase'
+import { useAdminActivity } from '../hooks/queries/useAdminActivity'
 import { AdminActivityPanel } from '../components/AdminActivityPanel'
-import { adminActivityReducer, createAdminActivityInitialState } from '../reducers/adminActivityReducer'
 import { SkeletonCardList } from '../components/Skeleton'
 
 export function AdminClientsPage() {
-  const { session, role, getAccessToken } = useAuth()
+  const { session, role } = useAuth()
   const {
     adminClients,
     adminBusy,
@@ -21,53 +18,10 @@ export function AdminClientsPage() {
   } = useAdminData()
 
   const [adminClientSearch, setAdminClientSearch] = useState('')
-  const [activityState, activityDispatch] = useReducer(adminActivityReducer, true, createAdminActivityInitialState)
+  const [kindFilter, setKindFilter] = useState<'all' | AdminActivityKind>('all')
+  const [expanded, setExpanded] = useState(true)
 
-  // --- Load admin activity on mount ---
-
-  useEffect(() => {
-    if (!supabase || !session?.user.id || role !== 'admin') return
-
-    let cancelled = false
-
-    const loadAdminActivity = async () => {
-      activityDispatch({ type: 'SET_BUSY', busy: true })
-      activityDispatch({ type: 'SET_ERROR', error: '' })
-
-      try {
-        const token = await getAccessToken()
-        if (cancelled) return
-        if (!token) {
-          activityDispatch({ type: 'SET_ERROR', error: 'Login session expired. Please log in again.' })
-          return
-        }
-
-        const params = new URLSearchParams({ limit: String(ADMIN_ACTIVITY_LIMIT) })
-
-        const payload = await workerRequest<{ activities: AdminActivityItem[] }>(
-          `/api/v1/admin/activity?${params.toString()}`,
-          token
-        )
-        if (!cancelled) {
-          activityDispatch({ type: 'SET_ACTIVITIES', activities: payload.activities ?? [] })
-        }
-      } catch (error) {
-        if (!cancelled) {
-          activityDispatch({ type: 'SET_ERROR', error: error instanceof Error ? error.message : 'Failed to load activity trail' })
-        }
-      } finally {
-        if (!cancelled) {
-          activityDispatch({ type: 'SET_BUSY', busy: false })
-        }
-      }
-    }
-
-    void loadAdminActivity()
-
-    return () => {
-      cancelled = true
-    }
-  }, [role, session?.user.id, getAccessToken])
+  const { data: activities = [], isLoading: activityBusy, error: activityError } = useAdminActivity()
 
   // --- Computed values ---
 
@@ -151,13 +105,13 @@ export function AdminClientsPage() {
 
       <AdminActivityPanel
         title="Recent activity"
-        activities={activityState.activities}
-        busy={activityState.busy}
-        error={activityState.error}
-        kindFilter={activityState.kindFilter}
-        onKindFilterChange={(filter) => activityDispatch({ type: 'SET_KIND_FILTER', filter })}
-        expanded={activityState.expanded}
-        onToggleExpanded={() => activityDispatch({ type: 'TOGGLE_EXPANDED' })}
+        activities={activities}
+        busy={activityBusy}
+        error={activityError instanceof Error ? activityError.message : activityError ? String(activityError) : ''}
+        kindFilter={kindFilter}
+        onKindFilterChange={setKindFilter}
+        expanded={expanded}
+        onToggleExpanded={() => setExpanded((prev) => !prev)}
         getContext={getAdminActivityContext}
       />
 

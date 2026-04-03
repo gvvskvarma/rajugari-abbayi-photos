@@ -7,10 +7,12 @@ import { supabase } from '../lib/supabase'
 import { buildUploadQueueGroups, collectDroppedUploadItems } from '../lib/upload'
 import { randomToken } from '../lib/helpers'
 import { uploadFormReducer, uploadFormInitialState } from '../reducers/uploadFormReducer'
+import { queryClient } from '../lib/queryClient'
+import { queryKeys } from '../lib/queryKeys'
 
 export function UploadPage() {
   const { session, role, getAccessToken } = useAuth()
-  const { adminClients, loadAdminData, recordAdminActivity, adminBusy, adminError } = useAdminData()
+  const { adminClients, recordAdminActivity, adminBusy, adminError } = useAdminData()
 
   const [state, dispatch] = useReducer(uploadFormReducer, uploadFormInitialState)
   const { clientMode: uploadClientMode, email: uploadEmail, reuseSearch: uploadReuseSearch, title: uploadTitle, items: uploadItems, dropActive: uploadDropActive, busy: uploadBusy, message: uploadMessage } = state
@@ -293,7 +295,7 @@ export function UploadPage() {
     dispatch({ type: 'RESET' })
     dispatch({ type: 'SET_MESSAGE', message: `Upload complete for ${targetEmail}. Opening the client folder now.` })
     window.location.hash = '#/admin/clients/' + clientId
-    void loadAdminData()
+    void queryClient.invalidateQueries({ queryKey: queryKeys.adminClients(session.user.id) })
   }
 
   if (!session?.user.id) {
