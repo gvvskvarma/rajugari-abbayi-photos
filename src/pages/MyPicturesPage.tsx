@@ -546,7 +546,7 @@ export function MyPicturesPage() {
                         onClick={() => { void handleDownloadSelected() }}
                         disabled={actionBusy || selectedCount === 0}
                       >
-                        {actionBusy ? 'Working...' : `Download (${selectedCount})`}
+                        {actionBusy ? 'Working...' : `Download selected (${selectedCount})`}
                       </button>
                       <button
                         className="button ghost"
@@ -554,7 +554,7 @@ export function MyPicturesPage() {
                         onClick={() => { void handleShareSelected() }}
                         disabled={actionBusy || selectedCount === 0}
                       >
-                        {actionBusy ? 'Working...' : `Share (${selectedCount})`}
+                        {actionBusy ? 'Working...' : `Create share link with selected files (${selectedCount})`}
                       </button>
                       <button className="button ghost" type="button" onClick={exitSelectMode} disabled={actionBusy}>
                         Cancel
