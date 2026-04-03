@@ -28,6 +28,17 @@ type PreviewTokenPayload = {
   expiresAt: string
 }
 
+type DownloadTokenPayload = {
+  v: 1
+  assetId: string
+  deliveryId: string
+  r2ObjectKey: string
+  filename: string
+  mimeType: string
+  issuedAt: string
+  expiresAt: string
+}
+
 type PreviewAccessContext =
   | {
       kind: 'share'
@@ -284,6 +295,37 @@ const verifyPreviewToken = async (secret: string, token: string): Promise<Previe
 
   if (new Date(payload.expiresAt).getTime() <= Date.now()) {
     throw new Error('Preview token expired')
+  }
+
+  return payload
+}
+
+const downloadTokenVersion = 'dt1'
+
+const createDownloadToken = async (secret: string, payload: DownloadTokenPayload) => {
+  const payloadB64 = base64UrlEncode(JSON.stringify(payload))
+  const signature = await signToken(downloadTokenVersion, secret, payloadB64)
+  return `${downloadTokenVersion}.${payloadB64}.${signature}`
+}
+
+const verifyDownloadToken = async (secret: string, token: string): Promise<DownloadTokenPayload> => {
+  const [version, payloadB64, signature] = token.split('.')
+  if (version !== downloadTokenVersion || !payloadB64 || !signature) {
+    throw new Error('Invalid download token')
+  }
+
+  const expectedSignature = await signToken(downloadTokenVersion, secret, payloadB64)
+  if (expectedSignature !== signature) {
+    throw new Error('Invalid download token')
+  }
+
+  const payload = JSON.parse(base64UrlDecode(payloadB64)) as DownloadTokenPayload
+  if (!payload.v || !payload.assetId || !payload.deliveryId || !payload.r2ObjectKey || !payload.issuedAt || !payload.expiresAt) {
+    throw new Error('Invalid download token')
+  }
+
+  if (new Date(payload.expiresAt).getTime() <= Date.now()) {
+    throw new Error('Download token expired')
   }
 
   return payload
@@ -1422,10 +1464,10 @@ app.post('/api/v1/media/signed-url', async (c) => {
     if (!body.assetId) return jsonError('assetId is required', 400)
 
     const assets = await supabaseRequest<
-      Array<{ id: string; delivery_id: string | null; r2_object_key: string; mime_type: string }>
+      Array<{ id: string; delivery_id: string | null; r2_object_key: string; mime_type: string; filename: string }>
     >(
       c.env,
-      `assets?id=eq.${encodeURIComponent(body.assetId)}&select=id,delivery_id,r2_object_key,mime_type&limit=1`
+      `assets?id=eq.${encodeURIComponent(body.assetId)}&select=id,delivery_id,r2_object_key,mime_type,filename&limit=1`
     )
 
     const asset = assets[0]
@@ -1471,6 +1513,22 @@ app.post('/api/v1/media/signed-url', async (c) => {
         return jsonError('File missing in storage for this asset. Re-upload required.', 404)
       }
 
+      if (mode === 'download') {
+        const origin = new URL(c.req.url).origin
+        const downloadToken = await createDownloadToken(c.env.SUPABASE_SERVICE_ROLE_KEY, {
+          v: 1,
+          assetId: asset.id,
+          deliveryId,
+          r2ObjectKey: asset.r2_object_key,
+          filename: asset.filename,
+          mimeType: asset.mime_type,
+          issuedAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+        })
+        const signedUrl = `${origin}/api/v1/media/download?token=${encodeURIComponent(downloadToken)}`
+        return c.json({ signedUrl, expiresInSeconds: 300, mode }, 200, responseHeaders(c))
+      }
+
       const signedUrl = await buildR2SignedUrl(c.env, 'GET', asset.r2_object_key, 300, mode)
       return c.json({ signedUrl, expiresInSeconds: 300, mode }, 200, responseHeaders(c))
     }
@@ -1493,6 +1551,22 @@ app.post('/api/v1/media/signed-url', async (c) => {
     const objectHead = await c.env.R2_MEDIA_BUCKET.head(asset.r2_object_key)
     if (!objectHead) {
       return jsonError('File missing in storage for this asset. Re-upload required.', 404)
+    }
+
+    if (mode === 'download') {
+      const origin = new URL(c.req.url).origin
+      const downloadToken = await createDownloadToken(c.env.SUPABASE_SERVICE_ROLE_KEY, {
+        v: 1,
+        assetId: asset.id,
+        deliveryId,
+        r2ObjectKey: asset.r2_object_key,
+        filename: asset.filename,
+        mimeType: asset.mime_type,
+        issuedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      })
+      const signedUrl = `${origin}/api/v1/media/download?token=${encodeURIComponent(downloadToken)}`
+      return c.json({ signedUrl, expiresInSeconds: 300, mode }, 200, responseHeaders(c))
     }
 
     const signedUrl = await buildR2SignedUrl(c.env, 'GET', asset.r2_object_key, 300, mode)
@@ -1582,6 +1656,34 @@ app.get('/api/v1/media/preview', async (c) => {
     })
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Preview failed', 400)
+  }
+})
+
+app.get('/api/v1/media/download', async (c) => {
+  try {
+    const token = c.req.query('token')
+    if (!token) return jsonError('token is required', 400)
+
+    const payload = await verifyDownloadToken(c.env.SUPABASE_SERVICE_ROLE_KEY, token)
+
+    const object = await c.env.R2_MEDIA_BUCKET.get(payload.r2ObjectKey)
+    if (!object) {
+      return jsonError('File missing in storage. Re-upload required.', 404)
+    }
+
+    const safeFilename = (payload.filename || 'download').replace(/[^\w.\-() ]/g, '_')
+
+    return new Response(object.body, {
+      status: 200,
+      headers: {
+        ...responseHeaders(c),
+        'content-type': object.httpMetadata?.contentType ?? payload.mimeType ?? 'application/octet-stream',
+        'content-disposition': `attachment; filename="${safeFilename}"`,
+        'cache-control': 'private, no-cache',
+      },
+    })
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Download failed', 400)
   }
 })
 
@@ -1704,6 +1806,61 @@ app.post('/api/v1/admin/projects/:projectId/download', async (c) => {
     return streamZipResponse(c, assets, `${sanitizeArchiveEntryName(project.name)}.zip`)
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Project download failed', 400)
+  }
+})
+
+app.post('/api/v1/deliveries/:deliveryId/download', async (c) => {
+  try {
+    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
+    const deliveryId = c.req.param('deliveryId')
+    if (!deliveryId) return jsonError('deliveryId is required', 400)
+
+    await ensureDeliveryAccess(c.env, user, deliveryId, 'download')
+
+    const body = await c.req.json<{ assetIds?: string[] }>()
+    const requestedIds = body.assetIds && body.assetIds.length > 0
+      ? [...new Set(body.assetIds.filter((id) => typeof id === 'string' && id.trim()))]
+      : null
+
+    const assetRules = await getDeliveryAssetRules(c.env, deliveryId)
+    const downloadableAssetIds = [...assetRules.values()]
+      .filter((rule) => rule.canDownload)
+      .map((rule) => rule.assetId)
+
+    if (downloadableAssetIds.length === 0) return jsonError('No downloadable assets', 404)
+
+    const targetIds = requestedIds
+      ? requestedIds.filter((id) => downloadableAssetIds.includes(id))
+      : downloadableAssetIds
+
+    if (targetIds.length === 0) return jsonError('No matching downloadable assets', 404)
+
+    const assetFilter = targetIds.map((id) => `id.eq.${id}`).join(',')
+    const assets = await supabaseRequest<
+      Array<{ id: string; filename: string; r2_object_key: string }>
+    >(
+      c.env,
+      `assets?or=(${assetFilter})&select=id,filename,r2_object_key&order=created_at.asc`
+    )
+    const uploadedAssets = assets.filter((asset) => !asset.r2_object_key.startsWith('pending/'))
+    if (uploadedAssets.length === 0) return jsonError('No files available for download', 404)
+
+    const requesterIp = c.req.header('CF-Connecting-IP')
+    const ipHash = requesterIp ? await sha256Hex(requesterIp) : null
+    for (const asset of uploadedAssets) {
+      await logDownloadEvent(c.env, {
+        deliveryId,
+        assetId: asset.id,
+        requesterProfileId: user.id,
+        ipHash,
+        userAgent: c.req.header('User-Agent') ?? null,
+      })
+    }
+
+    const archiveName = `photos-${deliveryId.slice(0, 8)}.zip`
+    return streamZipResponse(c, uploadedAssets, archiveName)
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Download failed', 400)
   }
 })
 

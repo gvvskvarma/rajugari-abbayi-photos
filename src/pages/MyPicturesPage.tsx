@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CustomerLightboxState, DeliveryCard, ShareLinkScope } from '../types'
 import { useAuth } from '../hooks/useAuth'
-import { workerRequest } from '../hooks/useApi'
-import { getDisplayFileName } from '../lib/upload'
+import { workerRequest, loadWorkerBlob, triggerBrowserDownload } from '../hooks/useApi'
+import { getDisplayFileName, sanitizeDownloadName } from '../lib/upload'
 import { getAssetKind } from '../lib/helpers'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import { supabase } from '../lib/supabase'
@@ -25,6 +25,11 @@ export function MyPicturesPage() {
   const [shareComposerBusy, setShareComposerBusy] = useState(false)
   const [shareComposerMessage, setShareComposerMessage] = useState('')
 
+  // ── Download selection state ──────────────────────────────────────────
+  const [downloadSelectDeliveryId, setDownloadSelectDeliveryId] = useState('')
+  const [downloadSelectedAssetIds, setDownloadSelectedAssetIds] = useState<string[]>([])
+  const [downloadBusy, setDownloadBusy] = useState(false)
+
   // ── Lightbox state ───────────────────────────────────────────────────
   const [customerLightbox, setCustomerLightbox] = useState<CustomerLightboxState | null>(null)
   const [customerAssetPreviewUrls, setCustomerAssetPreviewUrls] = useState<Record<string, string>>({})
@@ -43,6 +48,12 @@ export function MyPicturesPage() {
     () => new Set(shareComposerSelectedAssetIds),
     [shareComposerSelectedAssetIds],
   )
+
+  const downloadSelectedAssetSet = useMemo(
+    () => new Set(downloadSelectedAssetIds),
+    [downloadSelectedAssetIds],
+  )
+  const downloadSelectedCount = downloadSelectedAssetIds.length
 
   const customerVisibleAssets = useMemo(
     () => myDeliveries.flatMap((delivery) => delivery.assets),
@@ -304,6 +315,79 @@ export function MyPicturesPage() {
     }
   }
 
+  // ── Download selection handlers ────────────────────────────────────────
+
+  const startDownloadSelect = (deliveryId: string) => {
+    setDownloadSelectDeliveryId(deliveryId)
+    setDownloadSelectedAssetIds([])
+  }
+
+  const cancelDownloadSelect = () => {
+    setDownloadSelectDeliveryId('')
+    setDownloadSelectedAssetIds([])
+  }
+
+  const toggleDownloadAsset = (assetId: string) => {
+    setDownloadSelectedAssetIds((current) =>
+      current.includes(assetId)
+        ? current.filter((id) => id !== assetId)
+        : [...current, assetId],
+    )
+  }
+
+  const selectAllDownloadAssets = (deliveryId: string) => {
+    const delivery = myDeliveries.find((d) => d.deliveryId === deliveryId)
+    if (!delivery) return
+    const downloadable = delivery.assets.filter((a) => a.canDownload).map((a) => a.id)
+    setDownloadSelectedAssetIds(downloadable)
+  }
+
+  const handleDownloadAll = async (deliveryId: string) => {
+    try {
+      const token = await getAccessToken()
+      if (!token) {
+        setCustomerError('Login session expired. Please log in again.')
+        return
+      }
+      setDownloadBusy(true)
+      const delivery = myDeliveries.find((d) => d.deliveryId === deliveryId)
+      const blob = await loadWorkerBlob(`/api/v1/deliveries/${deliveryId}/download`, token, {
+        method: 'POST',
+        body: {},
+      })
+      const name = sanitizeDownloadName(delivery?.projectName || delivery?.clientName || 'photos')
+      triggerBrowserDownload(blob, `${name}.zip`)
+    } catch (error) {
+      setCustomerError(error instanceof Error ? error.message : 'Download failed')
+    } finally {
+      setDownloadBusy(false)
+    }
+  }
+
+  const handleDownloadSelected = async (deliveryId: string) => {
+    if (downloadSelectedAssetIds.length === 0) return
+    try {
+      const token = await getAccessToken()
+      if (!token) {
+        setCustomerError('Login session expired. Please log in again.')
+        return
+      }
+      setDownloadBusy(true)
+      const delivery = myDeliveries.find((d) => d.deliveryId === deliveryId)
+      const blob = await loadWorkerBlob(`/api/v1/deliveries/${deliveryId}/download`, token, {
+        method: 'POST',
+        body: { assetIds: downloadSelectedAssetIds },
+      })
+      const name = sanitizeDownloadName(delivery?.projectName || delivery?.clientName || 'photos')
+      triggerBrowserDownload(blob, `${name}-selected.zip`)
+      cancelDownloadSelect()
+    } catch (error) {
+      setCustomerError(error instanceof Error ? error.message : 'Download failed')
+    } finally {
+      setDownloadBusy(false)
+    }
+  }
+
   // ── Lightbox handlers ────────────────────────────────────────────────
 
   const openCustomerLightbox = (deliveryId: string, assetId: string) => {
@@ -464,6 +548,50 @@ export function MyPicturesPage() {
                 <span className="admin-client-count">
                   {delivery.assets.length} file{delivery.assets.length === 1 ? '' : 's'}
                 </span>
+                {delivery.accessMode !== 'viewer' && (
+                  <>
+                    <button
+                      className="button ghost"
+                      type="button"
+                      disabled={downloadBusy}
+                      onClick={() => { void handleDownloadAll(delivery.deliveryId) }}
+                    >
+                      {downloadBusy && downloadSelectDeliveryId === '' ? 'Downloading...' : 'Download all'}
+                    </button>
+                    {downloadSelectDeliveryId === delivery.deliveryId ? (
+                      <>
+                        <button
+                          className="button ghost"
+                          type="button"
+                          onClick={() => selectAllDownloadAssets(delivery.deliveryId)}
+                          disabled={downloadBusy}
+                        >
+                          Select all
+                        </button>
+                        <button
+                          className="button ghost"
+                          type="button"
+                          onClick={() => { void handleDownloadSelected(delivery.deliveryId) }}
+                          disabled={downloadBusy || downloadSelectedCount === 0}
+                        >
+                          {downloadBusy ? 'Downloading...' : `Download selected (${downloadSelectedCount})`}
+                        </button>
+                        <button className="button ghost" type="button" onClick={cancelDownloadSelect} disabled={downloadBusy}>
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        className="button ghost"
+                        type="button"
+                        onClick={() => startDownloadSelect(delivery.deliveryId)}
+                        disabled={downloadBusy}
+                      >
+                        Select files
+                      </button>
+                    )}
+                  </>
+                )}
                 <button
                   className="button ghost"
                   type="button"
@@ -565,11 +693,20 @@ export function MyPicturesPage() {
 
             <div className="customer-asset-grid">
               {delivery.assets.map((asset) => {
-                const isSelectMode = shareComposerDeliveryId === delivery.deliveryId && shareComposerScope === 'selected'
-                const isSelected = isSelectMode && shareComposerSelectedAssetSet.has(asset.id)
+                const isShareSelectMode = shareComposerDeliveryId === delivery.deliveryId && shareComposerScope === 'selected'
+                const isShareSelected = isShareSelectMode && shareComposerSelectedAssetSet.has(asset.id)
+                const isDownloadSelectMode = downloadSelectDeliveryId === delivery.deliveryId
+                const isDownloadSelected = isDownloadSelectMode && downloadSelectedAssetSet.has(asset.id)
+                const isSelectMode = isShareSelectMode || isDownloadSelectMode
+                const isSelected = isShareSelected || isDownloadSelected
                 const displayName = getDisplayFileName(asset.filename)
                 const isImage = asset.mime_type.startsWith('image/')
                 const thumbnailUrl = customerThumbnailUrls[asset.id]
+
+                const handleSelectClick = () => {
+                  if (isShareSelectMode) toggleShareComposerAsset(asset.id)
+                  else if (isDownloadSelectMode) toggleDownloadAsset(asset.id)
+                }
 
                 return (
                   <article key={asset.id} className={`customer-asset-card ${isSelected ? 'is-selected' : ''}`}>
@@ -578,8 +715,8 @@ export function MyPicturesPage() {
                         className="customer-asset-select-overlay"
                         type="button"
                         aria-pressed={isSelected}
-                        onClick={() => toggleShareComposerAsset(asset.id)}
-                        disabled={shareComposerBusy}
+                        onClick={handleSelectClick}
+                        disabled={shareComposerBusy || downloadBusy}
                       >
                         <span className="customer-asset-check">{isSelected ? '✓' : ''}</span>
                         <span className="sr-only">Select {displayName}</span>
@@ -589,7 +726,7 @@ export function MyPicturesPage() {
                       <button
                         className="customer-asset-thumb customer-asset-thumb-button"
                         type="button"
-                        onClick={() => isSelectMode ? toggleShareComposerAsset(asset.id) : openCustomerLightbox(delivery.deliveryId, asset.id)}
+                        onClick={() => isSelectMode ? handleSelectClick() : openCustomerLightbox(delivery.deliveryId, asset.id)}
                         aria-label={isSelectMode ? `Select ${displayName}` : `Open ${displayName}`}
                         disabled={!isSelectMode && !thumbnailUrl}
                       >
