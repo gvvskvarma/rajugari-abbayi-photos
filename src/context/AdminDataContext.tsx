@@ -1,10 +1,12 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { workerRequest } from '../hooks/useApi'
+import { useAdminClients } from '../hooks/queries/useAdminClients'
+import { queryClient } from '../lib/queryClient'
+import { queryKeys } from '../lib/queryKeys'
 import type {
-  AdminClient,
   AdminProject,
   AdminAsset,
   AdminClientSummary,
@@ -48,10 +50,21 @@ export function useAdminData() {
 
 export function AdminDataProvider({ children }: { children: ReactNode }) {
   const { session, role, getAccessToken } = useAuth()
-  const [adminClients, setAdminClients] = useState<AdminClientSummary[]>([])
   const [adminBusy, setAdminBusy] = useState(false)
   const [adminError, setAdminError] = useState('')
   const [adminActionMessage, setAdminActionMessage] = useState('')
+
+  const userId = session?.user.id
+  const { data: adminClients = [], isLoading, error: queryError } = useAdminClients(userId, role)
+
+  const setAdminClients: React.Dispatch<React.SetStateAction<AdminClientSummary[]>> = (action) => {
+    const key = queryKeys.adminClients(userId ?? '')
+    if (typeof action === 'function') {
+      queryClient.setQueryData<AdminClientSummary[]>(key, (prev) => action(prev ?? []))
+    } else {
+      queryClient.setQueryData<AdminClientSummary[]>(key, action)
+    }
+  }
 
   const adminClientById = useMemo(
     () => new Map(adminClients.map((client) => [client.id, client] as const)),
@@ -69,75 +82,8 @@ export function AdminDataProvider({ children }: { children: ReactNode }) {
   )
 
   const loadAdminData = async () => {
-    if (!supabase || !session?.user.id || role !== 'admin') return
-
-    setAdminBusy(true)
-    setAdminError('')
-
-    try {
-      const [clientsResult, projectsResult, assetsResult] = await Promise.all([
-        supabase
-          .from('clients')
-          .select('id, full_name, email, phone, notes, created_at, updated_at')
-          .eq('owner_user_id', session.user.id)
-          .order('updated_at', { ascending: false }),
-        supabase
-          .from('projects')
-          .select('id, client_id, name, description, shoot_date, location, status, created_at, updated_at')
-          .eq('owner_user_id', session.user.id)
-          .order('updated_at', { ascending: false }),
-        supabase
-          .from('assets')
-          .select('id, project_id, delivery_id, filename, mime_type, bytes, r2_object_key, created_at')
-          .eq('owner_user_id', session.user.id)
-          .order('created_at', { ascending: false }),
-      ])
-
-      if (clientsResult.error) throw clientsResult.error
-      if (projectsResult.error) throw projectsResult.error
-      if (assetsResult.error) throw assetsResult.error
-
-      const clients = (clientsResult.data ?? []) as AdminClient[]
-      const projects = (projectsResult.data ?? []) as AdminProject[]
-      const assets = (assetsResult.data ?? []) as AdminAsset[]
-
-      const projectsByClient = new Map<string, AdminProject[]>()
-      for (const project of projects) {
-        const current = projectsByClient.get(project.client_id) ?? []
-        current.push(project)
-        projectsByClient.set(project.client_id, current)
-      }
-
-      const assetsByProject = new Map<string, AdminAsset[]>()
-      for (const asset of assets) {
-        const current = assetsByProject.get(asset.project_id) ?? []
-        current.push(asset)
-        assetsByProject.set(asset.project_id, current)
-      }
-
-      const summaries: AdminClientSummary[] = clients.map((clientRow) => {
-        const clientProjects = projectsByClient.get(clientRow.id) ?? []
-        const clientAssets = clientProjects.flatMap((project) => assetsByProject.get(project.id) ?? [])
-        const latestUpdatedAt =
-          [clientRow.updated_at, ...clientProjects.map((p) => p.updated_at), ...clientAssets.map((a) => a.created_at)]
-            .sort((l, r) => new Date(r).getTime() - new Date(l).getTime())[0] ?? clientRow.updated_at
-
-        return {
-          ...clientRow,
-          projects: clientProjects,
-          assets: clientAssets,
-          projectCount: clientProjects.length,
-          assetCount: clientAssets.length,
-          latestUpdatedAt,
-        }
-      })
-
-      setAdminClients(summaries)
-    } catch (error) {
-      setAdminError(error instanceof Error ? error.message : 'Failed to load admin data')
-    } finally {
-      setAdminBusy(false)
-    }
+    if (!userId || role !== 'admin') return
+    await queryClient.invalidateQueries({ queryKey: queryKeys.adminClients(userId) })
   }
 
   const recordAdminActivity = (
@@ -180,10 +126,8 @@ export function AdminDataProvider({ children }: { children: ReactNode }) {
     })()
   }
 
-  useEffect(() => {
-    if (!supabase || !session?.user.id || role !== 'admin') return
-    void loadAdminData()
-  }, [role, session?.user.id])
+  const combinedBusy = adminBusy || isLoading
+  const combinedError = adminError || (queryError instanceof Error ? queryError.message : queryError ? 'Failed to load admin data' : '')
 
   const value: AdminDataContextValue = {
     adminClients,
@@ -192,8 +136,8 @@ export function AdminDataProvider({ children }: { children: ReactNode }) {
     adminProjectById,
     adminAssetById,
     loadAdminData,
-    adminBusy,
-    adminError,
+    adminBusy: combinedBusy,
+    adminError: combinedError,
     setAdminError,
     adminActionMessage,
     setAdminActionMessage,

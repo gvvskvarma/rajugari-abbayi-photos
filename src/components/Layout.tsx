@@ -1,8 +1,10 @@
 import { Outlet } from 'react-router-dom'
+import { QueryClientProvider } from '@tanstack/react-query'
 import '../App.css'
 import { isSupabaseConfigured } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { personalInstagramUrl } from '../lib/constants'
+import { queryClient } from '../lib/queryClient'
 import { AdminDataProvider } from '../context/AdminDataContext.tsx'
 
 export function Layout() {
@@ -142,9 +144,11 @@ export function Layout() {
       </header>
 
       <main id="main-content">
-        <AdminDataProvider>
-          <Outlet />
-        </AdminDataProvider>
+        <QueryClientProvider client={queryClient}>
+          <AdminDataProvider>
+            <Outlet />
+          </AdminDataProvider>
+        </QueryClientProvider>
       </main>
 
       <footer className="footer">

@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { useMutation } from '@tanstack/react-query'
 import type {
   AdminActivityItem,
   AdminActivityKind,
+  AdminClient,
   AdminLightboxState,
   AdminProject,
   AdminProjectView,
@@ -11,6 +13,7 @@ import type {
 import { useAuth } from '../hooks/useAuth'
 import { workerRequest, loadWorkerBlob, triggerBrowserDownload } from '../hooks/useApi'
 import { useAdminData } from '../context/AdminDataContext.tsx'
+import { useAdminActivity } from '../hooks/queries/useAdminActivity'
 import { DeleteConfirmationModal } from '../components/DeleteConfirmationModal'
 import { AdminActivityPanel } from '../components/AdminActivityPanel'
 import { AdminClientEditForm } from '../components/AdminClientEditForm'
@@ -18,10 +21,11 @@ import { AdminProjectCard } from '../components/AdminProjectCard'
 import { AdminBulkActions } from '../components/AdminBulkActions'
 import { AdminDetailToolbar } from '../components/AdminDetailToolbar'
 import { supabase } from '../lib/supabase'
-import { ADMIN_ACTIVITY_LIMIT, ADMIN_PROJECT_CHUNK_SIZE, getAssetKind } from '../lib/helpers'
+import { ADMIN_PROJECT_CHUNK_SIZE, getAssetKind } from '../lib/helpers'
 import { getDisplayFileName, sanitizeDownloadName } from '../lib/upload'
 import { AdminLightbox } from '../components/AdminLightbox'
-import { adminActivityReducer, createAdminActivityInitialState } from '../reducers/adminActivityReducer'
+import { queryClient } from '../lib/queryClient'
+import { queryKeys } from '../lib/queryKeys'
 
 export function AdminClientDetailPage() {
   const { clientId } = useParams<{ clientId: string }>()
@@ -59,7 +63,11 @@ export function AdminClientDetailPage() {
   const [adminProjectRenderLimits, setAdminProjectRenderLimits] = useState<Record<string, number>>({})
   const [adminLightbox, setAdminLightbox] = useState<AdminLightboxState | null>(null)
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmationState | null>(null)
-  const [activityState, activityDispatch] = useReducer(adminActivityReducer, false, createAdminActivityInitialState)
+
+  // --- activity via TanStack Query ---
+  const [kindFilter, setKindFilter] = useState<'all' | AdminActivityKind>('all')
+  const [activityExpanded, setActivityExpanded] = useState(false)
+  const { data: activities = [], isLoading: activityBusy, error: activityError } = useAdminActivity(clientId)
 
   // --- computed ---
   const selectedAdminClient = useMemo(
@@ -181,29 +189,30 @@ export function AdminClientDetailPage() {
     return () => { cancelled = true }
   }, [adminAssetPreviewUrls, getAccessToken, role, selectedAdminVisibleAssets, session?.user.id])
 
-  useEffect(() => {
-    if (!supabase || !session?.user.id || role !== 'admin') return
-    if (!selectedAdminClient?.id) return
-    const loadAdminActivity = async (activityClientId: string) => {
-      activityDispatch({ type: 'SET_BUSY', busy: true })
-      activityDispatch({ type: 'SET_ERROR', error: '' })
-      try {
-        const token = await getAccessToken()
-        if (!token) { activityDispatch({ type: 'SET_ERROR', error: 'Login session expired. Please log in again.' }); return }
-        const params = new URLSearchParams({ limit: String(ADMIN_ACTIVITY_LIMIT) })
-        params.set('clientId', activityClientId)
-        const payload = await workerRequest<{ activities: AdminActivityItem[] }>(
-          `/api/v1/admin/activity?${params.toString()}`, token
-        )
-        activityDispatch({ type: 'SET_ACTIVITIES', activities: payload.activities ?? [] })
-      } catch (error) {
-        activityDispatch({ type: 'SET_ERROR', error: error instanceof Error ? error.message : 'Failed to load activity trail' })
-      } finally {
-        activityDispatch({ type: 'SET_BUSY', busy: false })
-      }
-    }
-    void loadAdminActivity(selectedAdminClient.id)
-  }, [getAccessToken, role, selectedAdminClient?.id, session?.user.id])
+  // --- mutations ---
+
+  const saveClientMutation = useMutation({
+    mutationFn: async (draft: { fullName: string; email: string; phone: string; notes: string }) => {
+      if (!selectedAdminClient) throw new Error('No client selected')
+      const token = await getAccessToken()
+      if (!token) throw new Error('Login session expired. Please log in again.')
+      return workerRequest<{ client: AdminClient }>(
+        `/api/v1/admin/clients/${selectedAdminClient.id}`, token,
+        { method: 'PATCH', body: { fullName: draft.fullName, email: draft.email, phone: draft.phone, notes: draft.notes } }
+      )
+    },
+    onSuccess: (data) => {
+      setAdminClients((current) =>
+        current.map((client) => (client.id === data.client.id ? { ...client, ...data.client } : client))
+      )
+      setAdminClientEditMode(false)
+      recordAdminActivity('edit', 'Updated client', data.client.full_name, { clientId: data.client.id })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.adminActivity(clientId) })
+    },
+    onError: (error) => {
+      setAdminError(error instanceof Error ? error.message : 'Unable to update client')
+    },
+  })
 
   // --- handlers ---
 
@@ -348,6 +357,7 @@ export function AdminClientDetailPage() {
         clientId: context?.clientId ?? selectedAdminClient?.id ?? null,
         projectId: context?.projectId ?? null, assetId: context?.assetId ?? assetId, metadata: context?.metadata,
       })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.adminActivity(clientId) })
     }
   }
 
@@ -356,6 +366,7 @@ export function AdminClientDetailPage() {
     recordAdminActivity('delete', `Deleted ${assetIds.length} file${assetIds.length === 1 ? '' : 's'}`,
       'Removed selected files from the admin folder',
       { clientId: selectedAdminClient?.id ?? null, metadata: { count: assetIds.length, assetIds } })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.adminActivity(clientId) })
   }
 
   const performDeleteAdminProject = async (projectId: string, label?: string) => {
@@ -367,6 +378,7 @@ export function AdminClientDetailPage() {
     setSelectedAdminAssetIds([])
     if (adminLightbox?.projectId === projectId) closeAdminLightbox()
     recordAdminActivity('delete', 'Deleted folder', `Removed ${label ?? projectId}`, { clientId: selectedAdminClient?.id ?? null, projectId })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.adminActivity(clientId) })
   }
 
   const performDeleteAdminClient = async (deleteClientId: string, label?: string) => {
@@ -445,29 +457,18 @@ export function AdminClientDetailPage() {
     })
   }
 
-  const handleSaveAdminClient = async () => {
-    if (!supabase || !session?.user.id || role !== 'admin' || !selectedAdminClient) return
+  const handleSaveAdminClient = () => {
     const fullName = adminClientDraft.fullName.trim()
     const email = adminClientDraft.email.trim().toLowerCase()
     const phone = adminClientDraft.phone.trim()
     const notes = adminClientDraft.notes.trim()
     if (!fullName || !email) { setAdminError('Client full name and email are required.'); return }
-    setAdminBusy(true); setAdminError('')
-    try {
-      const token = await getAccessToken()
-      if (!token) { setAdminError('Login session expired. Please log in again.'); return }
-      const updated = await workerRequest<{ client: import('../types').AdminClient }>(
-        `/api/v1/admin/clients/${selectedAdminClient.id}`, token,
-        { method: 'PATCH', body: { fullName, email, phone, notes } }
-      )
-      setAdminClients((current) =>
-        current.map((client) => (client.id === updated.client.id ? { ...client, ...updated.client } : client))
-      )
-      setAdminClientEditMode(false)
-      recordAdminActivity('edit', 'Updated client', updated.client.full_name, { clientId: updated.client.id })
-    } catch (error) {
-      setAdminError(error instanceof Error ? error.message : 'Unable to update client')
-    } finally { setAdminBusy(false) }
+    setAdminBusy(true)
+    setAdminError('')
+    saveClientMutation.mutate(
+      { fullName, email, phone, notes },
+      { onSettled: () => setAdminBusy(false) }
+    )
   }
 
   const handleCancelEdit = () => {
@@ -568,13 +569,13 @@ export function AdminClientDetailPage() {
 
         <AdminActivityPanel
           title="Recent activity"
-          activities={activityState.activities}
-          busy={activityState.busy}
-          error={activityState.error}
-          kindFilter={activityState.kindFilter}
-          onKindFilterChange={(filter) => activityDispatch({ type: 'SET_KIND_FILTER', filter })}
-          expanded={activityState.expanded}
-          onToggleExpanded={() => activityDispatch({ type: 'TOGGLE_EXPANDED' })}
+          activities={activities}
+          busy={activityBusy}
+          error={activityError instanceof Error ? activityError.message : activityError ? String(activityError) : ''}
+          kindFilter={kindFilter}
+          onKindFilterChange={setKindFilter}
+          expanded={activityExpanded}
+          onToggleExpanded={() => setActivityExpanded((prev) => !prev)}
           contextHint="Showing activity for the selected client folder."
           getContext={getAdminActivityContext}
         />
