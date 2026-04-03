@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { CustomerLightboxState, DeliveryCard, ShareLinkScope } from '../types'
 import { useAuth } from '../hooks/useAuth'
 import { workerRequest, loadWorkerBlob, triggerBrowserDownload } from '../hooks/useApi'
 import { getDisplayFileName, sanitizeDownloadName } from '../lib/upload'
 import { getAssetKind } from '../lib/helpers'
-import { useFocusTrap } from '../hooks/useFocusTrap'
 import { supabase } from '../lib/supabase'
+import { CustomerLightbox } from '../components/CustomerLightbox'
+import { SkeletonCardList } from '../components/Skeleton'
 
 export function MyPicturesPage() {
   const { session, getAccessToken } = useAuth()
@@ -30,9 +31,6 @@ export function MyPicturesPage() {
   const [customerLightbox, setCustomerLightbox] = useState<CustomerLightboxState | null>(null)
   const [customerAssetPreviewUrls, setCustomerAssetPreviewUrls] = useState<Record<string, string>>({})
   const [customerAssetThumbnailUrls, setCustomerAssetThumbnailUrls] = useState<Record<string, string>>({})
-
-  const customerLightboxTouchStartRef = useRef<number | null>(null)
-  const customerLightboxTrapRef = useFocusTrap(Boolean(customerLightbox))
 
   // ── Computed values ──────────────────────────────────────────────────
   const selectedAssetSet = useMemo(() => new Set(selectedAssetIds), [selectedAssetIds])
@@ -156,43 +154,6 @@ export function MyPicturesPage() {
       cancelled = true
     }
   }, [customerLightboxAsset, customerPreviewUrls, session?.user.id])
-
-  // Lightbox keyboard navigation
-  useEffect(() => {
-    if (!customerLightboxAsset) return
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        setCustomerLightbox(null)
-        return
-      }
-      if (event.key === 'ArrowLeft') {
-        event.preventDefault()
-        const nextIndex = customerLightboxIndex - 1
-        if (nextIndex >= 0) {
-          setCustomerLightbox({
-            deliveryId: customerLightbox?.deliveryId ?? '',
-            assetId: customerLightboxAssets[nextIndex].id,
-          })
-        }
-        return
-      }
-      if (event.key === 'ArrowRight') {
-        event.preventDefault()
-        const nextIndex = customerLightboxIndex + 1
-        if (nextIndex < customerLightboxAssets.length) {
-          setCustomerLightbox({
-            deliveryId: customerLightbox?.deliveryId ?? '',
-            assetId: customerLightboxAssets[nextIndex].id,
-          })
-        }
-      }
-    }
-
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [customerLightbox, customerLightboxAsset, customerLightboxAssets, customerLightboxIndex])
 
   // ── Unified selection handlers ──────────────────────────────────────
 
@@ -380,88 +341,6 @@ export function MyPicturesPage() {
     })
   }
 
-  // ── Lightbox renderer ────────────────────────────────────────────────
-
-  const renderCustomerLightbox = () => {
-    if (!customerLightboxAsset || !customerLightbox) return null
-
-    const previewUrl = customerPreviewUrls[customerLightboxAsset.id] ?? customerThumbnailUrls[customerLightboxAsset.id]
-    const canDownload = Boolean(customerLightboxAsset.canDownload)
-
-    return (
-      <div
-        ref={customerLightboxTrapRef}
-        className="customer-lightbox"
-        role="dialog"
-        aria-modal="true"
-        aria-label={getDisplayFileName(customerLightboxAsset.filename)}
-        onClick={closeCustomerLightbox}
-        onTouchStart={(event) => {
-          customerLightboxTouchStartRef.current = event.touches[0]?.clientX ?? null
-        }}
-        onTouchEnd={(event) => {
-          const start = customerLightboxTouchStartRef.current
-          customerLightboxTouchStartRef.current = null
-          if (start === null) return
-          const delta = event.changedTouches[0]?.clientX - start
-          if (Math.abs(delta) < 48) return
-          if (delta < 0) {
-            moveCustomerLightbox('next')
-          } else {
-            moveCustomerLightbox('prev')
-          }
-        }}
-      >
-        <div className="customer-lightbox-panel" onClick={(event) => event.stopPropagation()}>
-          <button className="customer-lightbox-close" type="button" onClick={closeCustomerLightbox}>
-            Close
-          </button>
-          <div className="customer-lightbox-stage">
-            {previewUrl ? (
-              <img src={previewUrl} alt={getDisplayFileName(customerLightboxAsset.filename)} />
-            ) : (
-              <div className="customer-lightbox-loading">Loading preview…</div>
-            )}
-          </div>
-          <div className="customer-lightbox-meta">
-            <p className="customer-lightbox-name">{getDisplayFileName(customerLightboxAsset.filename)}</p>
-            <div className="customer-lightbox-actions">
-              <button
-                className="button ghost"
-                type="button"
-                onClick={() => moveCustomerLightbox('prev')}
-                disabled={customerLightboxIndex <= 0}
-              >
-                Previous
-              </button>
-              <button
-                className="button ghost"
-                type="button"
-                onClick={() => moveCustomerLightbox('next')}
-                disabled={customerLightboxIndex >= customerLightboxAssets.length - 1}
-              >
-                Next
-              </button>
-              <button
-                className="button ghost"
-                type="button"
-                disabled={!canDownload}
-                onClick={() => {
-                  void handleOpenAsset(customerLightboxAsset.id, 'download')
-                }}
-              >
-                Download
-              </button>
-            </div>
-            <p className="portal-hint">
-              {customerLightboxIndex + 1} / {customerLightboxAssets.length}
-            </p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   // ── Auth guard ───────────────────────────────────────────────────────
 
   if (!session?.user.email) {
@@ -498,7 +377,7 @@ export function MyPicturesPage() {
         </div>
       </div>
 
-      {customerBusy && <p className="portal-hint">Loading your deliveries...</p>}
+      {customerBusy && <SkeletonCardList count={3} />}
       {customerError && <p className="portal-error">{customerError}</p>}
       {!customerBusy && !customerError && myDeliveries.length === 0 && (
         <p className="portal-hint">No active deliveries found for this email.</p>
@@ -689,7 +568,18 @@ export function MyPicturesPage() {
         })}
       </div>
 
-      {customerLightboxAsset && customerLightbox && renderCustomerLightbox()}
+      {customerLightboxAsset && customerLightbox && (
+        <CustomerLightbox
+          asset={customerLightboxAsset}
+          previewUrl={customerPreviewUrls[customerLightboxAsset.id]}
+          thumbnailUrl={customerThumbnailUrls[customerLightboxAsset.id]}
+          index={customerLightboxIndex}
+          total={customerLightboxAssets.length}
+          onClose={closeCustomerLightbox}
+          onMove={moveCustomerLightbox}
+          onDownload={(assetId) => { void handleOpenAsset(assetId, 'download') }}
+        />
+      )}
     </section>
   )
 }

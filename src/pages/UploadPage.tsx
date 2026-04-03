@@ -1,25 +1,19 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useReducer, useRef } from 'react'
 import type { ChangeEvent, DragEvent, FormEvent } from 'react'
-import type { UploadItem } from '../types'
 import { useAuth } from '../hooks/useAuth'
 import { workerRequest } from '../hooks/useApi'
 import { useAdminData } from '../context/AdminDataContext.tsx'
 import { supabase } from '../lib/supabase'
-import { dedupeUploadItems, buildUploadQueueGroups, collectDroppedUploadItems, normalizeUploadItemPath } from '../lib/upload'
+import { buildUploadQueueGroups, collectDroppedUploadItems } from '../lib/upload'
 import { randomToken } from '../lib/helpers'
+import { uploadFormReducer, uploadFormInitialState } from '../reducers/uploadFormReducer'
 
 export function UploadPage() {
   const { session, role, getAccessToken } = useAuth()
   const { adminClients, loadAdminData, recordAdminActivity, adminBusy, adminError } = useAdminData()
 
-  const [uploadClientMode, setUploadClientMode] = useState<'create' | 'reuse'>('create')
-  const [uploadEmail, setUploadEmail] = useState('')
-  const [uploadReuseSearch, setUploadReuseSearch] = useState('')
-  const [uploadTitle, setUploadTitle] = useState('Client Delivery')
-  const [uploadItems, setUploadItems] = useState<UploadItem[]>([])
-  const [uploadDropActive, setUploadDropActive] = useState(false)
-  const [uploadBusy, setUploadBusy] = useState(false)
-  const [uploadMessage, setUploadMessage] = useState('')
+  const [state, dispatch] = useReducer(uploadFormReducer, uploadFormInitialState)
+  const { clientMode: uploadClientMode, email: uploadEmail, reuseSearch: uploadReuseSearch, title: uploadTitle, items: uploadItems, dropActive: uploadDropActive, busy: uploadBusy, message: uploadMessage } = state
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const uploadDragDepthRef = useRef(0)
@@ -57,16 +51,12 @@ export function UploadPage() {
 
   const uploadQueueGroups = useMemo(() => buildUploadQueueGroups(uploadItems), [uploadItems])
 
-  const appendUploadItems = (items: UploadItem[]) => {
-    setUploadItems((current) => dedupeUploadItems([...current, ...items]))
-  }
-
   const handleUploadFilesChange = (event: ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(event.target.files ?? []).map((file) => ({
       file,
       path: file.name,
     }))
-    appendUploadItems(selected)
+    dispatch({ type: 'APPEND_ITEMS', items: selected })
     event.target.value = ''
   }
 
@@ -78,19 +68,19 @@ export function UploadPage() {
     event.preventDefault()
     event.stopPropagation()
     uploadDragDepthRef.current = 0
-    setUploadDropActive(false)
+    dispatch({ type: 'SET_DROP_ACTIVE', active: false })
     try {
       const dropped = await collectDroppedUploadItems(event.dataTransfer)
-      appendUploadItems(dropped)
+      dispatch({ type: 'APPEND_ITEMS', items: dropped })
     } catch (error) {
-      setUploadMessage(error instanceof Error ? error.message : 'Unable to read dropped files')
+      dispatch({ type: 'SET_MESSAGE', message: error instanceof Error ? error.message : 'Unable to read dropped files' })
     }
   }
 
   const handleUploadDragEnter = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     uploadDragDepthRef.current += 1
-    setUploadDropActive(true)
+    dispatch({ type: 'SET_DROP_ACTIVE', active: true })
   }
 
   const handleUploadDragOver = (event: DragEvent<HTMLDivElement>) => {
@@ -102,7 +92,7 @@ export function UploadPage() {
     event.preventDefault()
     uploadDragDepthRef.current = Math.max(0, uploadDragDepthRef.current - 1)
     if (uploadDragDepthRef.current === 0) {
-      setUploadDropActive(false)
+      dispatch({ type: 'SET_DROP_ACTIVE', active: false })
     }
   }
 
@@ -125,12 +115,12 @@ export function UploadPage() {
 
     const targetEmail = uploadEmail.trim().toLowerCase()
     if (!targetEmail || uploadItems.length === 0) {
-      setUploadMessage('Enter a client email and add at least one file or folder item.')
+      dispatch({ type: 'SET_MESSAGE', message: 'Enter a client email and add at least one file or folder item.' })
       return
     }
 
-    setUploadBusy(true)
-    setUploadMessage('')
+    dispatch({ type: 'SET_BUSY', busy: true })
+    dispatch({ type: 'SET_MESSAGE', message: '' })
 
     const existingClient = await supabase
       .from('clients')
@@ -140,8 +130,8 @@ export function UploadPage() {
       .maybeSingle()
 
     if (existingClient.error) {
-      setUploadMessage(existingClient.error.message)
-      setUploadBusy(false)
+      dispatch({ type: 'SET_MESSAGE', message: existingClient.error.message })
+      dispatch({ type: 'SET_BUSY', busy: false })
       return
     }
 
@@ -149,8 +139,8 @@ export function UploadPage() {
 
     if (uploadClientMode === 'create') {
       if (clientId) {
-        setUploadMessage('That client already exists. Switch to Reuse existing.')
-        setUploadBusy(false)
+        dispatch({ type: 'SET_MESSAGE', message: 'That client already exists. Switch to Reuse existing.' })
+        dispatch({ type: 'SET_BUSY', busy: false })
         return
       }
 
@@ -165,15 +155,15 @@ export function UploadPage() {
         .single()
 
       if (insertedClient.error || !insertedClient.data) {
-        setUploadMessage(insertedClient.error?.message ?? 'Unable to create client.')
-        setUploadBusy(false)
+        dispatch({ type: 'SET_MESSAGE', message: insertedClient.error?.message ?? 'Unable to create client.' })
+        dispatch({ type: 'SET_BUSY', busy: false })
         return
       }
 
       clientId = insertedClient.data.id
     } else if (!clientId) {
-      setUploadMessage('No existing client found for that email. Switch to Create new.')
-      setUploadBusy(false)
+      dispatch({ type: 'SET_MESSAGE', message: 'No existing client found for that email. Switch to Create new.' })
+      dispatch({ type: 'SET_BUSY', busy: false })
       return
     }
 
@@ -189,8 +179,8 @@ export function UploadPage() {
       .single()
 
     if (insertedProject.error || !insertedProject.data) {
-      setUploadMessage(insertedProject.error?.message ?? 'Unable to create project.')
-      setUploadBusy(false)
+      dispatch({ type: 'SET_MESSAGE', message: insertedProject.error?.message ?? 'Unable to create project.' })
+      dispatch({ type: 'SET_BUSY', busy: false })
       return
     }
 
@@ -217,8 +207,8 @@ export function UploadPage() {
       .single()
 
     if (insertedDelivery.error || !insertedDelivery.data) {
-      setUploadMessage(insertedDelivery.error?.message ?? 'Unable to create delivery.')
-      setUploadBusy(false)
+      dispatch({ type: 'SET_MESSAGE', message: insertedDelivery.error?.message ?? 'Unable to create delivery.' })
+      dispatch({ type: 'SET_BUSY', busy: false })
       return
     }
 
@@ -229,15 +219,15 @@ export function UploadPage() {
     })
 
     if (recipientInsert.error) {
-      setUploadMessage(recipientInsert.error.message)
-      setUploadBusy(false)
+      dispatch({ type: 'SET_MESSAGE', message: recipientInsert.error.message })
+      dispatch({ type: 'SET_BUSY', busy: false })
       return
     }
 
     const token = await getAccessToken()
     if (!token) {
-      setUploadMessage('Login session expired. Please log in again.')
-      setUploadBusy(false)
+      dispatch({ type: 'SET_MESSAGE', message: 'Login session expired. Please log in again.' })
+      dispatch({ type: 'SET_BUSY', busy: false })
       return
     }
 
@@ -281,14 +271,11 @@ export function UploadPage() {
         )
       }
     } catch (error) {
-      setUploadMessage(error instanceof Error ? error.message : 'Upload failed')
-      setUploadBusy(false)
+      dispatch({ type: 'SET_MESSAGE', message: error instanceof Error ? error.message : 'Upload failed' })
+      dispatch({ type: 'SET_BUSY', busy: false })
       return
     }
 
-    setUploadMessage(
-      `Upload complete for ${targetEmail}. Opening the client folder now.`
-    )
     recordAdminActivity(
       'upload',
       'Uploaded files',
@@ -303,13 +290,10 @@ export function UploadPage() {
         },
       }
     )
-    setUploadItems([])
-    setUploadEmail('')
-    setUploadClientMode('create')
-    setUploadReuseSearch('')
+    dispatch({ type: 'RESET' })
+    dispatch({ type: 'SET_MESSAGE', message: `Upload complete for ${targetEmail}. Opening the client folder now.` })
     window.location.hash = '#/admin/clients/' + clientId
     void loadAdminData()
-    setUploadBusy(false)
   }
 
   if (!session?.user.id) {
@@ -392,14 +376,14 @@ export function UploadPage() {
             <button
               className={`admin-toggle-button ${uploadClientMode === 'create' ? 'is-active' : ''}`}
               type="button"
-              onClick={() => setUploadClientMode('create')}
+              onClick={() => dispatch({ type: 'SET_CLIENT_MODE', mode: 'create' })}
             >
               Create new
             </button>
             <button
               className={`admin-toggle-button ${uploadClientMode === 'reuse' ? 'is-active' : ''}`}
               type="button"
-              onClick={() => setUploadClientMode('reuse')}
+              onClick={() => dispatch({ type: 'SET_CLIENT_MODE', mode: 'reuse' })}
             >
               Reuse existing
             </button>
@@ -410,7 +394,7 @@ export function UploadPage() {
             <input
               type="email"
               value={uploadEmail}
-              onChange={(event) => setUploadEmail(event.target.value)}
+              onChange={(event) => dispatch({ type: 'SET_EMAIL', email: event.target.value })}
               placeholder="client@example.com"
               required
             />
@@ -422,7 +406,7 @@ export function UploadPage() {
                 <input
                   type="search"
                   value={uploadReuseSearch}
-                  onChange={(event) => setUploadReuseSearch(event.target.value)}
+                  onChange={(event) => dispatch({ type: 'SET_REUSE_SEARCH', search: event.target.value })}
                   placeholder="Search by name or email"
                 />
               </label>
@@ -430,7 +414,7 @@ export function UploadPage() {
                 Existing client email
                 <select
                   value={selectedUploadClient?.email ?? ''}
-                  onChange={(event) => setUploadEmail(event.target.value)}
+                  onChange={(event) => dispatch({ type: 'SET_EMAIL', email: event.target.value })}
                   disabled={filteredReuseClientEmailOptions.length === 0}
                 >
                   <option value="">Select an existing client</option>
@@ -458,7 +442,7 @@ export function UploadPage() {
             <input
               type="text"
               value={uploadTitle}
-              onChange={(event) => setUploadTitle(event.target.value)}
+              onChange={(event) => dispatch({ type: 'SET_TITLE', title: event.target.value })}
               required
             />
           </label>
@@ -514,16 +498,7 @@ export function UploadPage() {
                   <button
                     className="button ghost"
                     type="button"
-                    onClick={() => {
-                      setUploadItems((current) =>
-                        current.filter((item) => {
-                          const normalizedPath = normalizeUploadItemPath(item.path)
-                          const segments = normalizedPath.split('/').filter(Boolean)
-                          const key = segments.length > 1 ? `folder:${segments[0]}` : `file:${normalizedPath}`
-                          return key !== group.key
-                        })
-                      )
-                    }}
+                    onClick={() => dispatch({ type: 'REMOVE_GROUP', groupKey: group.key })}
                   >
                     Remove
                   </button>

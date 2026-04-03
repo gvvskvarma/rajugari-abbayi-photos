@@ -1,4 +1,5 @@
 import type { UploadItem } from '../types'
+import { dedupeUploadItems, normalizeUploadItemPath } from '../lib/upload'
 
 export type UploadFormState = {
   clientMode: 'create' | 'reuse'
@@ -18,7 +19,7 @@ export type UploadFormAction =
   | { type: 'SET_TITLE'; title: string }
   | { type: 'SET_ITEMS'; items: UploadItem[] }
   | { type: 'APPEND_ITEMS'; items: UploadItem[] }
-  | { type: 'REMOVE_GROUP'; groupKey: string; groupItems: UploadItem[] }
+  | { type: 'REMOVE_GROUP'; groupKey: string }
   | { type: 'SET_DROP_ACTIVE'; active: boolean }
   | { type: 'SET_BUSY'; busy: boolean }
   | { type: 'SET_MESSAGE'; message: string }
@@ -49,10 +50,17 @@ export function uploadFormReducer(state: UploadFormState, action: UploadFormActi
     case 'SET_ITEMS':
       return { ...state, items: action.items }
     case 'APPEND_ITEMS':
-      return { ...state, items: [...state.items, ...action.items] }
+      return { ...state, items: dedupeUploadItems([...state.items, ...action.items]) }
     case 'REMOVE_GROUP': {
-      const removeSet = new Set(action.groupItems.map((item) => `${item.path}::${item.file.size}::${item.file.lastModified}`))
-      return { ...state, items: state.items.filter((item) => !removeSet.has(`${item.path}::${item.file.size}::${item.file.lastModified}`)) }
+      return {
+        ...state,
+        items: state.items.filter((item) => {
+          const normalizedPath = normalizeUploadItemPath(item.path)
+          const segments = normalizedPath.split('/').filter(Boolean)
+          const key = segments.length > 1 ? `folder:${segments[0]}` : `file:${normalizedPath}`
+          return key !== action.groupKey
+        }),
+      }
     }
     case 'SET_DROP_ACTIVE':
       return { ...state, dropActive: action.active }

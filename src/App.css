@@ -2659,3 +2659,77 @@ main > section {
     font-size: 0.55rem;
   }
 }
+
+/* ── Skeleton loading primitives ──────────────────────────────────── */
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+
+.skeleton {
+  border-radius: 8px;
+  background: linear-gradient(
+    90deg,
+    var(--panel) 0%,
+    var(--line-strong) 40%,
+    var(--panel) 80%
+  );
+  background-size: 800px 100%;
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+}
+
+.skeleton-text {
+  height: 14px;
+  border-radius: 6px;
+  width: 100%;
+}
+
+.skeleton-card {
+  width: 100%;
+  height: 96px;
+  border-radius: 12px;
+}
+
+.skeleton-thumbnail {
+  aspect-ratio: 1;
+  width: 100%;
+  border-radius: 10px;
+}
+
+.skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.skeleton-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px 0;
+}
+
+.skeleton-card-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skeleton-card-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
