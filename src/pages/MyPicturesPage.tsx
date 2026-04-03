@@ -15,20 +15,16 @@ export function MyPicturesPage() {
   const [customerError, setCustomerError] = useState('')
   const [customerBusy, setCustomerBusy] = useState(false)
 
-  // ── Share link composer state ────────────────────────────────────────
+  // ── Unified selection state ──────────────────────────────────────────
+  const [selectDeliveryId, setSelectDeliveryId] = useState('')
+  const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([])
+  const [actionBusy, setActionBusy] = useState(false)
+  const [actionMessage, setActionMessage] = useState('')
+
+  // ── Share link result state ──────────────────────────────────────────
   const [newShareLinks, setNewShareLinks] = useState<Record<string, string>>({})
   const [newShareLinkScopes, setNewShareLinkScopes] = useState<Record<string, ShareLinkScope>>({})
   const [shareCopyState, setShareCopyState] = useState<Record<string, string>>({})
-  const [shareComposerDeliveryId, setShareComposerDeliveryId] = useState('')
-  const [shareComposerScope, setShareComposerScope] = useState<ShareLinkScope>('all')
-  const [shareComposerSelectedAssetIds, setShareComposerSelectedAssetIds] = useState<string[]>([])
-  const [shareComposerBusy, setShareComposerBusy] = useState(false)
-  const [shareComposerMessage, setShareComposerMessage] = useState('')
-
-  // ── Download selection state ──────────────────────────────────────────
-  const [downloadSelectDeliveryId, setDownloadSelectDeliveryId] = useState('')
-  const [downloadSelectedAssetIds, setDownloadSelectedAssetIds] = useState<string[]>([])
-  const [downloadBusy, setDownloadBusy] = useState(false)
 
   // ── Lightbox state ───────────────────────────────────────────────────
   const [customerLightbox, setCustomerLightbox] = useState<CustomerLightboxState | null>(null)
@@ -39,21 +35,8 @@ export function MyPicturesPage() {
   const customerLightboxTrapRef = useFocusTrap(Boolean(customerLightbox))
 
   // ── Computed values ──────────────────────────────────────────────────
-  const shareComposerDelivery = useMemo(
-    () => myDeliveries.find((delivery) => delivery.deliveryId === shareComposerDeliveryId) ?? null,
-    [myDeliveries, shareComposerDeliveryId],
-  )
-  const shareComposerSelectedCount = shareComposerSelectedAssetIds.length
-  const shareComposerSelectedAssetSet = useMemo(
-    () => new Set(shareComposerSelectedAssetIds),
-    [shareComposerSelectedAssetIds],
-  )
-
-  const downloadSelectedAssetSet = useMemo(
-    () => new Set(downloadSelectedAssetIds),
-    [downloadSelectedAssetIds],
-  )
-  const downloadSelectedCount = downloadSelectedAssetIds.length
+  const selectedAssetSet = useMemo(() => new Set(selectedAssetIds), [selectedAssetIds])
+  const selectedCount = selectedAssetIds.length
 
   const customerVisibleAssets = useMemo(
     () => myDeliveries.flatMap((delivery) => delivery.assets),
@@ -211,54 +194,118 @@ export function MyPicturesPage() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [customerLightbox, customerLightboxAsset, customerLightboxAssets, customerLightboxIndex])
 
-  // ── Share composer handlers ──────────────────────────────────────────
+  // ── Unified selection handlers ──────────────────────────────────────
 
-  const openShareComposer = (delivery: DeliveryCard) => {
-    setShareComposerDeliveryId(delivery.deliveryId)
-    setShareComposerScope('all')
-    setShareComposerSelectedAssetIds([])
-    setShareComposerBusy(false)
-    setShareComposerMessage('')
+  const startSelectMode = (deliveryId: string) => {
+    setSelectDeliveryId(deliveryId)
+    setSelectedAssetIds([])
+    setActionMessage('')
   }
 
-  const closeShareComposer = () => {
-    setShareComposerDeliveryId('')
-    setShareComposerScope('all')
-    setShareComposerSelectedAssetIds([])
-    setShareComposerBusy(false)
-    setShareComposerMessage('')
+  const exitSelectMode = () => {
+    setSelectDeliveryId('')
+    setSelectedAssetIds([])
+    setActionMessage('')
   }
 
-  const toggleShareComposerAsset = (assetId: string) => {
-    setShareComposerSelectedAssetIds((current) =>
-      current.includes(assetId) ? current.filter((currentId) => currentId !== assetId) : [...current, assetId],
+  const toggleAsset = (assetId: string) => {
+    setSelectedAssetIds((current) =>
+      current.includes(assetId) ? current.filter((id) => id !== assetId) : [...current, assetId],
     )
   }
 
-  const selectAllShareComposerAssets = () => {
-    if (!shareComposerDelivery) return
-    setShareComposerSelectedAssetIds(shareComposerDelivery.assets.map((asset) => asset.id))
+  const selectAllAssets = (deliveryId: string) => {
+    const delivery = myDeliveries.find((d) => d.deliveryId === deliveryId)
+    if (!delivery) return
+    setSelectedAssetIds(delivery.assets.filter((a) => a.canDownload).map((a) => a.id))
   }
 
-  const clearShareComposerSelection = () => setShareComposerSelectedAssetIds([])
+  const clearSelection = () => setSelectedAssetIds([])
 
-  const handleCreateShareLink = async () => {
-    if (!supabase || !session?.user.id || !shareComposerDeliveryId) return
-    const deliveryId = shareComposerDeliveryId
-    const scope = shareComposerScope
-    const assetIds = scope === 'selected' ? [...new Set(shareComposerSelectedAssetIds)] : []
+  // ── Download handlers ───────────────────────────────────────────────
 
-    if (scope === 'selected' && assetIds.length === 0) {
-      setShareComposerMessage('Select at least one file before generating the link.')
-      return
-    }
-
+  const handleDownloadAll = async (deliveryId: string) => {
     try {
-      setShareComposerBusy(true)
-      setShareComposerMessage('')
       const token = await getAccessToken()
       if (!token) {
-        setShareComposerMessage('Login session expired. Please log in again.')
+        setCustomerError('Login session expired. Please log in again.')
+        return
+      }
+      setActionBusy(true)
+      const delivery = myDeliveries.find((d) => d.deliveryId === deliveryId)
+      const blob = await loadWorkerBlob(`/api/v1/deliveries/${deliveryId}/download`, token, {
+        method: 'POST',
+        body: {},
+      })
+      const name = sanitizeDownloadName(delivery?.projectName || delivery?.clientName || 'photos')
+      triggerBrowserDownload(blob, `${name}.zip`)
+    } catch (error) {
+      setCustomerError(error instanceof Error ? error.message : 'Download failed')
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  const handleDownloadSelected = async () => {
+    if (selectedAssetIds.length === 0 || !selectDeliveryId) return
+    try {
+      const token = await getAccessToken()
+      if (!token) {
+        setCustomerError('Login session expired. Please log in again.')
+        return
+      }
+      setActionBusy(true)
+      const delivery = myDeliveries.find((d) => d.deliveryId === selectDeliveryId)
+      const blob = await loadWorkerBlob(`/api/v1/deliveries/${selectDeliveryId}/download`, token, {
+        method: 'POST',
+        body: { assetIds: selectedAssetIds },
+      })
+      const name = sanitizeDownloadName(delivery?.projectName || delivery?.clientName || 'photos')
+      triggerBrowserDownload(blob, `${name}-selected.zip`)
+      exitSelectMode()
+    } catch (error) {
+      setCustomerError(error instanceof Error ? error.message : 'Download failed')
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  // ── Share link handlers ─────────────────────────────────────────────
+
+  const handleShareAll = async (deliveryId: string) => {
+    if (!supabase || !session?.user.id) return
+    try {
+      setActionBusy(true)
+      setActionMessage('')
+      const token = await getAccessToken()
+      if (!token) {
+        setCustomerError('Login session expired. Please log in again.')
+        return
+      }
+      const payload = await workerRequest<{ url: string; scopeType: ShareLinkScope }>(
+        '/api/v1/share-links',
+        token,
+        { method: 'POST', body: { deliveryId, expiresInDays: 7, scope: 'all', assetIds: [] } },
+      )
+      setNewShareLinks((current) => ({ ...current, [deliveryId]: payload.url }))
+      setNewShareLinkScopes((current) => ({ ...current, [deliveryId]: payload.scopeType ?? 'all' }))
+      setShareCopyState((current) => ({ ...current, [deliveryId]: '' }))
+    } catch (error) {
+      setCustomerError(error instanceof Error ? error.message : 'Unable to create share link')
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  const handleShareSelected = async () => {
+    if (selectedAssetIds.length === 0 || !selectDeliveryId) return
+    if (!supabase || !session?.user.id) return
+    try {
+      setActionBusy(true)
+      setActionMessage('')
+      const token = await getAccessToken()
+      if (!token) {
+        setCustomerError('Login session expired. Please log in again.')
         return
       }
       const payload = await workerRequest<{ url: string; scopeType: ShareLinkScope }>(
@@ -266,17 +313,17 @@ export function MyPicturesPage() {
         token,
         {
           method: 'POST',
-          body: { deliveryId, expiresInDays: 7, scope, assetIds },
+          body: { deliveryId: selectDeliveryId, expiresInDays: 7, scope: 'selected', assetIds: [...new Set(selectedAssetIds)] },
         },
       )
-      setNewShareLinks((current) => ({ ...current, [deliveryId]: payload.url }))
-      setNewShareLinkScopes((current) => ({ ...current, [deliveryId]: payload.scopeType ?? scope }))
-      setShareCopyState((current) => ({ ...current, [deliveryId]: '' }))
-      closeShareComposer()
+      setNewShareLinks((current) => ({ ...current, [selectDeliveryId]: payload.url }))
+      setNewShareLinkScopes((current) => ({ ...current, [selectDeliveryId]: payload.scopeType ?? 'selected' }))
+      setShareCopyState((current) => ({ ...current, [selectDeliveryId]: '' }))
+      exitSelectMode()
     } catch (error) {
-      setShareComposerMessage(error instanceof Error ? error.message : 'Unable to create share link')
+      setCustomerError(error instanceof Error ? error.message : 'Unable to create share link')
     } finally {
-      setShareComposerBusy(false)
+      setActionBusy(false)
     }
   }
 
@@ -312,79 +359,6 @@ export function MyPicturesPage() {
       window.open(nextUrl, '_blank', 'noopener,noreferrer')
     } catch (error) {
       setCustomerError(error instanceof Error ? error.message : 'Unable to open file')
-    }
-  }
-
-  // ── Download selection handlers ────────────────────────────────────────
-
-  const startDownloadSelect = (deliveryId: string) => {
-    setDownloadSelectDeliveryId(deliveryId)
-    setDownloadSelectedAssetIds([])
-  }
-
-  const cancelDownloadSelect = () => {
-    setDownloadSelectDeliveryId('')
-    setDownloadSelectedAssetIds([])
-  }
-
-  const toggleDownloadAsset = (assetId: string) => {
-    setDownloadSelectedAssetIds((current) =>
-      current.includes(assetId)
-        ? current.filter((id) => id !== assetId)
-        : [...current, assetId],
-    )
-  }
-
-  const selectAllDownloadAssets = (deliveryId: string) => {
-    const delivery = myDeliveries.find((d) => d.deliveryId === deliveryId)
-    if (!delivery) return
-    const downloadable = delivery.assets.filter((a) => a.canDownload).map((a) => a.id)
-    setDownloadSelectedAssetIds(downloadable)
-  }
-
-  const handleDownloadAll = async (deliveryId: string) => {
-    try {
-      const token = await getAccessToken()
-      if (!token) {
-        setCustomerError('Login session expired. Please log in again.')
-        return
-      }
-      setDownloadBusy(true)
-      const delivery = myDeliveries.find((d) => d.deliveryId === deliveryId)
-      const blob = await loadWorkerBlob(`/api/v1/deliveries/${deliveryId}/download`, token, {
-        method: 'POST',
-        body: {},
-      })
-      const name = sanitizeDownloadName(delivery?.projectName || delivery?.clientName || 'photos')
-      triggerBrowserDownload(blob, `${name}.zip`)
-    } catch (error) {
-      setCustomerError(error instanceof Error ? error.message : 'Download failed')
-    } finally {
-      setDownloadBusy(false)
-    }
-  }
-
-  const handleDownloadSelected = async (deliveryId: string) => {
-    if (downloadSelectedAssetIds.length === 0) return
-    try {
-      const token = await getAccessToken()
-      if (!token) {
-        setCustomerError('Login session expired. Please log in again.')
-        return
-      }
-      setDownloadBusy(true)
-      const delivery = myDeliveries.find((d) => d.deliveryId === deliveryId)
-      const blob = await loadWorkerBlob(`/api/v1/deliveries/${deliveryId}/download`, token, {
-        method: 'POST',
-        body: { assetIds: downloadSelectedAssetIds },
-      })
-      const name = sanitizeDownloadName(delivery?.projectName || delivery?.clientName || 'photos')
-      triggerBrowserDownload(blob, `${name}-selected.zip`)
-      cancelDownloadSelect()
-    } catch (error) {
-      setCustomerError(error instanceof Error ? error.message : 'Download failed')
-    } finally {
-      setDownloadBusy(false)
     }
   }
 
@@ -531,242 +505,188 @@ export function MyPicturesPage() {
       )}
 
       <div className="delivery-list">
-        {myDeliveries.map((delivery) => (
-          <article key={delivery.deliveryId} className="delivery-card">
-            <div className="delivery-header">
-              <div>
-                <p className="delivery-title">{delivery.projectName || delivery.clientName || 'Your gallery'}</p>
-                <p className="delivery-expiry">
-                  {delivery.projectStatus
-                    ? delivery.projectStatus.charAt(0).toUpperCase() + delivery.projectStatus.slice(1)
-                    : delivery.accessMode === 'viewer'
-                      ? 'View only'
-                      : 'Available now'}
-                </p>
+        {myDeliveries.map((delivery) => {
+          const isSelectMode = selectDeliveryId === delivery.deliveryId
+          const canAct = delivery.accessMode !== 'viewer'
+
+          return (
+            <article key={delivery.deliveryId} className="delivery-card">
+              <div className="delivery-header">
+                <div>
+                  <p className="delivery-title">{delivery.projectName || delivery.clientName || 'Your gallery'}</p>
+                  <p className="delivery-expiry">
+                    {delivery.projectStatus
+                      ? delivery.projectStatus.charAt(0).toUpperCase() + delivery.projectStatus.slice(1)
+                      : delivery.accessMode === 'viewer'
+                        ? 'View only'
+                        : 'Available now'}
+                  </p>
+                </div>
+                <div className="delivery-header-actions">
+                  <span className="admin-client-count">
+                    {delivery.assets.length} file{delivery.assets.length === 1 ? '' : 's'}
+                  </span>
+                </div>
               </div>
-              <div className="delivery-header-actions">
-                <span className="admin-client-count">
-                  {delivery.assets.length} file{delivery.assets.length === 1 ? '' : 's'}
-                </span>
-                {delivery.accessMode !== 'viewer' && (
-                  <>
-                    <button
-                      className="button ghost"
-                      type="button"
-                      disabled={downloadBusy}
-                      onClick={() => { void handleDownloadAll(delivery.deliveryId) }}
-                    >
-                      {downloadBusy && downloadSelectDeliveryId === '' ? 'Downloading...' : 'Download all'}
-                    </button>
-                    {downloadSelectDeliveryId === delivery.deliveryId ? (
-                      <>
-                        <button
-                          className="button ghost"
-                          type="button"
-                          onClick={() => selectAllDownloadAssets(delivery.deliveryId)}
-                          disabled={downloadBusy}
-                        >
-                          Select all
-                        </button>
-                        <button
-                          className="button ghost"
-                          type="button"
-                          onClick={() => { void handleDownloadSelected(delivery.deliveryId) }}
-                          disabled={downloadBusy || downloadSelectedCount === 0}
-                        >
-                          {downloadBusy ? 'Downloading...' : `Download selected (${downloadSelectedCount})`}
-                        </button>
-                        <button className="button ghost" type="button" onClick={cancelDownloadSelect} disabled={downloadBusy}>
-                          Cancel
-                        </button>
-                      </>
-                    ) : (
+
+              {/* ── Action bar ─────────────────────────────────────── */}
+              {canAct && (
+                <div className="delivery-action-bar">
+                  {isSelectMode ? (
+                    <>
+                      <button className="button ghost" type="button" onClick={() => selectAllAssets(delivery.deliveryId)} disabled={actionBusy}>
+                        Select all
+                      </button>
+                      <button className="button ghost" type="button" onClick={clearSelection} disabled={actionBusy || selectedCount === 0}>
+                        Clear
+                      </button>
                       <button
                         className="button ghost"
                         type="button"
-                        onClick={() => startDownloadSelect(delivery.deliveryId)}
-                        disabled={downloadBusy}
+                        onClick={() => { void handleDownloadSelected() }}
+                        disabled={actionBusy || selectedCount === 0}
+                      >
+                        {actionBusy ? 'Working...' : `Download (${selectedCount})`}
+                      </button>
+                      <button
+                        className="button ghost"
+                        type="button"
+                        onClick={() => { void handleShareSelected() }}
+                        disabled={actionBusy || selectedCount === 0}
+                      >
+                        {actionBusy ? 'Working...' : `Share (${selectedCount})`}
+                      </button>
+                      <button className="button ghost" type="button" onClick={exitSelectMode} disabled={actionBusy}>
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className="button ghost"
+                        type="button"
+                        disabled={actionBusy}
+                        onClick={() => { void handleDownloadAll(delivery.deliveryId) }}
+                      >
+                        Download all
+                      </button>
+                      <button
+                        className="button ghost"
+                        type="button"
+                        disabled={actionBusy}
+                        onClick={() => startSelectMode(delivery.deliveryId)}
                       >
                         Select files
                       </button>
-                    )}
-                  </>
-                )}
-                <button
-                  className="button ghost"
-                  type="button"
-                  disabled={delivery.accessMode === 'viewer'}
-                  onClick={() => {
-                    openShareComposer(delivery)
-                  }}
-                >
-                  Create share link
-                </button>
-              </div>
-            </div>
-
-            {shareComposerDeliveryId === delivery.deliveryId && shareComposerDelivery && (
-              <div className="share-link-composer">
-                <div className="share-link-composer-controls">
-                  <div className="share-link-scope-toggle" role="radiogroup" aria-label="Share scope">
-                    <label className={`share-link-scope-option ${shareComposerScope === 'all' ? 'is-selected' : ''}`}>
-                      <input
-                        type="radio"
-                        name={`share-scope-${delivery.deliveryId}`}
-                        checked={shareComposerScope === 'all'}
-                        onChange={() => {
-                          setShareComposerScope('all')
-                          clearShareComposerSelection()
-                          setShareComposerMessage('')
-                        }}
-                        disabled={shareComposerBusy}
-                      />
-                      <span>All files</span>
-                    </label>
-                    <label className={`share-link-scope-option ${shareComposerScope === 'selected' ? 'is-selected' : ''}`}>
-                      <input
-                        type="radio"
-                        name={`share-scope-${delivery.deliveryId}`}
-                        checked={shareComposerScope === 'selected'}
-                        onChange={() => {
-                          setShareComposerScope('selected')
-                          setShareComposerMessage('')
-                        }}
-                        disabled={shareComposerBusy}
-                      />
-                      <span>Selected ({shareComposerSelectedCount})</span>
-                    </label>
-                  </div>
-
-                  <div className="share-link-composer-row">
-                    {shareComposerScope === 'selected' && (
-                      <>
-                        <button className="button ghost" type="button" onClick={selectAllShareComposerAssets} disabled={shareComposerBusy}>
-                          Select all
-                        </button>
-                        <button className="button ghost" type="button" onClick={clearShareComposerSelection} disabled={shareComposerBusy || shareComposerSelectedCount === 0}>
-                          Clear
-                        </button>
-                      </>
-                    )}
-                    <button
-                      className="button primary"
-                      type="button"
-                      onClick={() => { void handleCreateShareLink() }}
-                      disabled={shareComposerBusy || (shareComposerScope === 'selected' && shareComposerSelectedCount === 0)}
-                    >
-                      {shareComposerBusy ? 'Generating...' : 'Generate link'}
-                    </button>
-                    <button className="button ghost" type="button" onClick={closeShareComposer}>
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-
-                {shareComposerScope === 'selected' && (
-                  <p className="portal-hint">Tap photos below to select them for the share link.</p>
-                )}
-
-                {shareComposerMessage && <p className="portal-error">{shareComposerMessage}</p>}
-              </div>
-            )}
-
-            {newShareLinks[delivery.deliveryId] && (
-              <div className="share-link-row">
-                <div className="share-link-meta">
-                  <span className="share-link-label">
-                    {newShareLinkScopes[delivery.deliveryId] === 'selected' ? 'Selected files only' : 'All files in this folder'}
-                  </span>
-                </div>
-                <input className="share-link-input" value={newShareLinks[delivery.deliveryId]} readOnly />
-                <button
-                  className="button ghost"
-                  type="button"
-                  onClick={() => {
-                    void handleCopyShareLink(delivery.deliveryId)
-                  }}
-                >
-                  {shareCopyState[delivery.deliveryId] || 'Copy'}
-                </button>
-              </div>
-            )}
-
-            <div className="customer-asset-grid">
-              {delivery.assets.map((asset) => {
-                const isShareSelectMode = shareComposerDeliveryId === delivery.deliveryId && shareComposerScope === 'selected'
-                const isShareSelected = isShareSelectMode && shareComposerSelectedAssetSet.has(asset.id)
-                const isDownloadSelectMode = downloadSelectDeliveryId === delivery.deliveryId
-                const isDownloadSelected = isDownloadSelectMode && downloadSelectedAssetSet.has(asset.id)
-                const isSelectMode = isShareSelectMode || isDownloadSelectMode
-                const isSelected = isShareSelected || isDownloadSelected
-                const displayName = getDisplayFileName(asset.filename)
-                const isImage = asset.mime_type.startsWith('image/')
-                const thumbnailUrl = customerThumbnailUrls[asset.id]
-
-                const handleSelectClick = () => {
-                  if (isShareSelectMode) toggleShareComposerAsset(asset.id)
-                  else if (isDownloadSelectMode) toggleDownloadAsset(asset.id)
-                }
-
-                return (
-                  <article key={asset.id} className={`customer-asset-card ${isSelected ? 'is-selected' : ''}`}>
-                    {isSelectMode && (
                       <button
-                        className="customer-asset-select-overlay"
+                        className="button ghost"
                         type="button"
-                        aria-pressed={isSelected}
-                        onClick={handleSelectClick}
-                        disabled={shareComposerBusy || downloadBusy}
+                        disabled={actionBusy}
+                        onClick={() => { void handleShareAll(delivery.deliveryId) }}
                       >
-                        <span className="customer-asset-check">{isSelected ? '✓' : ''}</span>
-                        <span className="sr-only">Select {displayName}</span>
+                        Share all
                       </button>
-                    )}
-                    {isImage ? (
-                      <button
-                        className="customer-asset-thumb customer-asset-thumb-button"
-                        type="button"
-                        onClick={() => isSelectMode ? handleSelectClick() : openCustomerLightbox(delivery.deliveryId, asset.id)}
-                        aria-label={isSelectMode ? `Select ${displayName}` : `Open ${displayName}`}
-                        disabled={!isSelectMode && !thumbnailUrl}
-                      >
-                        {thumbnailUrl ? (
-                          <img src={thumbnailUrl} alt={displayName} loading="lazy" decoding="async" />
-                        ) : (
+                    </>
+                  )}
+                </div>
+              )}
+
+              {isSelectMode && (
+                <p className="portal-hint">Tap photos to select, then download or share them.</p>
+              )}
+              {actionMessage && selectDeliveryId === delivery.deliveryId && (
+                <p className="portal-error">{actionMessage}</p>
+              )}
+
+              {/* ── Share link result ──────────────────────────────── */}
+              {newShareLinks[delivery.deliveryId] && (
+                <div className="share-link-row">
+                  <div className="share-link-meta">
+                    <span className="share-link-label">
+                      {newShareLinkScopes[delivery.deliveryId] === 'selected' ? 'Selected files only' : 'All files in this folder'}
+                    </span>
+                  </div>
+                  <input className="share-link-input" value={newShareLinks[delivery.deliveryId]} readOnly />
+                  <button
+                    className="button ghost"
+                    type="button"
+                    onClick={() => {
+                      void handleCopyShareLink(delivery.deliveryId)
+                    }}
+                  >
+                    {shareCopyState[delivery.deliveryId] || 'Copy'}
+                  </button>
+                </div>
+              )}
+
+              {/* ── Asset grid ────────────────────────────────────── */}
+              <div className="customer-asset-grid">
+                {delivery.assets.map((asset) => {
+                  const isSelected = isSelectMode && selectedAssetSet.has(asset.id)
+                  const displayName = getDisplayFileName(asset.filename)
+                  const isImage = asset.mime_type.startsWith('image/')
+                  const thumbnailUrl = customerThumbnailUrls[asset.id]
+
+                  return (
+                    <article key={asset.id} className={`customer-asset-card ${isSelected ? 'is-selected' : ''}`}>
+                      {isSelectMode && (
+                        <button
+                          className="customer-asset-select-overlay"
+                          type="button"
+                          aria-pressed={isSelected}
+                          onClick={() => toggleAsset(asset.id)}
+                          disabled={actionBusy}
+                        >
+                          <span className="customer-asset-check">{isSelected ? '✓' : ''}</span>
+                          <span className="sr-only">Select {displayName}</span>
+                        </button>
+                      )}
+                      {isImage ? (
+                        <button
+                          className="customer-asset-thumb customer-asset-thumb-button"
+                          type="button"
+                          onClick={() => isSelectMode ? toggleAsset(asset.id) : openCustomerLightbox(delivery.deliveryId, asset.id)}
+                          aria-label={isSelectMode ? `Select ${displayName}` : `Open ${displayName}`}
+                          disabled={!isSelectMode && !thumbnailUrl}
+                        >
+                          {thumbnailUrl ? (
+                            <img src={thumbnailUrl} alt={displayName} loading="lazy" decoding="async" />
+                          ) : (
+                            <div className="customer-asset-thumb-fallback">
+                              <span>IMG</span>
+                            </div>
+                          )}
+                        </button>
+                      ) : (
+                        <div className="customer-asset-thumb">
                           <div className="customer-asset-thumb-fallback">
-                            <span>IMG</span>
+                            <span>{asset.mime_type.split('/')[0]?.slice(0, 1).toUpperCase() || 'F'}</span>
                           </div>
-                        )}
-                      </button>
-                    ) : (
-                      <div className="customer-asset-thumb">
-                        <div className="customer-asset-thumb-fallback">
-                          <span>{asset.mime_type.split('/')[0]?.slice(0, 1).toUpperCase() || 'F'}</span>
                         </div>
+                      )}
+                      <div className="customer-asset-main">
+                        <p className="customer-asset-name">{displayName}</p>
+                        {!isImage && <p className="portal-hint">{getAssetKind(asset.mime_type)}</p>}
                       </div>
-                    )}
-                    <div className="customer-asset-main">
-                      <p className="customer-asset-name">{displayName}</p>
-                      {!isImage && <p className="portal-hint">{getAssetKind(asset.mime_type)}</p>}
-                    </div>
-                    {!isSelectMode && (
-                      <div className="customer-asset-actions">
-                        {!isImage && (
-                          <button className="button ghost" type="button" onClick={() => { void handleOpenAsset(asset.id, 'view') }}>
-                            Open
+                      {!isSelectMode && (
+                        <div className="customer-asset-actions">
+                          {!isImage && (
+                            <button className="button ghost" type="button" onClick={() => { void handleOpenAsset(asset.id, 'view') }}>
+                              Open
+                            </button>
+                          )}
+                          <button className="button ghost" type="button" disabled={!asset.canDownload} onClick={() => { void handleOpenAsset(asset.id, 'download') }}>
+                            Download
                           </button>
-                        )}
-                        <button className="button ghost" type="button" disabled={!asset.canDownload} onClick={() => { void handleOpenAsset(asset.id, 'download') }}>
-                          Download
-                        </button>
-                      </div>
-                    )}
-                  </article>
-                )
-              })}
-            </div>
-          </article>
-        ))}
+                        </div>
+                      )}
+                    </article>
+                  )
+                })}
+              </div>
+            </article>
+          )
+        })}
       </div>
 
       {customerLightboxAsset && customerLightbox && renderCustomerLightbox()}
