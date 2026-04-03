@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { AdminActivityKind, AdminActivityItem } from '../types'
+import { useCallback, useEffect, useReducer, useState } from 'react'
+import type { AdminActivityItem } from '../types'
 import { useAuth } from '../hooks/useAuth'
 import { workerRequest } from '../hooks/useApi'
 import { useAdminData } from '../context/AdminDataContext.tsx'
 import { ADMIN_ACTIVITY_LIMIT } from '../lib/helpers'
-import { getDisplayFileName } from '../lib/upload'
 import { supabase } from '../lib/supabase'
+import { AdminActivityPanel } from '../components/AdminActivityPanel'
+import { adminActivityReducer, createAdminActivityInitialState } from '../reducers/adminActivityReducer'
+import { SkeletonCardList } from '../components/Skeleton'
 
 export function AdminClientsPage() {
   const { session, role, getAccessToken } = useAuth()
@@ -19,11 +21,7 @@ export function AdminClientsPage() {
   } = useAdminData()
 
   const [adminClientSearch, setAdminClientSearch] = useState('')
-  const [adminActivities, setAdminActivities] = useState<AdminActivityItem[]>([])
-  const [adminActivityBusy, setAdminActivityBusy] = useState(false)
-  const [adminActivityError, setAdminActivityError] = useState('')
-  const [adminActivityKindFilter, setAdminActivityKindFilter] = useState<'all' | AdminActivityKind>('all')
-  const [adminActivityExpanded, setAdminActivityExpanded] = useState(true)
+  const [activityState, activityDispatch] = useReducer(adminActivityReducer, true, createAdminActivityInitialState)
 
   // --- Load admin activity on mount ---
 
@@ -33,14 +31,14 @@ export function AdminClientsPage() {
     let cancelled = false
 
     const loadAdminActivity = async () => {
-      setAdminActivityBusy(true)
-      setAdminActivityError('')
+      activityDispatch({ type: 'SET_BUSY', busy: true })
+      activityDispatch({ type: 'SET_ERROR', error: '' })
 
       try {
         const token = await getAccessToken()
         if (cancelled) return
         if (!token) {
-          setAdminActivityError('Login session expired. Please log in again.')
+          activityDispatch({ type: 'SET_ERROR', error: 'Login session expired. Please log in again.' })
           return
         }
 
@@ -51,15 +49,15 @@ export function AdminClientsPage() {
           token
         )
         if (!cancelled) {
-          setAdminActivities(payload.activities ?? [])
+          activityDispatch({ type: 'SET_ACTIVITIES', activities: payload.activities ?? [] })
         }
       } catch (error) {
         if (!cancelled) {
-          setAdminActivityError(error instanceof Error ? error.message : 'Failed to load activity trail')
+          activityDispatch({ type: 'SET_ERROR', error: error instanceof Error ? error.message : 'Failed to load activity trail' })
         }
       } finally {
         if (!cancelled) {
-          setAdminActivityBusy(false)
+          activityDispatch({ type: 'SET_BUSY', busy: false })
         }
       }
     }
@@ -82,151 +80,16 @@ export function AdminClientsPage() {
       .includes(query)
   })
 
-  const getAdminActivityContext = (entry: AdminActivityItem) => {
-    const client = entry.clientId ? adminClientById.get(entry.clientId) : null
-    const project = entry.projectId ? adminProjectById.get(entry.projectId) : null
-    const asset = entry.assetId ? adminAssetById.get(entry.assetId) : null
-    const itemCount = typeof entry.metadata?.count === 'number' ? entry.metadata.count : null
+  const getAdminActivityContext = useCallback(
+    (entry: AdminActivityItem) => {
+      const client = entry.clientId ? adminClientById.get(entry.clientId) : null
+      const project = entry.projectId ? adminProjectById.get(entry.projectId) : null
+      const asset = entry.assetId ? adminAssetById.get(entry.assetId) : null
+      const itemCount = typeof entry.metadata?.count === 'number' ? entry.metadata.count : null
 
-    return { client, project, asset, itemCount }
-  }
-
-  const adminActivityCounts = useMemo(() => {
-    const counts: Record<'all' | AdminActivityKind, number> = {
-      all: 0,
-      upload: 0,
-      download: 0,
-      create: 0,
-      edit: 0,
-      delete: 0,
-    }
-
-    for (const activity of adminActivities) {
-      counts.all += 1
-      counts[activity.kind] += 1
-    }
-
-    return counts
-  }, [adminActivities])
-
-  const visibleAdminActivities = useMemo(() => {
-    return adminActivities.filter((entry) => {
-      const kindMatches = adminActivityKindFilter === 'all' || entry.kind === adminActivityKindFilter
-      return kindMatches
-    })
-  }, [adminActivities, adminActivityKindFilter])
-
-  // --- Activity panel ---
-
-  const renderAdminActivityPanel = (title: string) => (
-    <section className="admin-activity-panel">
-      <div className="admin-activity-panel-head">
-        <div>
-          <p className="eyebrow">Audit trail</p>
-          <h3>{title}</h3>
-        </div>
-        <div className="admin-activity-panel-head-actions">
-          <span className="admin-client-count">{visibleAdminActivities.length} events</span>
-          <button
-            className="button ghost"
-            type="button"
-            onClick={() => setAdminActivityExpanded((current) => !current)}
-          >
-            {adminActivityExpanded ? 'Hide activity' : 'Show activity'}
-          </button>
-        </div>
-      </div>
-
-      {adminActivityExpanded && (
-        <>
-          <div className="admin-activity-toolbar" role="toolbar" aria-label="Audit trail filters">
-            <button
-              className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'all' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => setAdminActivityKindFilter('all')}
-            >
-              All events
-              <span>{adminActivityCounts.all}</span>
-            </button>
-            <button
-              className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'upload' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => setAdminActivityKindFilter('upload')}
-            >
-              Uploads
-              <span>{adminActivityCounts.upload}</span>
-            </button>
-            <button
-              className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'download' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => setAdminActivityKindFilter('download')}
-            >
-              Downloads
-              <span>{adminActivityCounts.download}</span>
-            </button>
-            <button
-              className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'create' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => setAdminActivityKindFilter('create')}
-            >
-              Creates
-              <span>{adminActivityCounts.create}</span>
-            </button>
-            <button
-              className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'edit' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => setAdminActivityKindFilter('edit')}
-            >
-              Edits
-              <span>{adminActivityCounts.edit}</span>
-            </button>
-            <button
-              className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'delete' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => setAdminActivityKindFilter('delete')}
-            >
-              Deletes
-              <span>{adminActivityCounts.delete}</span>
-            </button>
-          </div>
-
-          {adminActivityBusy ? (
-            <p className="portal-hint">Loading recent activity...</p>
-          ) : adminActivityError ? (
-            <p className="portal-error">{adminActivityError}</p>
-          ) : visibleAdminActivities.length === 0 ? (
-            <p className="portal-hint">No recent activity yet.</p>
-          ) : (
-            <ul className="admin-activity-list">
-              {visibleAdminActivities.slice(0, 6).map((entry) => (
-                <li key={entry.id} className={`admin-activity-item is-${entry.kind}`}>
-                  {(() => {
-                    const { client, project, asset, itemCount } = getAdminActivityContext(entry)
-                    return (
-                      <div>
-                        <p className="admin-activity-title">{entry.title}</p>
-                        <p className="admin-activity-detail">{entry.detail}</p>
-                        <div className="admin-activity-context">
-                          {client && <span>Client: {client.full_name}</span>}
-                          {project && <span>Folder: {project.name}</span>}
-                          {asset && <span>File: {getDisplayFileName(asset.filename)}</span>}
-                          {itemCount !== null && (
-                            <span>
-                              {itemCount} item{itemCount === 1 ? '' : 's'}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })()}
-                  <time dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleString()}</time>
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
-      )}
-    </section>
+      return { client, project, asset, itemCount }
+    },
+    [adminClientById, adminProjectById, adminAssetById]
   )
 
   // --- Auth guard ---
@@ -286,9 +149,19 @@ export function AdminClientsPage() {
         />
       </label>
 
-      {renderAdminActivityPanel('Recent activity')}
+      <AdminActivityPanel
+        title="Recent activity"
+        activities={activityState.activities}
+        busy={activityState.busy}
+        error={activityState.error}
+        kindFilter={activityState.kindFilter}
+        onKindFilterChange={(filter) => activityDispatch({ type: 'SET_KIND_FILTER', filter })}
+        expanded={activityState.expanded}
+        onToggleExpanded={() => activityDispatch({ type: 'TOGGLE_EXPANDED' })}
+        getContext={getAdminActivityContext}
+      />
 
-      {adminBusy && <p className="portal-hint">Loading client folders...</p>}
+      {adminBusy && <SkeletonCardList count={4} />}
       {adminError && <p className="portal-error">{adminError}</p>}
       {!adminBusy && !adminError && filteredAdminClients.length === 0 && (
         <p className="portal-hint">No client folders found yet.</p>

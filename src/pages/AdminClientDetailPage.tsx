@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import type {
-  AdminActivityKind,
   AdminActivityItem,
+  AdminActivityKind,
   AdminLightboxState,
   AdminProject,
   AdminProjectView,
@@ -11,10 +11,17 @@ import type {
 import { useAuth } from '../hooks/useAuth'
 import { workerRequest, loadWorkerBlob, triggerBrowserDownload } from '../hooks/useApi'
 import { useAdminData } from '../context/AdminDataContext.tsx'
-import { useFocusTrap } from '../hooks/useFocusTrap'
+import { DeleteConfirmationModal } from '../components/DeleteConfirmationModal'
+import { AdminActivityPanel } from '../components/AdminActivityPanel'
+import { AdminClientEditForm } from '../components/AdminClientEditForm'
+import { AdminProjectCard } from '../components/AdminProjectCard'
+import { AdminBulkActions } from '../components/AdminBulkActions'
+import { AdminDetailToolbar } from '../components/AdminDetailToolbar'
 import { supabase } from '../lib/supabase'
 import { ADMIN_ACTIVITY_LIMIT, ADMIN_PROJECT_CHUNK_SIZE, getAssetKind } from '../lib/helpers'
 import { getDisplayFileName, sanitizeDownloadName } from '../lib/upload'
+import { AdminLightbox } from '../components/AdminLightbox'
+import { adminActivityReducer, createAdminActivityInitialState } from '../reducers/adminActivityReducer'
 
 export function AdminClientDetailPage() {
   const { clientId } = useParams<{ clientId: string }>()
@@ -52,15 +59,7 @@ export function AdminClientDetailPage() {
   const [adminProjectRenderLimits, setAdminProjectRenderLimits] = useState<Record<string, number>>({})
   const [adminLightbox, setAdminLightbox] = useState<AdminLightboxState | null>(null)
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmationState | null>(null)
-  const [adminActivities, setAdminActivities] = useState<AdminActivityItem[]>([])
-  const [adminActivityBusy, setAdminActivityBusy] = useState(false)
-  const [adminActivityError, setAdminActivityError] = useState('')
-  const [adminActivityKindFilter, setAdminActivityKindFilter] = useState<'all' | AdminActivityKind>('all')
-  const [adminActivityExpanded, setAdminActivityExpanded] = useState(false)
-  const adminLightboxTouchStartRef = useRef<number | null>(null)
-
-  const adminLightboxTrapRef = useFocusTrap(Boolean(adminLightbox))
-  const deleteConfirmationTrapRef = useFocusTrap(Boolean(deleteConfirmation))
+  const [activityState, activityDispatch] = useReducer(adminActivityReducer, false, createAdminActivityInitialState)
 
   // --- computed ---
   const selectedAdminClient = useMemo(
@@ -90,21 +89,12 @@ export function AdminClientDetailPage() {
           [project.updated_at, ...projectAssets.map((asset) => asset.created_at)]
             .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] ?? project.updated_at
 
-        return {
-          project,
-          totalAssets: filteredAssets.length,
-          visibleAssets,
-          latestActivityAt,
-        }
+        return { project, totalAssets: filteredAssets.length, visibleAssets, latestActivityAt }
       })
 
     projectViews.sort((left, right) => {
-      if (adminProjectSort === 'name') {
-        return left.project.name.localeCompare(right.project.name)
-      }
-      if (adminProjectSort === 'files') {
-        return right.totalAssets - left.totalAssets
-      }
+      if (adminProjectSort === 'name') return left.project.name.localeCompare(right.project.name)
+      if (adminProjectSort === 'files') return right.totalAssets - left.totalAssets
       return new Date(right.latestActivityAt).getTime() - new Date(left.latestActivityAt).getTime()
     })
 
@@ -129,33 +119,8 @@ export function AdminClientDetailPage() {
 
   const adminLightboxAsset = adminLightboxIndex >= 0 ? adminLightboxAssets[adminLightboxIndex] : null
 
-  const adminActivityCounts = useMemo(() => {
-    const counts: Record<'all' | AdminActivityKind, number> = {
-      all: 0,
-      upload: 0,
-      download: 0,
-      create: 0,
-      edit: 0,
-      delete: 0,
-    }
-    for (const activity of adminActivities) {
-      counts.all += 1
-      counts[activity.kind] += 1
-    }
-    return counts
-  }, [adminActivities])
-
-  const visibleAdminActivities = useMemo(() => {
-    return adminActivities.filter((entry) => {
-      const clientMatches = !selectedAdminClient?.id || entry.clientId === selectedAdminClient.id
-      const kindMatches = adminActivityKindFilter === 'all' || entry.kind === adminActivityKindFilter
-      return clientMatches && kindMatches
-    })
-  }, [adminActivities, adminActivityKindFilter, selectedAdminClient?.id])
-
   // --- effects ---
 
-  // Sync adminClientDraft when selectedAdminClient changes
   useEffect(() => {
     if (!selectedAdminClient) {
       setAdminClientEditMode(false)
@@ -170,14 +135,12 @@ export function AdminClientDetailPage() {
     })
   }, [selectedAdminClient?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Reset selectedAdminAssetIds when visible assets change
   useEffect(() => {
     setSelectedAdminAssetIds((current) =>
       current.filter((assetId) => selectedAdminVisibleAssets.some((asset) => asset.id === assetId))
     )
   }, [selectedAdminVisibleAssets])
 
-  // Reset adminProjectFilterId if selected project no longer exists
   useEffect(() => {
     if (adminProjectFilterId === 'all') return
     if (!selectedAdminClient?.projects.some((project) => project.id === adminProjectFilterId)) {
@@ -185,128 +148,60 @@ export function AdminClientDetailPage() {
     }
   }, [adminProjectFilterId, selectedAdminClient?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Reset adminProjectRenderLimits when client changes
   useEffect(() => {
     setAdminProjectRenderLimits({})
   }, [selectedAdminClient?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Update adminLightbox if current asset no longer visible
   useEffect(() => {
     if (!adminLightbox) return
-    if (adminLightboxAssets.length === 0) {
-      setAdminLightbox(null)
-      return
-    }
+    if (adminLightboxAssets.length === 0) { setAdminLightbox(null); return }
     if (adminLightboxIndex === -1) {
       setAdminLightbox({ projectId: adminLightbox.projectId, assetId: adminLightboxAssets[0].id })
     }
   }, [adminLightbox, adminLightboxAssets, adminLightboxIndex])
 
-  // Load admin asset preview URLs (batch via preview-url-batch)
   useEffect(() => {
     if (!supabase || !session?.user.id || role !== 'admin' || selectedAdminVisibleAssets.length === 0) return
-
     const missingPreviewAssets = selectedAdminVisibleAssets.filter(
       (asset) => asset.mime_type.startsWith('image/') && !adminAssetPreviewUrls[asset.id]
     )
     if (missingPreviewAssets.length === 0) return
-
     let cancelled = false
-
     const loadPreviewUrls = async () => {
       const token = await getAccessToken()
       if (!token) return
-
       const payload = await workerRequest<{ urls: Record<string, string> }>(
-        '/api/v1/media/preview-url-batch',
-        token,
-        {
-          method: 'POST',
-          body: { assetIds: missingPreviewAssets.map((asset) => asset.id), variant: 'preview' },
-        }
+        '/api/v1/media/preview-url-batch', token,
+        { method: 'POST', body: { assetIds: missingPreviewAssets.map((asset) => asset.id), variant: 'preview' } }
       )
-
       if (cancelled) return
       setAdminAssetPreviewUrls((current) => ({ ...current, ...(payload.urls ?? {}) }))
     }
-
     void loadPreviewUrls()
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [adminAssetPreviewUrls, getAccessToken, role, selectedAdminVisibleAssets, session?.user.id])
 
-  // Admin lightbox keyboard navigation
-  useEffect(() => {
-    if (!adminLightboxAsset) return
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        closeAdminLightbox()
-        return
-      }
-      if (event.key === 'ArrowLeft') {
-        event.preventDefault()
-        moveAdminLightbox('prev')
-        return
-      }
-      if (event.key === 'ArrowRight') {
-        event.preventDefault()
-        moveAdminLightbox('next')
-      }
-    }
-
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [adminLightboxAsset, adminLightboxAssets.length, adminLightboxIndex]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Delete confirmation Escape key handler
-  useEffect(() => {
-    if (!deleteConfirmation) return
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        setDeleteConfirmation(null)
-      }
-    }
-
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [deleteConfirmation])
-
-  // Load admin activity for selected client
   useEffect(() => {
     if (!supabase || !session?.user.id || role !== 'admin') return
     if (!selectedAdminClient?.id) return
-
     const loadAdminActivity = async (activityClientId: string) => {
-      setAdminActivityBusy(true)
-      setAdminActivityError('')
-
+      activityDispatch({ type: 'SET_BUSY', busy: true })
+      activityDispatch({ type: 'SET_ERROR', error: '' })
       try {
         const token = await getAccessToken()
-        if (!token) {
-          setAdminActivityError('Login session expired. Please log in again.')
-          return
-        }
-
+        if (!token) { activityDispatch({ type: 'SET_ERROR', error: 'Login session expired. Please log in again.' }); return }
         const params = new URLSearchParams({ limit: String(ADMIN_ACTIVITY_LIMIT) })
         params.set('clientId', activityClientId)
-
         const payload = await workerRequest<{ activities: AdminActivityItem[] }>(
-          `/api/v1/admin/activity?${params.toString()}`,
-          token
+          `/api/v1/admin/activity?${params.toString()}`, token
         )
-        setAdminActivities(payload.activities ?? [])
+        activityDispatch({ type: 'SET_ACTIVITIES', activities: payload.activities ?? [] })
       } catch (error) {
-        setAdminActivityError(error instanceof Error ? error.message : 'Failed to load activity trail')
+        activityDispatch({ type: 'SET_ERROR', error: error instanceof Error ? error.message : 'Failed to load activity trail' })
       } finally {
-        setAdminActivityBusy(false)
+        activityDispatch({ type: 'SET_BUSY', busy: false })
       }
     }
-
     void loadAdminActivity(selectedAdminClient.id)
   }, [getAccessToken, role, selectedAdminClient?.id, session?.user.id])
 
@@ -317,21 +212,16 @@ export function AdminClientDetailPage() {
       .find((entry) => entry.project.id === projectId)
       ?.visibleAssets.find((entry) => entry.id === assetId)
     if (!asset || !asset.mime_type.startsWith('image/')) return
-
     setAdminLightbox({ projectId, assetId })
     if (adminAssetPreviewUrls[asset.id]) return
-
     try {
       const token = await getAccessToken()
       if (!token) return
       const payload = await workerRequest<{ url: string }>('/api/v1/media/preview-url', token, {
-        method: 'POST',
-        body: { assetId: asset.id },
+        method: 'POST', body: { assetId: asset.id },
       })
       setAdminAssetPreviewUrls((current) => ({ ...current, [asset.id]: payload.url }))
-    } catch {
-      // The lightbox can still open; the image will retry from the existing preload effect.
-    }
+    } catch { /* lightbox can still open */ }
   }
 
   const closeAdminLightbox = () => setAdminLightbox(null)
@@ -370,32 +260,19 @@ export function AdminClientDetailPage() {
     if (!supabase) return
     try {
       const token = await getAccessToken()
-      if (!token) {
-        setAdminError('Login session expired. Please log in again.')
-        return
-      }
-
+      if (!token) { setAdminError('Login session expired. Please log in again.'); return }
       const endpoint = mode === 'view' ? '/api/v1/media/preview-url' : '/api/v1/media/signed-url'
       const payload = await workerRequest<{ signedUrl?: string; url?: string }>(endpoint, token, {
-        method: 'POST',
-        body: { assetId, mode },
+        method: 'POST', body: { assetId, mode },
       })
       const nextUrl = payload.url ?? payload.signedUrl
       if (!nextUrl) throw new Error('Missing asset URL')
       window.open(nextUrl, '_blank', 'noopener,noreferrer')
-
       if (mode === 'download') {
         const adminAsset = selectedAdminClient?.assets.find((entry) => entry.id === assetId)
-        recordAdminActivity(
-          'download',
-          'Downloaded file',
-          getDisplayFileName(adminAsset?.filename ?? assetId),
-          {
-            clientId: selectedAdminClient?.id ?? null,
-            projectId: adminAsset?.project_id ?? null,
-            assetId,
-          }
-        )
+        recordAdminActivity('download', 'Downloaded file', getDisplayFileName(adminAsset?.filename ?? assetId), {
+          clientId: selectedAdminClient?.id ?? null, projectId: adminAsset?.project_id ?? null, assetId,
+        })
       }
     } catch (error) {
       setAdminError(error instanceof Error ? error.message : 'Unable to open file')
@@ -403,19 +280,10 @@ export function AdminClientDetailPage() {
   }
 
   const downloadAdminArchive = async (
-    path: string,
-    body: unknown,
-    filename: string,
+    path: string, body: unknown, filename: string,
     activity?: {
-      kind: AdminActivityKind
-      title: string
-      detail: string
-      context?: {
-        clientId?: string | null
-        projectId?: string | null
-        assetId?: string | null
-        metadata?: Record<string, unknown>
-      }
+      kind: AdminActivityKind; title: string; detail: string
+      context?: { clientId?: string | null; projectId?: string | null; assetId?: string | null; metadata?: Record<string, unknown> }
     }
   ) => {
     if (!supabase) return
@@ -423,16 +291,10 @@ export function AdminClientDetailPage() {
       setAdminActionMessage(`Preparing ${filename}...`)
       setAdminBusy(true)
       const token = await getAccessToken()
-      if (!token) {
-        setAdminError('Login session expired. Please log in again.')
-        return
-      }
-
+      if (!token) { setAdminError('Login session expired. Please log in again.'); return }
       const blob = await loadWorkerBlob(path, token, { method: 'POST', body })
       triggerBrowserDownload(blob, filename)
-      if (activity) {
-        recordAdminActivity(activity.kind, activity.title, activity.detail, activity.context)
-      }
+      if (activity) recordAdminActivity(activity.kind, activity.title, activity.detail, activity.context)
     } catch (error) {
       setAdminError(error instanceof Error ? error.message : 'Unable to download files')
     } finally {
@@ -444,190 +306,119 @@ export function AdminClientDetailPage() {
   const handleDownloadAdminProject = async (project: AdminProject) => {
     if (!supabase || !session?.user.id || role !== 'admin') return
     const projectAssetIds = selectedAdminClient?.assets
-      .filter((asset) => asset.project_id === project.id)
-      .map((asset) => asset.id) ?? []
-    if (projectAssetIds.length === 0) {
-      setAdminError('No files found for this folder.')
-      return
-    }
-    await downloadAdminArchive(
-      '/api/v1/admin/downloads',
-      { assetIds: projectAssetIds, filename: project.name },
-      `${sanitizeDownloadName(project.name)}.zip`,
-      {
-        kind: 'download',
-        title: 'Downloaded folder',
-        detail: project.name,
-        context: {
-          clientId: selectedAdminClient?.id ?? null,
-          projectId: project.id,
-          metadata: { count: projectAssetIds.length },
-        },
-      }
-    )
+      .filter((asset) => asset.project_id === project.id).map((asset) => asset.id) ?? []
+    if (projectAssetIds.length === 0) { setAdminError('No files found for this folder.'); return }
+    await downloadAdminArchive('/api/v1/admin/downloads', { assetIds: projectAssetIds, filename: project.name },
+      `${sanitizeDownloadName(project.name)}.zip`, {
+        kind: 'download', title: 'Downloaded folder', detail: project.name,
+        context: { clientId: selectedAdminClient?.id ?? null, projectId: project.id, metadata: { count: projectAssetIds.length } },
+      })
   }
 
   const handleDownloadSelectedAdminAssets = async () => {
     if (!supabase || !session?.user.id || role !== 'admin' || selectedAdminAssetIds.length === 0) return
     const clientName = selectedAdminClient?.full_name ?? 'selected-files'
-    await downloadAdminArchive(
-      '/api/v1/admin/downloads',
-      { assetIds: selectedAdminAssetIds, filename: clientName },
-      `${sanitizeDownloadName(clientName)}-selected.zip`,
-      {
-        kind: 'download',
-        title: 'Downloaded selection',
+    await downloadAdminArchive('/api/v1/admin/downloads', { assetIds: selectedAdminAssetIds, filename: clientName },
+      `${sanitizeDownloadName(clientName)}-selected.zip`, {
+        kind: 'download', title: 'Downloaded selection',
         detail: `${selectedAdminAssetIds.length} selected files from ${clientName}`,
-        context: {
-          clientId: selectedAdminClient?.id ?? null,
-          metadata: { count: selectedAdminAssetIds.length, assetIds: selectedAdminAssetIds },
-        },
-      }
-    )
+        context: { clientId: selectedAdminClient?.id ?? null, metadata: { count: selectedAdminAssetIds.length, assetIds: selectedAdminAssetIds } },
+      })
   }
 
   const performDeleteAdminAsset = async (
-    assetId: string,
-    label?: string,
-    context?: {
-      clientId?: string | null
-      projectId?: string | null
-      assetId?: string | null
-      metadata?: Record<string, unknown>
-    },
+    assetId: string, label?: string,
+    context?: { clientId?: string | null; projectId?: string | null; assetId?: string | null; metadata?: Record<string, unknown> },
     options?: { silent?: boolean }
   ) => {
     if (!supabase || !session?.user.id || role !== 'admin') return
-
     const token = await getAccessToken()
-    if (!token) {
-      setAdminError('Login session expired. Please log in again.')
-      return
-    }
-
+    if (!token) { setAdminError('Login session expired. Please log in again.'); return }
     await workerRequest<{ ok: boolean }>(`/api/v1/admin/assets/${assetId}`, token, { method: 'DELETE' })
     setAdminClients((current) =>
       current.map((client) => {
         const nextAssets = client.assets.filter((asset) => asset.id !== assetId)
-        return {
-          ...client,
-          assets: nextAssets,
-          assetCount: nextAssets.length,
-        }
+        return { ...client, assets: nextAssets, assetCount: nextAssets.length }
       })
     )
     setSelectedAdminAssetIds((current) => current.filter((id) => id !== assetId))
-    if (adminLightbox?.assetId === assetId) {
-      closeAdminLightbox()
-    }
+    if (adminLightbox?.assetId === assetId) closeAdminLightbox()
     if (!options?.silent) {
       recordAdminActivity('delete', 'Deleted file', `Removed ${label ?? assetId}`, {
         clientId: context?.clientId ?? selectedAdminClient?.id ?? null,
-        projectId: context?.projectId ?? null,
-        assetId: context?.assetId ?? assetId,
-        metadata: context?.metadata,
+        projectId: context?.projectId ?? null, assetId: context?.assetId ?? assetId, metadata: context?.metadata,
       })
     }
   }
 
   const performDeleteAdminAssets = async (assetIds: string[]) => {
-    for (const assetId of assetIds) {
-      await performDeleteAdminAsset(assetId, undefined, undefined, { silent: true })
-    }
-    recordAdminActivity(
-      'delete',
-      `Deleted ${assetIds.length} file${assetIds.length === 1 ? '' : 's'}`,
+    for (const assetId of assetIds) await performDeleteAdminAsset(assetId, undefined, undefined, { silent: true })
+    recordAdminActivity('delete', `Deleted ${assetIds.length} file${assetIds.length === 1 ? '' : 's'}`,
       'Removed selected files from the admin folder',
-      {
-        clientId: selectedAdminClient?.id ?? null,
-        metadata: { count: assetIds.length, assetIds },
-      }
-    )
+      { clientId: selectedAdminClient?.id ?? null, metadata: { count: assetIds.length, assetIds } })
   }
 
   const performDeleteAdminProject = async (projectId: string, label?: string) => {
     if (!supabase || !session?.user.id || role !== 'admin') return
-
     const token = await getAccessToken()
-    if (!token) {
-      setAdminError('Login session expired. Please log in again.')
-      return
-    }
-
-    await workerRequest<{ ok: boolean }>(`/api/v1/admin/projects/${projectId}`, token, {
-      method: 'DELETE',
-    })
-
+    if (!token) { setAdminError('Login session expired. Please log in again.'); return }
+    await workerRequest<{ ok: boolean }>(`/api/v1/admin/projects/${projectId}`, token, { method: 'DELETE' })
     await loadAdminData()
     setSelectedAdminAssetIds([])
-    if (adminLightbox?.projectId === projectId) {
-      closeAdminLightbox()
-    }
-    recordAdminActivity('delete', 'Deleted folder', `Removed ${label ?? projectId}`, {
-      clientId: selectedAdminClient?.id ?? null,
-      projectId,
-    })
+    if (adminLightbox?.projectId === projectId) closeAdminLightbox()
+    recordAdminActivity('delete', 'Deleted folder', `Removed ${label ?? projectId}`, { clientId: selectedAdminClient?.id ?? null, projectId })
   }
 
   const performDeleteAdminClient = async (deleteClientId: string, label?: string) => {
     if (!supabase || !session?.user.id || role !== 'admin') return
-
     const token = await getAccessToken()
-    if (!token) {
-      setAdminError('Login session expired. Please log in again.')
-      return
-    }
-
-    await workerRequest<{ ok: boolean }>(`/api/v1/admin/clients/${deleteClientId}`, token, {
-      method: 'DELETE',
-    })
-
+    if (!token) { setAdminError('Login session expired. Please log in again.'); return }
+    await workerRequest<{ ok: boolean }>(`/api/v1/admin/clients/${deleteClientId}`, token, { method: 'DELETE' })
     setAdminClients((current) => current.filter((client) => client.id !== deleteClientId))
     setAdminClientEditMode(false)
     setAdminAssetSearch('')
     setSelectedAdminAssetIds([])
     closeAdminLightbox()
     window.location.hash = '#/admin/clients'
-    recordAdminActivity('delete', 'Deleted client', `Removed ${label ?? deleteClientId}`, {
-      clientId: deleteClientId,
-    })
+    recordAdminActivity('delete', 'Deleted client', `Removed ${label ?? deleteClientId}`, { clientId: deleteClientId })
+  }
+
+  const openDeleteConfirmation = (payload: DeleteConfirmationState) => setDeleteConfirmation(payload)
+  const closeDeleteConfirmation = () => setDeleteConfirmation(null)
+
+  const confirmDeleteConfirmation = async () => {
+    const current = deleteConfirmation
+    if (!current) return
+    setDeleteConfirmation(null)
+    setAdminActionMessage(current.progressLabel)
+    setAdminBusy(true)
+    setAdminError('')
+    try { await current.onConfirm() }
+    catch (error) { setAdminError(error instanceof Error ? error.message : 'Unable to complete delete') }
+    finally { setAdminBusy(false); setAdminActionMessage('') }
   }
 
   const handleDeleteAdminAsset = (assetId: string) => {
     if (!supabase || !session?.user.id || role !== 'admin' || !selectedAdminClient) return
-
-    const asset =
-      selectedAdminVisibleAssets.find((entry) => entry.id === assetId) ??
-      selectedAdminClient.assets.find((entry) => entry.id === assetId)
-    if (!asset) {
-      setAdminError('File not found.')
-      return
-    }
-
+    const asset = selectedAdminVisibleAssets.find((entry) => entry.id === assetId)
+      ?? selectedAdminClient.assets.find((entry) => entry.id === assetId)
+    if (!asset) { setAdminError('File not found.'); return }
     openDeleteConfirmation({
       title: `Delete ${getDisplayFileName(asset.filename)}?`,
-      description:
-        'This permanently removes the file from the folder, customer view, and database.',
-      confirmLabel: 'Delete file',
-      progressLabel: 'Deleting file...',
-      onConfirm: () =>
-        performDeleteAdminAsset(assetId, getDisplayFileName(asset.filename), {
-          clientId: selectedAdminClient.id,
-          projectId: asset.project_id,
-          assetId: asset.id,
-        }),
+      description: 'This permanently removes the file from the folder, customer view, and database.',
+      confirmLabel: 'Delete file', progressLabel: 'Deleting file...',
+      onConfirm: () => performDeleteAdminAsset(assetId, getDisplayFileName(asset.filename), {
+        clientId: selectedAdminClient.id, projectId: asset.project_id, assetId: asset.id,
+      }),
     })
   }
 
   const handleDeleteAdminProject = (project: AdminProject) => {
     if (!supabase || !session?.user.id || role !== 'admin') return
-
     openDeleteConfirmation({
       title: `Delete folder ${project.name}?`,
-      description:
-        'This removes the project, its uploaded files, the customer folder data, and the database records.',
-      confirmLabel: 'Delete folder',
-      progressLabel: 'Deleting folder...',
+      description: 'This removes the project, its uploaded files, the customer folder data, and the database records.',
+      confirmLabel: 'Delete folder', progressLabel: 'Deleting folder...',
       onConfirm: () => performDeleteAdminProject(project.id, project.name),
     })
   }
@@ -637,109 +428,69 @@ export function AdminClientDetailPage() {
     const assetIds = [...selectedAdminAssetIds]
     openDeleteConfirmation({
       title: `Delete ${assetIds.length} selected file${assetIds.length === 1 ? '' : 's'}?`,
-      description:
-        'This permanently removes the files from the folder, customer view, and database.',
+      description: 'This permanently removes the files from the folder, customer view, and database.',
       confirmLabel: 'Delete selected',
       progressLabel: `Deleting ${assetIds.length} selected file${assetIds.length === 1 ? '' : 's'}...`,
-      onConfirm: async () => {
-        await performDeleteAdminAssets(assetIds)
-        setSelectedAdminAssetIds([])
-      },
+      onConfirm: async () => { await performDeleteAdminAssets(assetIds); setSelectedAdminAssetIds([]) },
     })
   }
 
   const handleDeleteAdminClient = () => {
     if (!supabase || !session?.user.id || role !== 'admin' || !selectedAdminClient) return
-
     openDeleteConfirmation({
       title: `Delete ${selectedAdminClient.full_name}?`,
-      description:
-        'This removes the client, projects, deliveries, uploaded files, and database records.',
-      confirmLabel: 'Delete client',
-      progressLabel: 'Deleting client...',
+      description: 'This removes the client, projects, deliveries, uploaded files, and database records.',
+      confirmLabel: 'Delete client', progressLabel: 'Deleting client...',
       onConfirm: () => performDeleteAdminClient(selectedAdminClient.id, selectedAdminClient.full_name),
     })
   }
 
   const handleSaveAdminClient = async () => {
     if (!supabase || !session?.user.id || role !== 'admin' || !selectedAdminClient) return
-
     const fullName = adminClientDraft.fullName.trim()
     const email = adminClientDraft.email.trim().toLowerCase()
     const phone = adminClientDraft.phone.trim()
     const notes = adminClientDraft.notes.trim()
-
-    if (!fullName || !email) {
-      setAdminError('Client full name and email are required.')
-      return
-    }
-
-    setAdminBusy(true)
-    setAdminError('')
-
+    if (!fullName || !email) { setAdminError('Client full name and email are required.'); return }
+    setAdminBusy(true); setAdminError('')
     try {
       const token = await getAccessToken()
-      if (!token) {
-        setAdminError('Login session expired. Please log in again.')
-        return
-      }
-
+      if (!token) { setAdminError('Login session expired. Please log in again.'); return }
       const updated = await workerRequest<{ client: import('../types').AdminClient }>(
-        `/api/v1/admin/clients/${selectedAdminClient.id}`,
-        token,
-        {
-          method: 'PATCH',
-          body: { fullName, email, phone, notes },
-        }
+        `/api/v1/admin/clients/${selectedAdminClient.id}`, token,
+        { method: 'PATCH', body: { fullName, email, phone, notes } }
       )
-
       setAdminClients((current) =>
         current.map((client) => (client.id === updated.client.id ? { ...client, ...updated.client } : client))
       )
       setAdminClientEditMode(false)
-      recordAdminActivity('edit', 'Updated client', updated.client.full_name, {
-        clientId: updated.client.id,
-      })
+      recordAdminActivity('edit', 'Updated client', updated.client.full_name, { clientId: updated.client.id })
     } catch (error) {
       setAdminError(error instanceof Error ? error.message : 'Unable to update client')
-    } finally {
-      setAdminBusy(false)
-    }
+    } finally { setAdminBusy(false) }
   }
 
-  const openDeleteConfirmation = (payload: DeleteConfirmationState) => {
-    setDeleteConfirmation(payload)
+  const handleCancelEdit = () => {
+    if (!selectedAdminClient) return
+    setAdminClientDraft({
+      fullName: selectedAdminClient.full_name,
+      email: selectedAdminClient.email,
+      phone: selectedAdminClient.phone ?? '',
+      notes: selectedAdminClient.notes ?? '',
+    })
+    setAdminClientEditMode(false)
   }
 
-  const closeDeleteConfirmation = () => {
-    setDeleteConfirmation(null)
-  }
-
-  const confirmDeleteConfirmation = async () => {
-    const current = deleteConfirmation
-    if (!current) return
-
-    setDeleteConfirmation(null)
-    setAdminActionMessage(current.progressLabel)
-    setAdminBusy(true)
-    setAdminError('')
-    try {
-      await current.onConfirm()
-    } catch (error) {
-      setAdminError(error instanceof Error ? error.message : 'Unable to complete delete')
-    } finally {
-      setAdminBusy(false)
-      setAdminActionMessage('')
-    }
-  }
-
-  const getAdminActivityContext = (entry: AdminActivityItem) => {
-    const client = entry.clientId ? adminClientById.get(entry.clientId) : null
-    const project = entry.projectId ? adminProjectById.get(entry.projectId) : null
-    const asset = entry.assetId ? adminAssetById.get(entry.assetId) : null
-    const itemCount = typeof entry.metadata?.count === 'number' ? entry.metadata.count : null
-    return { client, project, asset, itemCount }
-  }
+  const getAdminActivityContext = useCallback(
+    (entry: AdminActivityItem) => {
+      const client = entry.clientId ? adminClientById.get(entry.clientId) : null
+      const project = entry.projectId ? adminProjectById.get(entry.projectId) : null
+      const asset = entry.assetId ? adminAssetById.get(entry.assetId) : null
+      const itemCount = typeof entry.metadata?.count === 'number' ? entry.metadata.count : null
+      return { client, project, asset, itemCount }
+    },
+    [adminClientById, adminProjectById, adminAssetById]
+  )
 
   // --- auth guard ---
   if (!session?.user.id || role !== 'admin') {
@@ -768,119 +519,6 @@ export function AdminClientDetailPage() {
     )
   }
 
-  // --- activity panel ---
-  const renderAdminActivityPanel = () => (
-    <section className="admin-activity-panel">
-      <div className="admin-activity-panel-head">
-        <div>
-          <p className="eyebrow">Audit trail</p>
-          <h3>Recent activity</h3>
-        </div>
-        <div className="admin-activity-panel-head-actions">
-          <span className="admin-client-count">{visibleAdminActivities.length} events</span>
-          <button
-            className="button ghost"
-            type="button"
-            onClick={() => setAdminActivityExpanded((current) => !current)}
-          >
-            {adminActivityExpanded ? 'Hide activity' : 'Show activity'}
-          </button>
-        </div>
-      </div>
-
-      {adminActivityExpanded && (
-        <>
-          <div className="admin-activity-toolbar" role="toolbar" aria-label="Audit trail filters">
-            <button
-              className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'all' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => setAdminActivityKindFilter('all')}
-            >
-              All events
-              <span>{adminActivityCounts.all}</span>
-            </button>
-            <button
-              className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'upload' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => setAdminActivityKindFilter('upload')}
-            >
-              Uploads
-              <span>{adminActivityCounts.upload}</span>
-            </button>
-            <button
-              className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'download' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => setAdminActivityKindFilter('download')}
-            >
-              Downloads
-              <span>{adminActivityCounts.download}</span>
-            </button>
-            <button
-              className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'create' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => setAdminActivityKindFilter('create')}
-            >
-              Creates
-              <span>{adminActivityCounts.create}</span>
-            </button>
-            <button
-              className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'edit' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => setAdminActivityKindFilter('edit')}
-            >
-              Edits
-              <span>{adminActivityCounts.edit}</span>
-            </button>
-            <button
-              className={`button ghost admin-activity-chip ${adminActivityKindFilter === 'delete' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => setAdminActivityKindFilter('delete')}
-            >
-              Deletes
-              <span>{adminActivityCounts.delete}</span>
-            </button>
-          </div>
-
-          <p className="portal-hint">Showing activity for the selected client folder.</p>
-          {adminActivityBusy ? (
-            <p className="portal-hint">Loading recent activity...</p>
-          ) : adminActivityError ? (
-            <p className="portal-error">{adminActivityError}</p>
-          ) : visibleAdminActivities.length === 0 ? (
-            <p className="portal-hint">No recent activity yet.</p>
-          ) : (
-            <ul className="admin-activity-list">
-              {visibleAdminActivities.slice(0, 6).map((entry) => (
-                <li key={entry.id} className={`admin-activity-item is-${entry.kind}`}>
-                  {(() => {
-                    const { client, project, asset, itemCount } = getAdminActivityContext(entry)
-                    return (
-                      <div>
-                        <p className="admin-activity-title">{entry.title}</p>
-                        <p className="admin-activity-detail">{entry.detail}</p>
-                        <div className="admin-activity-context">
-                          {client && <span>Client: {client.full_name}</span>}
-                          {project && <span>Folder: {project.name}</span>}
-                          {asset && <span>File: {getDisplayFileName(asset.filename)}</span>}
-                          {itemCount !== null && (
-                            <span>
-                              {itemCount} item{itemCount === 1 ? '' : 's'}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })()}
-                  <time dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleString()}</time>
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
-      )}
-    </section>
-  )
-
   // --- main render ---
   return (
     <>
@@ -895,211 +533,71 @@ export function AdminClientDetailPage() {
             </p>
           </div>
           <div className="admin-head-actions">
-            <button className="button ghost" type="button" onClick={() => { window.location.hash = '#/admin/clients' }}>
-              Back
-            </button>
-            <button className="button ghost" type="button" onClick={() => { window.location.hash = '#/upload' }}>
-              Upload more
-            </button>
-            <button
-              className="button ghost"
-              type="button"
-              onClick={() => setAdminClientEditMode((current) => !current)}
-            >
+            <button className="button ghost" type="button" onClick={() => { window.location.hash = '#/admin/clients' }}>Back</button>
+            <button className="button ghost" type="button" onClick={() => { window.location.hash = '#/upload' }}>Upload more</button>
+            <button className="button ghost" type="button" onClick={() => setAdminClientEditMode((current) => !current)}>
               {adminClientEditMode ? 'Close edit' : 'Edit client'}
             </button>
-            <button className="button ghost" type="button" onClick={() => void handleDeleteAdminClient()}>
-              Delete client
-            </button>
+            <button className="button ghost" type="button" onClick={() => void handleDeleteAdminClient()}>Delete client</button>
           </div>
         </div>
 
         <div className="admin-detail-summary">
-          <div className="admin-stat-card">
-            <span>Projects</span>
-            <strong>{selectedAdminClient.projectCount}</strong>
-          </div>
-          <div className="admin-stat-card">
-            <span>Files</span>
-            <strong>{selectedAdminClient.assetCount}</strong>
-          </div>
-          <div className="admin-stat-card">
-            <span>Updated</span>
-            <strong>{new Date(selectedAdminClient.latestUpdatedAt).toLocaleDateString()}</strong>
-          </div>
+          <div className="admin-stat-card"><span>Projects</span><strong>{selectedAdminClient.projectCount}</strong></div>
+          <div className="admin-stat-card"><span>Files</span><strong>{selectedAdminClient.assetCount}</strong></div>
+          <div className="admin-stat-card"><span>Updated</span><strong>{new Date(selectedAdminClient.latestUpdatedAt).toLocaleDateString()}</strong></div>
         </div>
 
         {adminError && <p className="portal-error">{adminError}</p>}
 
-        <div className="admin-detail-toolbar">
-          <label className="admin-search">
-            Search files
-            <input
-              type="search"
-              value={adminAssetSearch}
-              onChange={(event) => setAdminAssetSearch(event.target.value)}
-              placeholder="Search by filename, type, or project"
-            />
-          </label>
+        <AdminDetailToolbar
+          assetSearch={adminAssetSearch}
+          projectSort={adminProjectSort}
+          assetTypeFilter={adminAssetTypeFilter}
+          projectFilterId={adminProjectFilterId}
+          projects={selectedAdminClient.projects}
+          selectedCount={selectedAdminAssetIds.length}
+          visibleCount={selectedAdminVisibleAssets.length}
+          searchTrimmed={adminAssetSearch.trim()}
+          clientNotes={selectedAdminClient.notes}
+          onAssetSearchChange={setAdminAssetSearch}
+          onProjectSortChange={setAdminProjectSort}
+          onAssetTypeFilterChange={setAdminAssetTypeFilter}
+          onProjectFilterIdChange={setAdminProjectFilterId}
+        />
 
-          <label className="admin-search">
-            Sort folders
-            <select value={adminProjectSort} onChange={(event) => setAdminProjectSort(event.target.value as typeof adminProjectSort)}>
-              <option value="recent">Recent activity</option>
-              <option value="name">Name</option>
-              <option value="files">File count</option>
-            </select>
-          </label>
+        <AdminActivityPanel
+          title="Recent activity"
+          activities={activityState.activities}
+          busy={activityState.busy}
+          error={activityState.error}
+          kindFilter={activityState.kindFilter}
+          onKindFilterChange={(filter) => activityDispatch({ type: 'SET_KIND_FILTER', filter })}
+          expanded={activityState.expanded}
+          onToggleExpanded={() => activityDispatch({ type: 'TOGGLE_EXPANDED' })}
+          contextHint="Showing activity for the selected client folder."
+          getContext={getAdminActivityContext}
+        />
 
-          <label className="admin-search">
-            Media type
-            <select
-              value={adminAssetTypeFilter}
-              onChange={(event) => setAdminAssetTypeFilter(event.target.value as typeof adminAssetTypeFilter)}
-            >
-              <option value="all">All files</option>
-              <option value="images">Images</option>
-              <option value="videos">Videos</option>
-              <option value="other">Other files</option>
-            </select>
-          </label>
-
-          <label className="admin-search">
-            Project
-            <select value={adminProjectFilterId} onChange={(event) => setAdminProjectFilterId(event.target.value)}>
-              <option value="all">All projects</option>
-              {selectedAdminClient.projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <div className="admin-detail-toolbar-copy">
-            <p className="portal-hint">
-              {selectedAdminAssetIds.length > 0
-                ? `${selectedAdminAssetIds.length} selected file${selectedAdminAssetIds.length === 1 ? '' : 's'}`
-                : `${selectedAdminVisibleAssets.length} loaded file${selectedAdminVisibleAssets.length === 1 ? '' : 's'}`}
-              {adminAssetSearch.trim() ? ` matching "${adminAssetSearch.trim()}"` : ''}
-            </p>
-            {selectedAdminClient.notes && <p className="portal-hint">{selectedAdminClient.notes}</p>}
-          </div>
-        </div>
-
-        {renderAdminActivityPanel()}
-
-        <div className="admin-bulk-actions" aria-live="polite">
-          <div className="admin-bulk-actions-copy">
-            <p className="admin-bulk-actions-title">
-              {selectedAdminAssetIds.length > 0
-                ? `${selectedAdminAssetIds.length} selected file${selectedAdminAssetIds.length === 1 ? '' : 's'}`
-                : `${selectedAdminVisibleAssets.length} visible file${selectedAdminVisibleAssets.length === 1 ? '' : 's'}`}
-            </p>
-            <p className="admin-bulk-actions-status">
-              {adminActionMessage || 'Bulk actions stay pinned while you scroll through the folder.'}
-            </p>
-          </div>
-          <div className="admin-bulk-actions-buttons">
-            <button
-              className="button ghost"
-              type="button"
-              onClick={selectVisibleAdminAssets}
-              disabled={adminBusy || selectedAdminVisibleAssets.length === 0}
-            >
-              Select visible
-            </button>
-            <button
-              className="button ghost"
-              type="button"
-              onClick={clearSelectedAdminAssets}
-              disabled={adminBusy || selectedAdminAssetIds.length === 0}
-            >
-              Clear selection
-            </button>
-            <button
-              className="button ghost"
-              type="button"
-              onClick={() => void handleDownloadSelectedAdminAssets()}
-              disabled={adminBusy || selectedAdminAssetIds.length === 0}
-            >
-              Download selected
-            </button>
-            <button
-              className="button ghost"
-              type="button"
-              onClick={() => void handleBulkDeleteAdminAssets()}
-              disabled={adminBusy || selectedAdminAssetIds.length === 0}
-            >
-              Delete selected
-            </button>
-          </div>
-        </div>
+        <AdminBulkActions
+          selectedCount={selectedAdminAssetIds.length}
+          visibleCount={selectedAdminVisibleAssets.length}
+          busy={adminBusy}
+          actionMessage={adminActionMessage}
+          onSelectVisible={selectVisibleAdminAssets}
+          onClearSelection={clearSelectedAdminAssets}
+          onDownloadSelected={() => void handleDownloadSelectedAdminAssets()}
+          onDeleteSelected={() => void handleBulkDeleteAdminAssets()}
+        />
 
         {adminClientEditMode && (
-          <div className="admin-client-form">
-            <label>
-              Full name
-              <input
-                type="text"
-                value={adminClientDraft.fullName}
-                onChange={(event) =>
-                  setAdminClientDraft((current) => ({ ...current, fullName: event.target.value }))
-                }
-              />
-            </label>
-            <label>
-              Email
-              <input
-                type="email"
-                value={adminClientDraft.email}
-                onChange={(event) =>
-                  setAdminClientDraft((current) => ({ ...current, email: event.target.value }))
-                }
-              />
-            </label>
-            <label>
-              Phone
-              <input
-                type="text"
-                value={adminClientDraft.phone}
-                onChange={(event) =>
-                  setAdminClientDraft((current) => ({ ...current, phone: event.target.value }))
-                }
-              />
-            </label>
-            <label>
-              Notes
-              <textarea
-                rows={4}
-                value={adminClientDraft.notes}
-                onChange={(event) =>
-                  setAdminClientDraft((current) => ({ ...current, notes: event.target.value }))
-                }
-              />
-            </label>
-            <div className="admin-form-actions">
-              <button className="button primary" type="button" onClick={() => void handleSaveAdminClient()}>
-                Save client
-              </button>
-              <button
-                className="button ghost"
-                type="button"
-                onClick={() => {
-                  if (!selectedAdminClient) return
-                  setAdminClientDraft({
-                    fullName: selectedAdminClient.full_name,
-                    email: selectedAdminClient.email,
-                    phone: selectedAdminClient.phone ?? '',
-                    notes: selectedAdminClient.notes ?? '',
-                  })
-                  setAdminClientEditMode(false)
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
+          <AdminClientEditForm
+            draft={adminClientDraft}
+            onDraftChange={setAdminClientDraft}
+            onSave={() => void handleSaveAdminClient()}
+            onCancel={handleCancelEdit}
+            busy={adminBusy}
+          />
         )}
 
         <div className="admin-project-stack">
@@ -1111,226 +609,48 @@ export function AdminClientDetailPage() {
             </p>
           ) : (
             selectedAdminClientProjectViews.map(({ project, totalAssets, visibleAssets, latestActivityAt }) => (
-              <article key={project.id} className="admin-project-card">
-                <div className="delivery-header">
-                  <div>
-                    <p className="delivery-title">{project.name}</p>
-                    <p className="delivery-expiry">
-                      {project.status}
-                      {project.shoot_date ? ` · ${project.shoot_date}` : ''}
-                      {project.location ? ` · ${project.location}` : ''}
-                    </p>
-                  </div>
-                  <div className="admin-project-actions">
-                    <span className="admin-client-count">
-                      {visibleAssets.length}/{totalAssets} files
-                    </span>
-                    <button className="button ghost" type="button" onClick={() => void handleDownloadAdminProject(project)}>
-                      Download folder
-                    </button>
-                    <button className="button ghost" type="button" onClick={() => void handleDeleteAdminProject(project)}>
-                      Delete folder
-                    </button>
-                  </div>
-                </div>
-
-                {visibleAssets.length === 0 ? (
-                  <p className="portal-hint">No files in this project match the current search.</p>
-                ) : (
-                  <div className="admin-asset-grid">
-                    {visibleAssets.map((asset) => {
-                      const isSelected = selectedAdminAssetIds.includes(asset.id)
-                      const previewUrl = adminAssetPreviewUrls[asset.id]
-                      const isImage = asset.mime_type.startsWith('image/')
-                      const displayName = getDisplayFileName(asset.filename)
-                      return (
-                        <article key={asset.id} className={`admin-asset-card ${isSelected ? 'is-selected' : ''}`}>
-                          <button
-                            className="admin-asset-select"
-                            type="button"
-                            aria-pressed={isSelected}
-                            onClick={() => toggleSelectedAdminAsset(asset.id)}
-                          >
-                            <span className="admin-asset-checkbox">{isSelected ? '\u2713' : ''}</span>
-                            <span className="sr-only">Select {displayName}</span>
-                          </button>
-                          {isImage ? (
-                            <button
-                              className="admin-asset-thumb admin-asset-thumb-button"
-                              type="button"
-                              onClick={() => void openAdminLightbox(project.id, asset.id)}
-                              aria-label={`Open ${displayName}`}
-                            >
-                              {previewUrl ? (
-                                <img src={previewUrl} alt={displayName} loading="lazy" />
-                              ) : (
-                                <div className="admin-asset-thumb-fallback">
-                                  <span>IMG</span>
-                                </div>
-                              )}
-                            </button>
-                          ) : (
-                            <div className="admin-asset-thumb">
-                              <div className="admin-asset-thumb-fallback">
-                                <span>{asset.mime_type.split('/')[0]?.slice(0, 1).toUpperCase() || 'F'}</span>
-                              </div>
-                            </div>
-                          )}
-                          <div className="admin-asset-main">
-                            <p className="admin-asset-name">{displayName}</p>
-                          </div>
-                          <div className="delivery-asset-actions">
-                            <button
-                              className="button ghost"
-                              type="button"
-                              onClick={() => {
-                                void handleOpenAsset(asset.id, 'download')
-                              }}
-                            >
-                              Download
-                            </button>
-                            <button
-                              className="button ghost"
-                              type="button"
-                              onClick={() => {
-                                void handleDeleteAdminAsset(asset.id)
-                              }}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </article>
-                      )
-                    })}
-                  </div>
-                )}
-                {totalAssets > visibleAssets.length && (
-                  <div className="admin-project-more">
-                    <p className="portal-hint">
-                      Showing {visibleAssets.length} of {totalAssets} loaded files.
-                    </p>
-                    <button
-                      className="button ghost"
-                      type="button"
-                      onClick={() => loadMoreAdminProjectAssets(project.id)}
-                    >
-                      Load more
-                    </button>
-                  </div>
-                )}
-                <p className="portal-hint admin-project-updated">Last activity {new Date(latestActivityAt).toLocaleString()}</p>
-              </article>
+              <AdminProjectCard
+                key={project.id}
+                project={project}
+                totalAssets={totalAssets}
+                visibleAssets={visibleAssets}
+                latestActivityAt={latestActivityAt}
+                selectedAssetIds={selectedAdminAssetIds}
+                previewUrls={adminAssetPreviewUrls}
+                onToggleAssetSelection={toggleSelectedAdminAsset}
+                onOpenLightbox={(pid, aid) => void openAdminLightbox(pid, aid)}
+                onDownloadAsset={(aid) => void handleOpenAsset(aid, 'download')}
+                onDeleteAsset={handleDeleteAdminAsset}
+                onDownloadProject={(p) => void handleDownloadAdminProject(p)}
+                onDeleteProject={handleDeleteAdminProject}
+                onLoadMore={loadMoreAdminProjectAssets}
+              />
             ))
           )}
         </div>
 
-        {/* Admin lightbox */}
         {adminLightboxAsset && adminLightbox && (
-          <div
-            ref={adminLightboxTrapRef}
-            className="admin-lightbox"
-            role="dialog"
-            aria-modal="true"
-            aria-label={getDisplayFileName(adminLightboxAsset.filename)}
-            onClick={closeAdminLightbox}
-            onTouchStart={(event) => {
-              adminLightboxTouchStartRef.current = event.touches[0]?.clientX ?? null
-            }}
-            onTouchEnd={(event) => {
-              const start = adminLightboxTouchStartRef.current
-              adminLightboxTouchStartRef.current = null
-              if (start === null) return
-              const delta = event.changedTouches[0]?.clientX - start
-              if (Math.abs(delta) < 48) return
-              if (delta < 0) {
-                moveAdminLightbox('next')
-              } else {
-                moveAdminLightbox('prev')
-              }
-            }}
-          >
-            <div className="admin-lightbox-panel" onClick={(event) => event.stopPropagation()}>
-              <button className="admin-lightbox-close" type="button" onClick={closeAdminLightbox}>
-                Close
-              </button>
-              <div className="admin-lightbox-stage">
-                {adminAssetPreviewUrls[adminLightboxAsset.id] ? (
-                  <img
-                    src={adminAssetPreviewUrls[adminLightboxAsset.id]}
-                    alt={getDisplayFileName(adminLightboxAsset.filename)}
-                  />
-                ) : (
-                  <div className="admin-lightbox-loading">Loading preview...</div>
-                )}
-              </div>
-              <div className="admin-lightbox-meta">
-                <p className="admin-lightbox-name">{getDisplayFileName(adminLightboxAsset.filename)}</p>
-                <div className="admin-lightbox-actions">
-                  <button
-                    className="button ghost"
-                    type="button"
-                    onClick={() => moveAdminLightbox('prev')}
-                    disabled={adminLightboxIndex <= 0}
-                  >
-                    Previous
-                  </button>
-                  <button
-                    className="button ghost"
-                    type="button"
-                    onClick={() => moveAdminLightbox('next')}
-                    disabled={adminLightboxIndex >= adminLightboxAssets.length - 1}
-                  >
-                    Next
-                  </button>
-                  <button
-                    className="button ghost"
-                    type="button"
-                    onClick={() => void handleOpenAsset(adminLightboxAsset.id, 'download')}
-                  >
-                    Download
-                  </button>
-                </div>
-                <p className="portal-hint">
-                  {adminLightboxIndex + 1} / {adminLightboxAssets.length}
-                </p>
-              </div>
-            </div>
-          </div>
+          <AdminLightbox
+            asset={adminLightboxAsset}
+            previewUrl={adminAssetPreviewUrls[adminLightboxAsset.id]}
+            index={adminLightboxIndex}
+            total={adminLightboxAssets.length}
+            onClose={closeAdminLightbox}
+            onMove={moveAdminLightbox}
+            onDownload={(assetId) => void handleOpenAsset(assetId, 'download')}
+          />
         )}
       </section>
 
-      {/* Delete confirmation modal */}
       {deleteConfirmation && (
-        <div
-          ref={deleteConfirmationTrapRef}
-          className="admin-confirm-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="admin-confirm-title"
-          aria-describedby="admin-confirm-description"
-          onClick={closeDeleteConfirmation}
-        >
-          <div className="admin-confirm-panel" onClick={(event) => event.stopPropagation()}>
-            <div className="admin-confirm-copy">
-              <p className="eyebrow">Confirm delete</p>
-              <h3 id="admin-confirm-title">{deleteConfirmation.title}</h3>
-              <p id="admin-confirm-description">{deleteConfirmation.description}</p>
-            </div>
-            <div className="admin-confirm-actions">
-              <button className="button ghost" type="button" onClick={closeDeleteConfirmation} disabled={adminBusy}>
-                Cancel
-              </button>
-              <button
-                className="button primary admin-confirm-destructive"
-                type="button"
-                onClick={() => void confirmDeleteConfirmation()}
-                disabled={adminBusy}
-              >
-                {adminBusy ? 'Deleting...' : deleteConfirmation.confirmLabel}
-              </button>
-            </div>
-          </div>
-        </div>
+        <DeleteConfirmationModal
+          title={deleteConfirmation.title}
+          description={deleteConfirmation.description}
+          confirmLabel={deleteConfirmation.confirmLabel}
+          busy={adminBusy}
+          onConfirm={() => void confirmDeleteConfirmation()}
+          onCancel={closeDeleteConfirmation}
+        />
       )}
     </>
   )
