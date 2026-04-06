@@ -36,10 +36,10 @@
 
 .book-direct-link {
   margin: 0 0 10px;
-  display: inline-block;
   color: #f0e8d8;
   font-weight: 700;
   line-height: 1.32;
+  justify-self: start;
 }
 
 .book-direct-link:hover {
