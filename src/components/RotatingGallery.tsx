@@ -79,14 +79,14 @@ export const RotatingGallery = ({
               asset={active}
               alt={title}
               className="rotator-image"
-              sizes="(max-width: 900px) 92vw, 33vw"
+              sizes="(max-width: 680px) 92vw, 46vw"
             />
             {incoming && isTransitioning && (
               <ResponsiveImage
                 asset={incoming}
                 alt={title}
                 className="rotator-image rotator-image-enter"
-                sizes="(max-width: 900px) 92vw, 33vw"
+                sizes="(max-width: 680px) 92vw, 46vw"
               />
             )}
           </div>

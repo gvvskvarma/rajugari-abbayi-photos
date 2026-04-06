@@ -2168,6 +2168,10 @@ main > section {
   transform: translateZ(0);
 }
 
+.rotator-image img {
+  object-position: top center;
+}
+
 .rotator-image-enter {
   z-index: 2;
   opacity: 0;

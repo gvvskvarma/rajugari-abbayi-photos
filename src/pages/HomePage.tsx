@@ -204,8 +204,8 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
       {/* ── WORK ── */}
       <section id="work" className="work reveal-section" ref={workRef}>
         <div className="section-head">
-          <h2>My work</h2>
-          <p>People, personality, and all the little in-between moments.</p>
+          <h2>Stories I've told</h2>
+          <p>Portraits, celebrations, and the quiet moments in between.</p>
         </div>
         <div className="rotator-grid">
           <RotatingGallery title="Portraits" subtitle="Real people, real vibes" images={portraitAssets} cycleStep={cycleStep} />
