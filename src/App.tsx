@@ -4,14 +4,31 @@ import './App.css'
 import { Layout } from './components/Layout.tsx'
 import { LegacyRedirect } from './components/LegacyRedirect.tsx'
 
-const HomePage = lazy(() => import('./pages/HomePage.tsx').then((m) => ({ default: m.HomePage })))
-const BookPage = lazy(() => import('./pages/BookPage.tsx').then((m) => ({ default: m.BookPage })))
-const MyPicturesPage = lazy(() => import('./pages/MyPicturesPage.tsx').then((m) => ({ default: m.MyPicturesPage })))
-const UploadPage = lazy(() => import('./pages/UploadPage.tsx').then((m) => ({ default: m.UploadPage })))
-const AdminClientsPage = lazy(() => import('./pages/AdminClientsPage.tsx').then((m) => ({ default: m.AdminClientsPage })))
-const AdminClientDetailPage = lazy(() => import('./pages/AdminClientDetailPage.tsx').then((m) => ({ default: m.AdminClientDetailPage })))
-const ShareViewPage = lazy(() => import('./pages/ShareViewPage.tsx').then((m) => ({ default: m.ShareViewPage })))
-const AboutPage = lazy(() => import('./pages/AboutPage.tsx').then((m) => ({ default: m.AboutPage })))
+/* Auto-reload on stale chunk (happens after a new deployment) */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function lazyRetry(factory: () => Promise<any>, name: string) {
+  return lazy(() =>
+    factory()
+      .then((m: Record<string, unknown>) => ({ default: m[name] as React.ComponentType<any> }))
+      .catch(() => {
+        const key = 'chunk-retry'
+        if (!sessionStorage.getItem(key)) {
+          sessionStorage.setItem(key, '1')
+          window.location.reload()
+        }
+        return { default: (() => null) as React.ComponentType<any> }
+      }),
+  )
+}
+
+const HomePage = lazyRetry(() => import('./pages/HomePage.tsx'), 'HomePage')
+const BookPage = lazyRetry(() => import('./pages/BookPage.tsx'), 'BookPage')
+const MyPicturesPage = lazyRetry(() => import('./pages/MyPicturesPage.tsx'), 'MyPicturesPage')
+const UploadPage = lazyRetry(() => import('./pages/UploadPage.tsx'), 'UploadPage')
+const AdminClientsPage = lazyRetry(() => import('./pages/AdminClientsPage.tsx'), 'AdminClientsPage')
+const AdminClientDetailPage = lazyRetry(() => import('./pages/AdminClientDetailPage.tsx'), 'AdminClientDetailPage')
+const ShareViewPage = lazyRetry(() => import('./pages/ShareViewPage.tsx'), 'ShareViewPage')
+const AboutPage = lazyRetry(() => import('./pages/AboutPage.tsx'), 'AboutPage')
 
 function LazyPage({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<div className="portal-section"><p className="portal-hint">Loading...</p></div>}>{children}</Suspense>
