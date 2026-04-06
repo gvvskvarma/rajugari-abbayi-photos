@@ -97,17 +97,17 @@ export function AboutPage() {
           <h2>What sets me apart</h2>
           <div className="about-page-values">
             <div className="about-page-value">
-              <span className="about-page-value-icon" aria-hidden>*</span>
+
               <h3>Real moments</h3>
               <p>I focus on what happens between poses — where the real story lives.</p>
             </div>
             <div className="about-page-value">
-              <span className="about-page-value-icon" aria-hidden>*</span>
+
               <h3>Natural light</h3>
               <p>I work with light as it is — not forcing it, but shaping it.</p>
             </div>
             <div className="about-page-value">
-              <span className="about-page-value-icon" aria-hidden>*</span>
+
               <h3>Genuine emotion</h3>
               <p>The best frames happen when you forget the camera is there.</p>
             </div>
