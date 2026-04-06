@@ -87,7 +87,7 @@ const services = [
 const stats = [
   { value: '10,000+', label: 'Moments captured' },
   { value: '50+', label: 'Stories told' },
-  { value: '4+', label: 'Years shooting' },
+  { value: '5+', label: 'Years shooting' },
 ]
 
 /* ── Component ────────────────────────────────────────────────────── */
@@ -134,7 +134,6 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
   const heroRef = useReveal<HTMLElement>()
   const servicesRef = useReveal<HTMLElement>()
   const workRef = useReveal<HTMLElement>()
-  const portraitsRef = useReveal<HTMLDivElement>()
   const contactRef = useReveal<HTMLElement>()
 
   return (
@@ -202,53 +201,17 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
         </div>
       </section>
 
-      {/* ── WORK / LANDSCAPES ── */}
+      {/* ── WORK ── */}
       <section id="work" className="work reveal-section" ref={workRef}>
         <div className="section-head">
-          <h2>Landscapes</h2>
-          <p>
-            Wide open skies, golden light, and the kind of frames
-            that make you want to pack a bag and go.
-          </p>
+          <h2>My work</h2>
+          <p>People, personality, and all the little in-between moments.</p>
         </div>
-
-        <div className="landscape-showcase">
-          {landscapeAssets[0] && (
-            <article className="landscape-showcase-main">
-              <ResponsiveImage
-                asset={landscapeAssets[0]}
-                alt="Landscape photography"
-                sizes="(max-width: 900px) 92vw, 92vw"
-                loading="eager"
-                fetchPriority="high"
-              />
-            </article>
-          )}
-
-          <div className="landscape-showcase-strip" aria-label="More landscapes">
-            {landscapeAssets.slice(1, 5).map((asset) => (
-              <article key={asset.key} className="landscape-showcase-card">
-                <ResponsiveImage
-                  asset={asset}
-                  alt="Landscape"
-                  sizes="(max-width: 900px) 44vw, 22vw"
-                />
-              </article>
-            ))}
-          </div>
-        </div>
-
-        {/* ── PORTRAIT STORIES ── */}
-        <div className="work-block reveal-section" ref={portraitsRef}>
-          <div className="section-head">
-            <h2>Portrait stories</h2>
-            <p>People, personality, and all the little in-between moments.</p>
-          </div>
-          <div className="rotator-grid">
-            <RotatingGallery title="Baby shoots" subtitle="Tiny humans, big smiles" images={babyAssets} cycleStep={cycleStep} />
-            <RotatingGallery title="Portraits" subtitle="Real people, real vibes" images={portraitAssets} cycleStep={cycleStep} />
-            <RotatingGallery title="Events" subtitle="The energy, captured" images={eventAssets} cycleStep={cycleStep} />
-          </div>
+        <div className="rotator-grid">
+          <RotatingGallery title="Portraits" subtitle="Real people, real vibes" images={portraitAssets} cycleStep={cycleStep} />
+          <RotatingGallery title="Baby shoots" subtitle="Tiny humans, big smiles" images={babyAssets} cycleStep={cycleStep} />
+          <RotatingGallery title="Events" subtitle="The energy, captured" images={eventAssets} cycleStep={cycleStep} />
+          <RotatingGallery title="Landscapes" subtitle="Wide skies, golden light" images={landscapeAssets} cycleStep={cycleStep} />
         </div>
       </section>
 
