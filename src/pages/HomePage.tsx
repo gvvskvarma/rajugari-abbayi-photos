@@ -75,18 +75,18 @@ function useReveal<T extends HTMLElement>() {
 
 /* ── Service cards data ───────────────────────────────────────────── */
 const services = [
-  { icon: '📸', label: 'Portraits', desc: 'Studio & outdoor sessions' },
-  { icon: '🎉', label: 'Events', desc: 'Birthdays, baby showers & more' },
-  { icon: '💍', label: 'Pre-Wedding', desc: 'Engagements & couple shoots' },
-  { icon: '🎬', label: 'Videos & Reels', desc: 'Cinematic short-form content' },
-  { icon: '🤝', label: 'Brand Collabs', desc: 'Product & influencer shoots' },
-  { icon: '👶', label: 'Baby Shoots', desc: 'Newborn & milestone moments' },
+  { label: 'Portraits', desc: 'Studio & outdoor sessions' },
+  { label: 'Events', desc: 'Birthdays, baby showers & more' },
+  { label: 'Pre-Wedding', desc: 'Engagements & couple shoots' },
+  { label: 'Videos & Reels', desc: 'Cinematic short-form content' },
+  { label: 'Brand Collabs', desc: 'Product & influencer shoots' },
+  { label: 'Baby Shoots', desc: 'Newborn & milestone moments' },
 ]
 
 /* ── Stats strip ──────────────────────────────────────────────────── */
 const stats = [
-  { value: '10,000+', label: 'Photos delivered' },
-  { value: '50+', label: 'Happy clients' },
+  { value: '10,000+', label: 'Moments captured' },
+  { value: '50+', label: 'Stories told' },
   { value: '4+', label: 'Years shooting' },
 ]
 
@@ -156,17 +156,18 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
         </div>
         <div className="hero-v2-content">
           <p className="eyebrow">Rajugari Abbayi Photography</p>
-          <h1>Your moments.<br />Made&nbsp;iconic.</h1>
+          <h1>Your moments.</h1>
+          <p className="hero-v2-tagline">Made&nbsp;iconic.</p>
           <p className="lead">
             Bold portraits, cinematic events, candid magic — I turn everyday
             moments into visuals you'll keep coming back to.
           </p>
           <div className="hero-actions">
             <a className="button primary" href="#/book">
-              Book a shoot
+              Start your story
             </a>
             <a className="button ghost" href="#/work">
-              See my work
+              View my work
             </a>
           </div>
         </div>
@@ -194,7 +195,6 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
         <div className="services-grid">
           {services.map((svc) => (
             <div key={svc.label} className="service-card">
-              <span className="service-icon" aria-hidden>{svc.icon}</span>
               <h3>{svc.label}</h3>
               <p>{svc.desc}</p>
             </div>
@@ -255,14 +255,14 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
       {/* ── CONTACT ── */}
       <section id="contact" className="contact reveal-section" ref={contactRef}>
         <div>
-          <h2>Let's make something epic</h2>
+          <h2>Let's tell your story.</h2>
           <p>
             Got an event coming up? Want fresh content for your brand? Or just
-            need some fire portraits? Hit me up — I'd love to hear about it.
+            need some fire portraits? I'd love to hear about it.
           </p>
           <div className="contact-actions">
             <a className="button primary" href="#/book">
-              Book now
+              Start your story
             </a>
           </div>
         </div>
