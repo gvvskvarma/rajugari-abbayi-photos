@@ -32,7 +32,6 @@ function useReveal<T extends HTMLElement>() {
 export function AboutPage() {
   useDocumentMeta('About', 'Meet Vishnu Varma — the story behind Rajugari Abbayi Photography. Natural light, real moments, cinematic storytelling.')
   const hookRef = useReveal<HTMLElement>()
-  const photoRef = useReveal<HTMLElement>()
   const storyRef = useReveal<HTMLElement>()
   const positionRef = useReveal<HTMLElement>()
   const diffRef = useReveal<HTMLElement>()
@@ -42,23 +41,23 @@ export function AboutPage() {
     <>
       {/* ── HOOK ── */}
       <section className="about-page-hero reveal-section" ref={hookRef}>
-        <p className="eyebrow">About me</p>
-        <h1>I didn't start with a camera —</h1>
-        <p className="about-page-hero-body">
-          I started to hold onto moments that disappear too quickly.
-        </p>
-      </section>
-
-      {/* ── PHOTO ── */}
-      <section className="about-page-photo reveal-section" ref={photoRef}>
-        <div className="about-page-photo-frame">
-          <ResponsiveImage
-            asset={aboutPhoto}
-            alt="Vishnu Varma holding a camera on a gimbal"
-            className="about-page-photo-img"
-            sizes="(max-width: 680px) 80vw, 420px"
-            loading="eager"
-          />
+        <div className="about-page-hero-content">
+          <div className="about-page-hero-text">
+            <p className="eyebrow">About me</p>
+            <h1>I didn't start with a camera —</h1>
+            <p className="about-page-hero-body">
+              I started to hold onto moments that disappear too quickly.
+            </p>
+          </div>
+          <div className="about-page-photo-frame">
+            <ResponsiveImage
+              asset={aboutPhoto}
+              alt="Vishnu Varma holding a camera on a gimbal"
+              className="about-page-photo-img"
+              sizes="(max-width: 680px) 80vw, 340px"
+              loading="eager"
+            />
+          </div>
         </div>
       </section>
 
