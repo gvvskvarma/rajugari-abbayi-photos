@@ -89,9 +89,10 @@ export function BookPage() {
         <div className="book-card">
           <p className="book-card-title">What happens next</p>
           <ul>
-            <li>I review your enquiry and confirm the shoot type.</li>
-            <li>You'll get a response within two business days.</li>
-            <li>We lock the date and finalize the details.</li>
+            <li>I personally review your enquiry and confirm the shoot details.</li>
+            <li>You'll receive clear pricing and package options upfront.</li>
+            <li>You'll get a response within 24–48 hours.</li>
+            <li>We lock the date and finalize everything together.</li>
           </ul>
         </div>
       </section>
@@ -155,12 +156,13 @@ export function BookPage() {
             <textarea
               name="message"
               rows={5}
-              placeholder="Share your vision, timeline, and any must-have shots."
+              placeholder="Tell me about your vision, mood, and any must-have moments."
             />
           </label>
-          <button className="button primary" type="submit" disabled={!isConfigured || isSubmitting}>
-            {isSubmitting ? 'Sending...' : 'Send enquiry'}
+          <button className="button primary book-cta" type="submit" disabled={!isConfigured || isSubmitting}>
+            {isSubmitting ? 'Sending...' : "Let's plan your shoot"}
           </button>
+          <p className="book-trust-note">No spam. No pressure. I typically respond within 24–48 hours.</p>
         </form>
       </section>
     </>

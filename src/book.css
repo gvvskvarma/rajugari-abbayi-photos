@@ -111,17 +111,20 @@
 .enquiry-form {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 22px;
   border-radius: 12px;
   border: 1px solid rgba(236, 232, 223, 0.15);
   background: rgba(236, 232, 223, 0.05);
-  padding: 22px;
+  padding: 28px 26px;
+  max-width: 720px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 14px;
+  gap: 18px;
 }
 
 .enquiry-form label {
@@ -176,7 +179,7 @@
 .enquiry-form textarea:focus {
   outline: none;
   border-color: rgba(200, 168, 121, 0.7);
-  box-shadow: 0 0 0 3px rgba(200, 168, 121, 0.18);
+  box-shadow: 0 0 0 3px rgba(200, 168, 121, 0.18), 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .form-message textarea {
@@ -184,14 +187,28 @@
   resize: vertical;
 }
 
-.enquiry-form .button {
-  align-self: flex-start;
-  min-width: 182px;
+.book-cta {
+  width: 100%;
+  padding: 14px 18px;
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+}
+
+.book-cta:not(:disabled):hover {
+  box-shadow: 0 14px 26px rgba(0, 0, 0, 0.36), 0 0 28px rgba(209, 176, 127, 0.22);
 }
 
 .enquiry-form button[disabled] {
   opacity: 0.56;
   cursor: not-allowed;
+}
+
+.book-trust-note {
+  margin: 0;
+  text-align: center;
+  font-size: 0.78rem;
+  color: rgba(236, 232, 223, 0.45);
+  letter-spacing: 0.02em;
 }
 
 @media (max-width: 920px) {
