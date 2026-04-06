@@ -2146,11 +2146,11 @@ main > section {
   box-shadow: var(--shadow);
 }
 
-.rotator-card:hover .rotator-image-stack img {
+.rotator-card:hover img.rotator-image {
   transform: scale(1.03);
 }
 
-.rotator-image-stack img {
+img.rotator-image {
   transition: transform 0.4s ease;
 }
 
@@ -2168,7 +2168,7 @@ main > section {
   transform: translateZ(0);
 }
 
-.rotator-image img {
+img.rotator-image {
   object-position: top center;
 }
 
