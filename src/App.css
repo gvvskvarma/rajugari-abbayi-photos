@@ -1964,8 +1964,8 @@ main > section {
 }
 
 .button.primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 14px 26px rgba(0, 0, 0, 0.36);
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 14px 26px rgba(0, 0, 0, 0.36), 0 0 24px rgba(209, 176, 127, 0.18);
 }
 
 .button:focus-visible,
@@ -2323,10 +2323,18 @@ main > section {
 .about-page-hero h1 {
   margin: 0;
   font-family: 'Twigs', serif;
-  font-size: clamp(1.8rem, 4vw, 3.2rem);
-  line-height: 1.18;
+  font-size: clamp(2rem, 4.5vw, 3.6rem);
+  line-height: 1.15;
   letter-spacing: 0.01em;
   max-width: 22ch;
+}
+
+.about-page-hero-body {
+  margin: 0;
+  font-size: clamp(1.05rem, 1.6vw, 1.25rem);
+  line-height: 1.7;
+  color: var(--ink-soft);
+  max-width: 38ch;
 }
 
 .about-page-block {
@@ -2361,9 +2369,9 @@ main > section {
 }
 
 .about-page-block-inner h2 {
-  margin: 0 0 18px;
+  margin: 0 0 22px;
   font-family: 'Playfair Display', serif;
-  font-size: clamp(1.5rem, 3vw, 2.2rem);
+  font-size: clamp(1.6rem, 3.2vw, 2.5rem);
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
@@ -2371,8 +2379,8 @@ main > section {
 .about-page-block-inner p {
   margin: 0 0 14px;
   color: var(--ink-soft);
-  font-size: 1.06rem;
-  line-height: 1.76;
+  font-size: 0.98rem;
+  line-height: 1.78;
 }
 
 .about-page-block-inner p:last-child {
@@ -2407,7 +2415,14 @@ main > section {
   border-radius: 20px;
   border: 1px solid rgba(236, 232, 223, 0.08);
   background: rgba(236, 232, 223, 0.03);
-  padding: 22px 20px;
+  padding: 26px 22px;
+  transition: transform 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.about-page-value:hover {
+  transform: translateY(-4px);
+  border-color: rgba(209, 176, 127, 0.22);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
 }
 
 .about-page-value-icon {

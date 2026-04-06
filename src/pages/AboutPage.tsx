@@ -37,10 +37,10 @@ export function AboutPage() {
       {/* ── HOOK ── */}
       <section className="about-page-hero reveal-section" ref={hookRef}>
         <p className="eyebrow">About me</p>
-        <h1>
-          I didn't start with a camera to take pictures —<br />
+        <h1>I didn't start with a camera —</h1>
+        <p className="about-page-hero-body">
           I started to hold onto moments that disappear too quickly.
-        </h1>
+        </p>
       </section>
 
       {/* ── STORY ── */}
@@ -80,12 +80,12 @@ export function AboutPage() {
             <div className="about-page-value">
               <span className="about-page-value-icon" aria-hidden>*</span>
               <h3>Real moments</h3>
-              <p>I don't focus on perfect poses — I focus on what's genuine.</p>
+              <p>I focus on what happens between poses — where the real story lives.</p>
             </div>
             <div className="about-page-value">
               <span className="about-page-value-icon" aria-hidden>*</span>
               <h3>Natural light</h3>
-              <p>I work with the light that's already there — raw, warm, and honest.</p>
+              <p>I work with light as it is — not forcing it, but shaping it.</p>
             </div>
             <div className="about-page-value">
               <span className="about-page-value-icon" aria-hidden>*</span>
@@ -98,14 +98,13 @@ export function AboutPage() {
 
       {/* ── CTA ── */}
       <section className="about-page-cta reveal-section" ref={ctaRef}>
-        <h2>
-          If you're looking for more than just photos —<br />
-          if you want something that feels like a memory you can return to —
-        </h2>
-        <p>I'd love to create that with you.</p>
+        <h2>Let's tell your story.</h2>
+        <p>
+          If you're looking for something that feels real — I'd love to create that with you.
+        </p>
         <div className="about-page-cta-actions">
           <a className="button primary" href="#/book">
-            Let's create something meaningful
+            Start your story
           </a>
         </div>
         <div className="about-page-cta-contact">
