@@ -10,8 +10,10 @@ import { useThumbnailBatch } from '../hooks/queries/useThumbnailBatch'
 import { usePreviewUrl } from '../hooks/queries/usePreviewUrl'
 import { CustomerLightbox } from '../components/CustomerLightbox'
 import { SkeletonCardList } from '../components/Skeleton'
+import { useDocumentMeta } from '../hooks/useDocumentMeta.ts'
 
 export function MyPicturesPage() {
+  useDocumentMeta('Your Gallery', 'View, download, and share your photos from Rajugari Abbayi Photography.')
   const { session, getAccessToken } = useAuth()
   const email = session?.user.email
 

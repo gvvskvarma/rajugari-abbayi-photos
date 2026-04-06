@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { instagramUrl } from '../lib/constants'
+import { useDocumentMeta } from '../hooks/useDocumentMeta.ts'
 
 function useReveal<T extends HTMLElement>() {
   const ref = useRef<T>(null)
@@ -26,6 +27,7 @@ function useReveal<T extends HTMLElement>() {
 }
 
 export function AboutPage() {
+  useDocumentMeta('About', 'Meet Vishnu Varma — the story behind Rajugari Abbayi Photography. Natural light, real moments, cinematic storytelling.')
   const hookRef = useReveal<HTMLElement>()
   const storyRef = useReveal<HTMLElement>()
   const positionRef = useReveal<HTMLElement>()

@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import '../book.css'
 import { instagramUrl } from '../lib/constants'
+import { useDocumentMeta } from '../hooks/useDocumentMeta.ts'
 
 const shootTypes = [
   'Baby shoot',
@@ -21,6 +22,7 @@ const formAction = import.meta.env.VITE_FORMSPREE_ENDPOINT ?? ''
 const isConfigured = Boolean(formAction)
 
 export function BookPage() {
+  useDocumentMeta('Book a Shoot', 'Book a portrait, event, or baby shoot with Rajugari Abbayi Photography. Easy enquiry form, personal response within 24–48 hours.')
   const navigate = useNavigate()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submissionState, setSubmissionState] = useState<'idle' | 'success' | 'error'>('idle')
@@ -93,6 +95,7 @@ export function BookPage() {
             <li>You'll receive clear pricing and package options upfront.</li>
             <li>You'll get a response within 24–48 hours.</li>
             <li>We lock the date and finalize everything together.</li>
+            <li>Typical delivery: 7–14 business days after your shoot.</li>
           </ul>
         </div>
       </section>
@@ -109,10 +112,17 @@ export function BookPage() {
             Something went wrong while sending your enquiry. Please try again.
           </div>
         )}
-        {!isConfigured && (
+        {!isConfigured && import.meta.env.DEV && (
           <div className="form-alert">
             Set `VITE_FORMSPREE_ENDPOINT` in your `.env` file to start receiving
             emails in Gmail.
+          </div>
+        )}
+        {!isConfigured && !import.meta.env.DEV && (
+          <div className="form-alert">
+            The booking form is temporarily unavailable. Please reach out directly
+            at <a href="mailto:rgapics@gmail.com">rgapics@gmail.com</a> or on{' '}
+            <a href={instagramUrl} target="_blank" rel="noreferrer">Instagram</a>.
           </div>
         )}
         <form className="enquiry-form" onSubmit={handleSubmit}>

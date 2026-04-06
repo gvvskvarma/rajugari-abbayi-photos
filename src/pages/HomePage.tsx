@@ -3,6 +3,7 @@ import { createResponsiveAsset, ResponsiveImage } from '../lib/media.tsx'
 import { instagramUrl } from '../lib/constants'
 import { RotatingGallery } from '../components/RotatingGallery.tsx'
 import { useHomepageGallery } from '../hooks/queries/useHomepageGallery.ts'
+import { useDocumentMeta } from '../hooks/useDocumentMeta.ts'
 
 /* ── Hardcoded fallbacks (used when API is unavailable) ───────────── */
 const fallbackLandscapes = [
@@ -92,6 +93,7 @@ const stats = [
 
 /* ── Component ────────────────────────────────────────────────────── */
 export function HomePage({ sectionId }: { sectionId?: string }) {
+  useDocumentMeta('', 'Bold portraits, cinematic events, and candid magic by Vishnu Varma. Book your shoot today.')
   const [cycleStep, setCycleStep] = useState(0)
   const { data: galleryData } = useHomepageGallery()
 

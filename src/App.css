@@ -1783,7 +1783,7 @@ main > section {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(180deg, rgba(10, 12, 18, 0.10) 0%, rgba(10, 12, 18, 0.55) 50%, rgba(10, 12, 18, 0.92) 100%);
+    linear-gradient(180deg, rgba(10, 12, 18, 0.08) 0%, rgba(10, 12, 18, 0.35) 50%, rgba(10, 12, 18, 0.78) 100%);
 }
 
 .hero-v2-content {
