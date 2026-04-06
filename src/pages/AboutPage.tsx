@@ -1,6 +1,9 @@
 import { useEffect, useRef } from 'react'
 import { instagramUrl } from '../lib/constants'
 import { useDocumentMeta } from '../hooks/useDocumentMeta.ts'
+import { createResponsiveAsset, ResponsiveImage } from '../lib/media.tsx'
+
+const aboutPhoto = createResponsiveAsset('project-rga/about/about-vishnu.jpg')
 
 function useReveal<T extends HTMLElement>() {
   const ref = useRef<T>(null)
@@ -29,6 +32,7 @@ function useReveal<T extends HTMLElement>() {
 export function AboutPage() {
   useDocumentMeta('About', 'Meet Vishnu Varma — the story behind Rajugari Abbayi Photography. Natural light, real moments, cinematic storytelling.')
   const hookRef = useReveal<HTMLElement>()
+  const photoRef = useReveal<HTMLElement>()
   const storyRef = useReveal<HTMLElement>()
   const positionRef = useReveal<HTMLElement>()
   const diffRef = useReveal<HTMLElement>()
@@ -43,6 +47,19 @@ export function AboutPage() {
         <p className="about-page-hero-body">
           I started to hold onto moments that disappear too quickly.
         </p>
+      </section>
+
+      {/* ── PHOTO ── */}
+      <section className="about-page-photo reveal-section" ref={photoRef}>
+        <div className="about-page-photo-frame">
+          <ResponsiveImage
+            asset={aboutPhoto}
+            alt="Vishnu Varma holding a camera on a gimbal"
+            className="about-page-photo-img"
+            sizes="(max-width: 680px) 80vw, 420px"
+            loading="eager"
+          />
+        </div>
       </section>
 
       {/* ── STORY ── */}
