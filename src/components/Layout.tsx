@@ -60,7 +60,7 @@ export function Layout() {
             {session && role === 'admin' && <a href="#/admin/clients">Clients</a>}
             {!(session && role === 'admin') && <a href="#/work">Work</a>}
             {!(session && role === 'admin') && <a href="#/about">About</a>}
-            <a href="#/book">Contact</a>
+            {!(session && role === 'admin') && <a href="#/book">Contact</a>}
           </nav>
 
           <div className="auth-box">
