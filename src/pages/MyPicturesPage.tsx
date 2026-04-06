@@ -280,8 +280,10 @@ export function MyPicturesPage() {
   if (!email) {
     return (
       <section className="portal-section">
-        <h2>My Pictures</h2>
-        <p>Log in with your email OTP to view your photos and videos.</p>
+        <h2>Your Gallery</h2>
+        <p className="portal-empty-message">
+          Your photos are waiting for you. Log in with your email to view, download, and share your moments.
+        </p>
       </section>
     )
   }
@@ -292,20 +294,20 @@ export function MyPicturesPage() {
     <section className="portal-section">
       <div className="portal-head">
         <div>
-          <h2>My Pictures</h2>
-          <p>Media matched to <strong>{email}</strong>. Tap a photo to open it full screen.</p>
+          <h2>Your Gallery</h2>
+          <p>Logged in as <strong>{email}</strong>. Tap any photo to view it full screen.</p>
         </div>
         <div className="customer-summary-strip">
           <div className="admin-stat-card">
-            <span>Deliveries</span>
+            <span>Albums</span>
             <strong>{myDeliveries.length}</strong>
           </div>
           <div className="admin-stat-card">
-            <span>Files</span>
+            <span>Photos</span>
             <strong>{customerVisibleAssets.length}</strong>
           </div>
           <div className="admin-stat-card">
-            <span>Available</span>
+            <span>Ready to download</span>
             <strong>{myDeliveries.filter((delivery) => delivery.accessMode !== 'viewer').length}</strong>
           </div>
         </div>
@@ -478,8 +480,12 @@ export function MyPicturesPage() {
                         </div>
                       )}
                       <div className="customer-asset-main">
-                        <p className="customer-asset-name">{displayName}</p>
-                        {!isImage && <p className="portal-hint">{getAssetKind(asset.mime_type)}</p>}
+                        {!isImage && (
+                          <>
+                            <p className="customer-asset-name">{displayName}</p>
+                            <p className="portal-hint">{getAssetKind(asset.mime_type)}</p>
+                          </>
+                        )}
                       </div>
                       {!isSelectMode && (
                         <div className="customer-asset-actions">
