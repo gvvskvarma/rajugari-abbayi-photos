@@ -52,11 +52,11 @@ const fallbackLandscapes = [
 type Category = 'all' | 'portraits' | 'baby' | 'events' | 'landscapes'
 
 const categories: { key: Category; label: string }[] = [
+  { key: 'all', label: 'All' },
   { key: 'portraits', label: 'Portraits' },
   { key: 'baby', label: 'Baby Shoots' },
   { key: 'events', label: 'Events' },
   { key: 'landscapes', label: 'Landscapes' },
-  { key: 'all', label: 'All' },
 ]
 
 /* ── Scroll-reveal hook ─────────────────────────────────────────── */
