@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import '../book.css'
-import { instagramUrl } from '../lib/constants'
+import { instagramUrl, contactEmail } from '../lib/constants'
 import { useDocumentMeta } from '../hooks/useDocumentMeta.ts'
 
 const shootTypes = [
@@ -79,8 +79,8 @@ export function BookPage() {
           </p>
           <div className="book-direct-contact">
             <p className="book-direct-label">Email</p>
-            <a className="book-direct-link" href="mailto:rgapics@gmail.com">
-              rgapics@gmail.com
+            <a className="book-direct-link" href={`mailto:${contactEmail}`}>
+              {contactEmail}
             </a>
             <p className="book-direct-label">Instagram</p>
             <a className="book-direct-link" href={instagramUrl} target="_blank" rel="noreferrer">
@@ -121,7 +121,7 @@ export function BookPage() {
         {!isConfigured && !import.meta.env.DEV && (
           <div className="form-alert">
             The booking form is temporarily unavailable. Please reach out directly
-            at <a href="mailto:rgapics@gmail.com">rgapics@gmail.com</a> or on{' '}
+            at <a href={`mailto:${contactEmail}`}>{contactEmail}</a> or on{' '}
             <a href={instagramUrl} target="_blank" rel="noreferrer">Instagram</a>.
           </div>
         )}

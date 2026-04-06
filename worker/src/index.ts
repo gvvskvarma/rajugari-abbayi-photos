@@ -2226,4 +2226,32 @@ app.get('/api/v1/my-pictures', async (c) => {
   }
 })
 
+/* ── Public portfolio media (no auth, long cache) ─────────────────── */
+app.get('/api/v1/public-media/*', async (c) => {
+  const path = c.req.path.replace('/api/v1/public-media/', '')
+  if (!path || path.includes('..')) {
+    return jsonError('Invalid path', 400)
+  }
+
+  // Only allow serving from project-rga/optimized/ prefix
+  const objectKey = path.startsWith('project-rga/') ? path : `project-rga/${path}`
+  if (!objectKey.startsWith('project-rga/optimized/')) {
+    return jsonError('Access denied', 403)
+  }
+
+  const object = await c.env.R2_MEDIA_BUCKET.get(objectKey)
+  if (!object) {
+    return jsonError('Not found', 404)
+  }
+
+  return new Response(object.body, {
+    status: 200,
+    headers: {
+      ...responseHeaders(c),
+      'content-type': object.httpMetadata?.contentType ?? 'image/jpeg',
+      'cache-control': 'public, max-age=31536000, immutable',
+    },
+  })
+})
+
 export default app

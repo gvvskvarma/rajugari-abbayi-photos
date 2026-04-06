@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createResponsiveAsset, ResponsiveImage } from '../lib/media.tsx'
-import { instagramUrl } from '../lib/constants'
+import { instagramUrl, contactEmail } from '../lib/constants'
 import { RotatingGallery } from '../components/RotatingGallery.tsx'
 import { useHomepageGallery } from '../hooks/queries/useHomepageGallery.ts'
 import { useDocumentMeta } from '../hooks/useDocumentMeta.ts'
@@ -234,7 +234,7 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
         <div className="contact-card">
           <div className="contact-item">
             <p className="muted">Email</p>
-            <p className="contact-line">rgapics@gmail.com</p>
+            <p className="contact-line">{contactEmail}</p>
           </div>
           <div className="contact-item">
             <p className="muted">Instagram</p>

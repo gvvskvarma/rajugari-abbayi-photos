@@ -80,7 +80,7 @@ export function CustomerLightbox({
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  })
+  }, [onClose, handleMove])
 
   // Click zone handler
   const handleStageClick = (event: React.MouseEvent<HTMLDivElement>) => {

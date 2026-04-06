@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { instagramUrl } from '../lib/constants'
+import { instagramUrl, contactEmail } from '../lib/constants'
 import { useDocumentMeta } from '../hooks/useDocumentMeta.ts'
 import { createResponsiveAsset, ResponsiveImage } from '../lib/media.tsx'
 
@@ -126,7 +126,7 @@ export function AboutPage() {
           </a>
         </div>
         <div className="about-page-cta-contact">
-          <a href="mailto:rgapics@gmail.com">rgapics@gmail.com</a>
+          <a href={`mailto:${contactEmail}`}>{contactEmail}</a>
           <span className="about-page-cta-dot" aria-hidden />
           <a href={instagramUrl} target="_blank" rel="noreferrer">
             @rajugari_abbayi_photography

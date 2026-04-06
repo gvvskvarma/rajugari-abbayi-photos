@@ -1,5 +1,5 @@
 export type Role = 'admin' | 'customer'
-export type AppView = 'home' | 'my-pictures' | 'upload' | 'share' | 'admin-clients' | 'admin-client'
+
 export type ShareLinkScope = 'all' | 'selected'
 
 export type DeliveryAsset = {

@@ -1,5 +1,3 @@
-import type { AppView } from '../types'
-
 export const toFirstName = (value?: string) => {
   const cleaned = (value ?? '').trim()
   if (!cleaned) return ''
@@ -15,28 +13,6 @@ export const getAssetKind = (mimeType: string) => {
   if (mimeType.startsWith('image/')) return 'images'
   if (mimeType.startsWith('video/')) return 'videos'
   return 'other'
-}
-
-export const readViewFromHash = (): AppView => {
-  const hash = window.location.hash || '#home'
-  if (hash.startsWith('#share/')) return 'share'
-  if (hash === '#my-pictures') return 'my-pictures'
-  if (hash === '#upload') return 'upload'
-  if (hash.startsWith('#admin-clients/')) return 'admin-client'
-  if (hash === '#admin-clients' || hash === '#admin-work') return 'admin-clients'
-  return 'home'
-}
-
-export const readAdminClientIdFromHash = () => {
-  const hash = window.location.hash || ''
-  if (!hash.startsWith('#admin-clients/')) return ''
-  return hash.replace('#admin-clients/', '').split('/')[0]?.trim() ?? ''
-}
-
-export const readShareTokenFromHash = () => {
-  const hash = window.location.hash || ''
-  if (!hash.startsWith('#share/')) return ''
-  return hash.replace('#share/', '').trim()
 }
 
 export const daysRemainingText = (expiresAt: string | null) => {

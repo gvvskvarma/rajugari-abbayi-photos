@@ -33,9 +33,9 @@ export function Layout() {
         <div className="brand">
           <a className="brand-mark" href="#/" aria-label="Go to top">
             <img
-              src="/logo/IMG_3142.PNG"
+              src="/logo/logo-200.png"
               alt="Rajugari_Abbayi Photography logo"
-              loading="lazy"
+              loading="eager"
             />
           </a>
           <div>
