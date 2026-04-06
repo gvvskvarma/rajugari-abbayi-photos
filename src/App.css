@@ -2384,6 +2384,11 @@ img.rotator-image {
   gap: 24px;
 }
 
+.about-page-hero .eyebrow {
+  border: none;
+  padding: 0;
+}
+
 .about-page-hero h1 {
   margin: 0;
   font-family: 'Twigs', serif;
@@ -2482,6 +2487,11 @@ img.rotator-image {
   background:
     radial-gradient(circle at top left, rgba(209, 176, 127, 0.12), transparent 40%),
     radial-gradient(circle at bottom right, rgba(255, 255, 255, 0.025), transparent 42%);
+}
+
+/* Expand inner for sections that need full width (e.g. values grid) */
+.about-page-block:has(.about-page-values) .about-page-block-inner {
+  max-width: none;
 }
 
 /* Values grid */
