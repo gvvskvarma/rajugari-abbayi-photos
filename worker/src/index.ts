@@ -869,6 +869,46 @@ app.get('/api/v1/health', (c) =>
   )
 )
 
+app.get('/api/v1/homepage/gallery', async (c) => {
+  try {
+    const IMAGE_EXT_RE = /\.(jpe?g|png|webp)$/i
+
+    const prefixes: Record<string, string> = {
+      landscapes: 'project-rga/landscapes/',
+      baby: 'project-rga/potraits/baby/',
+      portraits: 'project-rga/potraits/potraits/',
+      events: 'project-rga/potraits/events/',
+    }
+
+    const entries = await Promise.all(
+      Object.entries(prefixes).map(async ([category, prefix]) => {
+        const listed = await c.env.R2_MEDIA_BUCKET.list({ prefix })
+        const keys = listed.objects
+          .map((obj) => obj.key)
+          .filter((key) => IMAGE_EXT_RE.test(key))
+        return [category, keys] as const
+      })
+    )
+
+    const categories = Object.fromEntries(entries) as {
+      landscapes: string[]
+      baby: string[]
+      portraits: string[]
+      events: string[]
+    }
+
+    return c.json({ categories }, 200, {
+      ...responseHeaders(c),
+      'Cache-Control': 'public, max-age=300',
+    })
+  } catch (error) {
+    return jsonError(
+      error instanceof Error ? error.message : 'Failed to load gallery',
+      500
+    )
+  }
+})
+
 app.get('/api/v1/me', async (c) => {
   try {
     const user = await getUserFromBearer(c.env, c.req.header('authorization'))

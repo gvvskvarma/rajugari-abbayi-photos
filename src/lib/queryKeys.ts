@@ -8,4 +8,5 @@ export const queryKeys = {
   adminClients: (userId: string) => ['admin-clients', userId] as const,
   adminActivity: (clientId?: string) => ['admin-activity', clientId ?? 'global'] as const,
   adminPreviewBatch: (ids: string[]) => ['admin-preview-batch', ...ids] as const,
+  homepageGallery: () => ['homepage-gallery'] as const,
 } as const
