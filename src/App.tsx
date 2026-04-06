@@ -9,13 +9,20 @@ import { LegacyRedirect } from './components/LegacyRedirect.tsx'
 function lazyRetry(factory: () => Promise<any>, name: string) {
   return lazy(() =>
     factory()
-      .then((m: Record<string, unknown>) => ({ default: m[name] as React.ComponentType<any> }))
+      .then((m: Record<string, unknown>) => {
+        // Chunk loaded successfully — clear the retry flag so future
+        // failures (e.g. navigating to another page after another deploy)
+        // can also trigger a reload.
+        sessionStorage.removeItem('chunk-retry')
+        return { default: m[name] as React.ComponentType<any> }
+      })
       .catch(() => {
         const key = 'chunk-retry'
         if (!sessionStorage.getItem(key)) {
           sessionStorage.setItem(key, '1')
           window.location.reload()
         }
+        // After a failed retry, return null so React doesn't crash
         return { default: (() => null) as React.ComponentType<any> }
       }),
   )
