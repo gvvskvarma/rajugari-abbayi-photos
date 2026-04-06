@@ -1,35 +1,26 @@
-import { useEffect, useState } from 'react'
-import type { GalleryShot } from '../types'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createResponsiveAsset, ResponsiveImage } from '../lib/media.tsx'
 import { instagramUrl } from '../lib/constants'
 import { RotatingGallery } from '../components/RotatingGallery.tsx'
+import { useHomepageGallery } from '../hooks/queries/useHomepageGallery.ts'
 
-const landscapePaths = [
+/* ── Hardcoded fallbacks (used when API is unavailable) ───────────── */
+const fallbackLandscapes = [
   'project-rga/landscapes/RGA02744.jpg',
   'project-rga/landscapes/RGA02755.jpg',
   'project-rga/landscapes/RGA02761.jpg',
   'project-rga/landscapes/RGA02807.jpg',
   'project-rga/landscapes/RGA03800.jpg',
 ]
-
-const featuredShots: GalleryShot[] = [
-  { image: createResponsiveAsset(landscapePaths[0]), title: 'North Cascades', tag: 'Landscape' },
-  { image: createResponsiveAsset(landscapePaths[1]), title: 'North Cascades', tag: 'Landscape' },
-  { image: createResponsiveAsset(landscapePaths[2]), title: 'North Cascades', tag: 'Landscape' },
-  { image: createResponsiveAsset(landscapePaths[3]), title: 'North Cascades', tag: 'Landscape' },
-  { image: createResponsiveAsset(landscapePaths[4]), title: 'San Francisco', tag: 'Landscape' },
-]
-
-const babyImages = [
+const fallbackBaby = [
   'project-rga/potraits/baby/RGA03628.jpg',
   'project-rga/potraits/baby/RGA03631.jpg',
   'project-rga/potraits/baby/RGA03639.jpg',
   'project-rga/potraits/baby/RGA03656.jpg',
   'project-rga/potraits/baby/RGA03664.jpg',
   'project-rga/potraits/baby/RGA03667.jpg',
-].map(createResponsiveAsset)
-
-const portraitImages = [
+]
+const fallbackPortraits = [
   'project-rga/potraits/potraits/RGA04154.jpg',
   'project-rga/potraits/potraits/RGA04156.jpg',
   'project-rga/potraits/potraits/RGA04170-2.jpg',
@@ -38,9 +29,8 @@ const portraitImages = [
   'project-rga/potraits/potraits/RGA04203-2.jpg',
   'project-rga/potraits/potraits/RGA04280.jpg',
   'project-rga/potraits/potraits/RGA04306-4.jpg',
-].map(createResponsiveAsset)
-
-const eventImages = [
+]
+const fallbackEvents = [
   'project-rga/potraits/events/RGA03248-2.jpg',
   'project-rga/potraits/events/RGA03250.jpg',
   'project-rga/potraits/events/RGA03281.jpg',
@@ -56,182 +46,223 @@ const eventImages = [
   'project-rga/potraits/events/RGA04158.jpg',
   'project-rga/potraits/events/RGA04191.jpg',
   'project-rga/potraits/events/RGA04205.jpg',
-].map(createResponsiveAsset)
+]
 
-const heroPortrait = createResponsiveAsset('project-rga/potraits/events/RGA03248-2.jpg')
-const heroLandscape = featuredShots[0]?.image
-const heroTravel = featuredShots[4]?.image ?? featuredShots[2]?.image
+/* ── Scroll-reveal hook ───────────────────────────────────────────── */
+function useReveal<T extends HTMLElement>() {
+  const ref = useRef<T>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      el.classList.add('revealed')
+      return
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          el.classList.add('revealed')
+          observer.disconnect()
+        }
+      },
+      { threshold: 0.12 }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+  return ref
+}
 
+/* ── Service cards data ───────────────────────────────────────────── */
+const services = [
+  { icon: '📸', label: 'Portraits', desc: 'Studio & outdoor sessions' },
+  { icon: '🎉', label: 'Events', desc: 'Birthdays, baby showers & more' },
+  { icon: '💍', label: 'Pre-Wedding', desc: 'Engagements & couple shoots' },
+  { icon: '🎬', label: 'Videos & Reels', desc: 'Cinematic short-form content' },
+  { icon: '🤝', label: 'Brand Collabs', desc: 'Product & influencer shoots' },
+  { icon: '👶', label: 'Baby Shoots', desc: 'Newborn & milestone moments' },
+]
+
+/* ── Stats strip ──────────────────────────────────────────────────── */
+const stats = [
+  { value: '10,000+', label: 'Photos delivered' },
+  { value: '50+', label: 'Happy clients' },
+  { value: '4+', label: 'Years shooting' },
+]
+
+/* ── Component ────────────────────────────────────────────────────── */
 export function HomePage({ sectionId }: { sectionId?: string }) {
   const [cycleStep, setCycleStep] = useState(0)
+  const { data: galleryData } = useHomepageGallery()
 
+  /* Build responsive assets from dynamic keys (or fallbacks) */
+  const { landscapeAssets, babyAssets, portraitAssets, eventAssets } = useMemo(() => {
+    const cats = galleryData?.categories
+    const lKeys = cats?.landscapes?.length ? cats.landscapes : fallbackLandscapes
+    const bKeys = cats?.baby?.length ? cats.baby : fallbackBaby
+    const pKeys = cats?.portraits?.length ? cats.portraits : fallbackPortraits
+    const eKeys = cats?.events?.length ? cats.events : fallbackEvents
+    return {
+      landscapeAssets: lKeys.map(createResponsiveAsset),
+      babyAssets: bKeys.map(createResponsiveAsset),
+      portraitAssets: pKeys.map(createResponsiveAsset),
+      eventAssets: eKeys.map(createResponsiveAsset),
+    }
+  }, [galleryData])
+
+  /* Hero picks */
+  const heroImage = useMemo(
+    () => eventAssets[0] ?? landscapeAssets[0],
+    [eventAssets, landscapeAssets]
+  )
+
+  /* Rotating gallery cycle */
   useEffect(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-    const id = window.setInterval(() => {
-      setCycleStep((current) => current + 1)
-    }, 2000)
+    const id = window.setInterval(() => setCycleStep((s) => s + 1), 2000)
     return () => window.clearInterval(id)
   }, [])
 
+  /* Scroll to section */
   useEffect(() => {
     if (!sectionId) return
     const el = document.getElementById(sectionId)
     if (el) el.scrollIntoView({ behavior: 'smooth' })
   }, [sectionId])
 
+  /* Section refs for scroll reveal */
+  const heroRef = useReveal<HTMLElement>()
+  const servicesRef = useReveal<HTMLElement>()
+  const workRef = useReveal<HTMLElement>()
+  const portraitsRef = useReveal<HTMLDivElement>()
+  const contactRef = useReveal<HTMLElement>()
+
   return (
     <>
-      <section id="home" className="hero">
-        <div className="hero-text">
-          <p className="eyebrow">Photography portfolio</p>
-          <h1>Light, texture, and quiet moments — curated from my shoots.</h1>
-          <p className="lead">
-            I focus on landscapes, portraits, and the subtle details that make
-            a scene feel alive. Browse the gallery and reach out to collaborate.
-          </p>
-          <div className="hero-actions">
-            <a className="button primary" href="#/work">
-              View the work
-            </a>
-            <a className="button ghost" href="#/book">
-              Let's collaborate
-            </a>
-          </div>
-        </div>
-        <div className="hero-cards">
-          <div className="hero-card tall">
+      {/* ── HERO ── */}
+      <section id="home" className="hero-v2 reveal-section" ref={heroRef}>
+        <div className="hero-v2-bg">
+          {heroImage && (
             <ResponsiveImage
-              asset={heroPortrait}
-              alt="Portrait"
-              className="hero-card-image"
-              sizes="(max-width: 900px) 92vw, 32vw"
+              asset={heroImage}
+              alt=""
+              className="hero-v2-bg-img"
+              sizes="100vw"
               loading="eager"
               fetchPriority="high"
             />
-            <div className="hero-card-overlay">
-              <p>Portraits</p>
-              <span>Studio & natural light</span>
-            </div>
+          )}
+          <div className="hero-v2-overlay" />
+        </div>
+        <div className="hero-v2-content">
+          <p className="eyebrow">Rajugari Abbayi Photography</p>
+          <h1>Your moments.<br />Made&nbsp;iconic.</h1>
+          <p className="lead">
+            Bold portraits, cinematic events, candid magic — I turn everyday
+            moments into visuals you'll keep coming back to.
+          </p>
+          <div className="hero-actions">
+            <a className="button primary" href="#/book">
+              Book a shoot
+            </a>
+            <a className="button ghost" href="#/work">
+              See my work
+            </a>
           </div>
-          <div className="hero-card wide">
-            {heroLandscape && (
-              <ResponsiveImage
-                asset={heroLandscape}
-                alt="Landscape"
-                className="hero-card-image"
-                sizes="(max-width: 900px) 92vw, 66vw"
-                loading="eager"
-                fetchPriority="high"
-              />
-            )}
-            <div className="hero-card-overlay">
-              <p>Landscapes</p>
-              <span>Golden hour stories</span>
+        </div>
+
+        {/* Stats strip */}
+        <div className="hero-stats">
+          {stats.map((s) => (
+            <div key={s.label} className="hero-stat">
+              <span className="hero-stat-value">{s.value}</span>
+              <span className="hero-stat-label">{s.label}</span>
             </div>
-          </div>
-          <div className="hero-card square">
-            {heroTravel && (
-              <ResponsiveImage
-                asset={heroTravel}
-                alt="Travel"
-                className="hero-card-image"
-                sizes="(max-width: 900px) 92vw, 32vw"
-                loading="eager"
-              />
-            )}
-            <div className="hero-card-overlay">
-              <p>Travel</p>
-              <span>Everyday poetry</span>
-            </div>
-          </div>
+          ))}
         </div>
       </section>
 
-      <section id="work" className="work">
+      {/* ── SERVICES ── */}
+      <section className="services-section reveal-section" ref={servicesRef}>
+        <div className="section-head">
+          <h2>What I shoot</h2>
+          <p>
+            From intimate portraits to high-energy events — I bring the same
+            energy and eye for detail to every project.
+          </p>
+        </div>
+        <div className="services-grid">
+          {services.map((svc) => (
+            <div key={svc.label} className="service-card">
+              <span className="service-icon" aria-hidden>{svc.icon}</span>
+              <h3>{svc.label}</h3>
+              <p>{svc.desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── WORK / LANDSCAPES ── */}
+      <section id="work" className="work reveal-section" ref={workRef}>
         <div className="section-head">
           <h2>Landscapes</h2>
           <p>
-            A quiet gallery of scenes from the road. Each frame is chosen to feel
-            collected rather than merely shown.
+            Wide open skies, golden light, and the kind of frames
+            that make you want to pack a bag and go.
           </p>
         </div>
 
         <div className="landscape-showcase">
-          {featuredShots[0] && (
+          {landscapeAssets[0] && (
             <article className="landscape-showcase-main">
               <ResponsiveImage
-                asset={featuredShots[0].image}
-                alt={featuredShots[0].title}
+                asset={landscapeAssets[0]}
+                alt="Landscape photography"
                 sizes="(max-width: 900px) 92vw, 92vw"
                 loading="eager"
                 fetchPriority="high"
               />
-              <div className="landscape-showcase-overlay">
-                <p>{featuredShots[0].title}</p>
-                <span>{featuredShots[0].tag}</span>
-              </div>
             </article>
           )}
 
-          <div className="landscape-showcase-strip" aria-label="Additional landscape highlights">
-            {featuredShots.slice(1).map((shot) => (
-              <article key={shot.image.key} className="landscape-showcase-card">
+          <div className="landscape-showcase-strip" aria-label="More landscapes">
+            {landscapeAssets.slice(1, 5).map((asset) => (
+              <article key={asset.key} className="landscape-showcase-card">
                 <ResponsiveImage
-                  asset={shot.image}
-                  alt={shot.title}
+                  asset={asset}
+                  alt="Landscape"
                   sizes="(max-width: 900px) 44vw, 22vw"
                 />
-                <div className="landscape-showcase-overlay">
-                  <p>{shot.title}</p>
-                  <span>{shot.tag}</span>
-                </div>
               </article>
             ))}
           </div>
         </div>
 
-        <div className="work-block">
+        {/* ── PORTRAIT STORIES ── */}
+        <div className="work-block reveal-section" ref={portraitsRef}>
           <div className="section-head">
             <h2>Portrait stories</h2>
+            <p>People, personality, and all the little in-between moments.</p>
           </div>
           <div className="rotator-grid">
-            <RotatingGallery title="BABY SHOOTS" subtitle="New beginnings" images={babyImages} cycleStep={cycleStep} />
-            <RotatingGallery title="Portraits" subtitle="People & personality" images={portraitImages} cycleStep={cycleStep} />
-            <RotatingGallery title="Events" subtitle="Milestones & energy" images={eventImages} cycleStep={cycleStep} />
+            <RotatingGallery title="Baby shoots" subtitle="Tiny humans, big smiles" images={babyAssets} cycleStep={cycleStep} />
+            <RotatingGallery title="Portraits" subtitle="Real people, real vibes" images={portraitAssets} cycleStep={cycleStep} />
+            <RotatingGallery title="Events" subtitle="The energy, captured" images={eventAssets} cycleStep={cycleStep} />
           </div>
         </div>
       </section>
 
-      <section id="about" className="about">
+      {/* ── CONTACT ── */}
+      <section id="contact" className="contact reveal-section" ref={contactRef}>
         <div>
-          <h2>About the lens</h2>
+          <h2>Let's make something epic</h2>
           <p>
-            I'm Vishnu Varma, a photographer focused on candid stories, textured light,
-            and the quiet energy of people in their spaces. My work blends editorial
-            composition with documentary honesty.
-          </p>
-        </div>
-        <div className="about-card">
-          <h3>Available for</h3>
-          <ul>
-            <li>Portrait sessions</li>
-            <li>Brand campaigns</li>
-            <li>Editorial shoots</li>
-            <li>Travel collaborations</li>
-          </ul>
-        </div>
-      </section>
-
-      <section id="contact" className="contact">
-        <div>
-          <h2>Let's build something beautiful</h2>
-          <p>
-            Want to book a shoot, collaborate, or hire me? Send a note and I'll reply
-            within two business days.
+            Got an event coming up? Want fresh content for your brand? Or just
+            need some fire portraits? Hit me up — I'd love to hear about it.
           </p>
           <div className="contact-actions">
             <a className="button primary" href="#/book">
-              Open contact form
+              Book now
             </a>
           </div>
         </div>

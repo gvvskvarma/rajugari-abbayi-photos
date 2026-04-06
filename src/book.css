@@ -67,7 +67,7 @@
 
 .book-card-title {
   margin: 0 0 10px;
-  font-family: 'Bodoni Moda', serif;
+  font-family: 'Playfair Display', serif;
   font-size: 1.12rem;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -146,7 +146,7 @@
   border: 1px solid rgba(236, 232, 223, 0.2);
   background: rgba(11, 13, 19, 0.6);
   color: var(--ink);
-  font-family: 'Manrope', sans-serif;
+  font-family: 'DM Sans', sans-serif;
   font-size: 0.94rem;
   padding: 11px 12px;
   line-height: 1.3;
