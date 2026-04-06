@@ -321,8 +321,8 @@ export function UploadPage() {
       <div className="portal-head admin-screen-head">
         <div>
           <p className="eyebrow">Admin upload</p>
-          <h2>Upload to a client folder</h2>
-          <p>Choose a client, drop files, then jump straight into that client's folder.</p>
+          <h2>Deliver photos to a client</h2>
+          <p>Choose a client, add files, and deliver — all in one go.</p>
         </div>
         <a className="button ghost" href="#/admin/clients">
           View folders
@@ -351,7 +351,9 @@ export function UploadPage() {
         <div className="admin-stat-card">
           <span>Files</span>
           <strong>
-            {uploadItems.length} item{uploadItems.length === 1 ? '' : 's'}
+            {uploadItems.length === 0
+              ? 'No files added yet'
+              : `${uploadItems.length} file${uploadItems.length === 1 ? '' : 's'}`}
           </strong>
           <p className="portal-hint">
             {uploadQueueGroups.length > 0
@@ -367,7 +369,7 @@ export function UploadPage() {
           <span>Upload</span>
           <strong>{uploadTitle.trim() || 'Client Delivery'}</strong>
           <p className="portal-hint">
-            {uploadBusy ? 'Preparing upload...' : 'Upload will use the title above as the folder name.'}
+            {uploadBusy ? 'Preparing upload...' : 'The delivery title will be used as the client folder name.'}
           </p>
         </div>
       </div>
@@ -476,10 +478,11 @@ export function UploadPage() {
             />
             <div className="admin-dropzone-copy">
               <p className="eyebrow">Upload content</p>
-              <h3>Drop files or folders here</h3>
+              <h3>{uploadDropActive ? 'Drop to upload' : 'Drop files or folders here'}</h3>
               <p>
-                Drag a folder, drag individual files, or use the browse action to pick
-                multiple items.
+                {uploadDropActive
+                  ? 'Release to add files to the upload queue.'
+                  : 'Drag a folder, drag individual files, or use the browse action to pick multiple items.'}
               </p>
             </div>
             <div className="admin-dropzone-actions">
@@ -509,8 +512,8 @@ export function UploadPage() {
             </div>
           )}
 
-          <button className="button primary" type="submit" disabled={uploadBusy || uploadItems.length === 0}>
-            {uploadBusy ? 'Creating delivery...' : 'Upload to client'}
+          <button className="button primary admin-upload-cta" type="submit" disabled={uploadBusy || uploadItems.length === 0}>
+            {uploadBusy ? 'Delivering...' : 'Deliver to client'}
           </button>
         </div>
       </form>
