@@ -29,6 +29,7 @@ const AdminClientsPage = lazyRetry(() => import('./pages/AdminClientsPage.tsx'),
 const AdminClientDetailPage = lazyRetry(() => import('./pages/AdminClientDetailPage.tsx'), 'AdminClientDetailPage')
 const ShareViewPage = lazyRetry(() => import('./pages/ShareViewPage.tsx'), 'ShareViewPage')
 const AboutPage = lazyRetry(() => import('./pages/AboutPage.tsx'), 'AboutPage')
+const PortfolioPage = lazyRetry(() => import('./pages/PortfolioPage.tsx'), 'PortfolioPage')
 
 function LazyPage({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<div className="portal-section"><p className="portal-hint">Loading...</p></div>}>{children}</Suspense>
@@ -39,7 +40,8 @@ const router = createHashRouter([
     element: <Layout />,
     children: [
       { path: '/', element: <LazyPage><HomePage /></LazyPage> },
-      { path: '/work', element: <LazyPage><HomePage sectionId="work" /></LazyPage> },
+      { path: '/work', element: <LazyPage><PortfolioPage /></LazyPage> },
+      { path: '/portfolio', element: <LazyPage><PortfolioPage /></LazyPage> },
       { path: '/about', element: <LazyPage><AboutPage /></LazyPage> },
       { path: '/book', element: <LazyPage><BookPage /></LazyPage> },
       { path: '/my-pictures', element: <LazyPage><MyPicturesPage /></LazyPage> },
