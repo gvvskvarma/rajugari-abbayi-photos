@@ -52,11 +52,11 @@ const fallbackLandscapes = [
 type Category = 'all' | 'portraits' | 'baby' | 'events' | 'landscapes'
 
 const categories: { key: Category; label: string }[] = [
-  { key: 'all', label: 'All' },
   { key: 'portraits', label: 'Portraits' },
   { key: 'baby', label: 'Baby Shoots' },
   { key: 'events', label: 'Events' },
   { key: 'landscapes', label: 'Landscapes' },
+  { key: 'all', label: 'All' },
 ]
 
 /* ── Scroll-reveal hook ─────────────────────────────────────────── */
@@ -193,7 +193,7 @@ function PortfolioLightbox({
 /* ── Portfolio Page ──────────────────────────────────────────────── */
 export function PortfolioPage() {
   useDocumentMeta('Portfolio', 'Curated portraits, baby shoots, events, and landscapes by Rajugari Abbayi Photography.')
-  const [activeCategory, setActiveCategory] = useState<Category>('all')
+  const [activeCategory, setActiveCategory] = useState<Category>('portraits')
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const { data: galleryData } = useHomepageGallery()
 
@@ -211,18 +211,26 @@ export function PortfolioPage() {
     }
   }, [galleryData])
 
+  /* Shuffled mix for "All" — stable per render cycle */
+  const shuffledAll = useMemo(() => {
+    const all = [
+      ...assetsByCategory.portraits,
+      ...assetsByCategory.baby,
+      ...assetsByCategory.events,
+      ...assetsByCategory.landscapes,
+    ]
+    for (let i = all.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [all[i], all[j]] = [all[j], all[i]]
+    }
+    return all
+  }, [assetsByCategory])
+
   /* Filtered list based on active tab */
   const filteredAssets = useMemo(() => {
-    if (activeCategory === 'all') {
-      return [
-        ...assetsByCategory.portraits,
-        ...assetsByCategory.baby,
-        ...assetsByCategory.events,
-        ...assetsByCategory.landscapes,
-      ]
-    }
+    if (activeCategory === 'all') return shuffledAll
     return assetsByCategory[activeCategory]
-  }, [activeCategory, assetsByCategory])
+  }, [activeCategory, assetsByCategory, shuffledAll])
 
   /* Close lightbox on category change */
   useEffect(() => setLightboxIndex(null), [activeCategory])
