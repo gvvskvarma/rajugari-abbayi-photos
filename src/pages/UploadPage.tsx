@@ -326,7 +326,7 @@ export function UploadPage() {
           <h2>Deliver photos to a client</h2>
           <p>Choose a client, add files, and deliver — all in one go.</p>
         </div>
-        <a className="button ghost" href="#/admin/clients">
+        <a className="button ghost" href="/admin/clients">
           View folders
         </a>
       </div>

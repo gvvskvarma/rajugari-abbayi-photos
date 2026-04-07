@@ -97,7 +97,7 @@ export function AboutPage() {
           If you're looking for something that feels real — I'd love to create that with you.
         </p>
         <div className="about-page-cta-actions">
-          <a className="button primary" href="#/book">
+          <a className="button primary" href="/book">
             Start your story
           </a>
         </div>

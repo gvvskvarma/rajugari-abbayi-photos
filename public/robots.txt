@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://rajugariabbayishots.vercel.app/sitemap.xml

@@ -32,7 +32,7 @@ export function Layout() {
       <a href="#main-content" className="skip-link">Skip to content</a>
       <header className="topbar">
         <div className="brand">
-          <a className="brand-mark" href="#/" aria-label="Go to top">
+          <a className="brand-mark" href="/" aria-label="Go to top">
             <img
               src="/logo/logo-200.png"
               alt="Rajugari_Abbayi Photography logo"
@@ -40,7 +40,7 @@ export function Layout() {
             />
           </a>
           <div>
-            <a className="brand-title" href="#/">
+            <a className="brand-title" href="/">
               Rajugari_Abbayi_Photography
             </a>
             <a
@@ -56,12 +56,12 @@ export function Layout() {
 
         <div className="topbar-right">
           <nav className="nav">
-            {session && role === 'customer' && <a href="#/my-pictures">My Pictures</a>}
-            {session && role === 'admin' && <a href="#/upload">Upload</a>}
-            {session && role === 'admin' && <a href="#/admin/clients">Clients</a>}
-            {!(session && role === 'admin') && <a href="#/work">Work</a>}
-            {!(session && role === 'admin') && <a href="#/about">About</a>}
-            {!(session && role === 'admin') && <a href="#/book">Contact</a>}
+            {session && role === 'customer' && <a href="/my-pictures">My Pictures</a>}
+            {session && role === 'admin' && <a href="/upload">Upload</a>}
+            {session && role === 'admin' && <a href="/admin/clients">Clients</a>}
+            {!(session && role === 'admin') && <a href="/work">Work</a>}
+            {!(session && role === 'admin') && <a href="/about">About</a>}
+            {!(session && role === 'admin') && <a href="/book">Contact</a>}
           </nav>
 
           <div className="auth-box">

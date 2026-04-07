@@ -97,10 +97,10 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
             moments into visuals you'll keep coming back to.
           </p>
           <div className="hero-actions">
-            <a className="button primary" href="#/book">
+            <a className="button primary" href="/book">
               Start your story
             </a>
-            <a className="button ghost" href="#/work">
+            <a className="button ghost" href="/work">
               View my work
             </a>
           </div>
@@ -159,7 +159,7 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
             need some fire portraits? I'd love to hear about it.
           </p>
           <div className="contact-actions">
-            <a className="button primary" href="#/book">
+            <a className="button primary" href="/book">
               Start your story
             </a>
           </div>

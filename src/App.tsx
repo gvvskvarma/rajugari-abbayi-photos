@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { createHashRouter, RouterProvider } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import './App.css'
 import { Layout } from './components/Layout.tsx'
 import { LegacyRedirect } from './components/LegacyRedirect.tsx'
@@ -42,7 +42,7 @@ function LazyPage({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<div className="portal-section"><p className="portal-hint">Loading...</p></div>}>{children}</Suspense>
 }
 
-const router = createHashRouter([
+const router = createBrowserRouter([
   {
     element: <Layout />,
     children: [
