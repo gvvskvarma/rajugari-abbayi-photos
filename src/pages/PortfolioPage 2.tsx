@@ -1,11 +1,53 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createResponsiveAsset, ResponsiveImage } from '../lib/media.tsx'
 import type { ResponsiveAsset } from '../types'
-import { fallbackPortraits, fallbackBaby, fallbackEvents, fallbackLandscapes } from '../lib/galleryFallbacks'
 import { useHomepageGallery } from '../hooks/queries/useHomepageGallery.ts'
 import { useDocumentMeta } from '../hooks/useDocumentMeta.ts'
 import { useFocusTrap } from '../hooks/useFocusTrap.ts'
-import { useReveal } from '../hooks/useReveal'
+
+/* ── Fallback image keys (same as homepage) ─────────────────────── */
+const fallbackPortraits = [
+  'project-rga/potraits/potraits/RGA04154.jpg',
+  'project-rga/potraits/potraits/RGA04156.jpg',
+  'project-rga/potraits/potraits/RGA04170-2.jpg',
+  'project-rga/potraits/potraits/RGA04174-2.jpg',
+  'project-rga/potraits/potraits/RGA04188-2.jpg',
+  'project-rga/potraits/potraits/RGA04203-2.jpg',
+  'project-rga/potraits/potraits/RGA04280.jpg',
+  'project-rga/potraits/potraits/RGA04306-4.jpg',
+]
+const fallbackBaby = [
+  'project-rga/potraits/baby/RGA03628.jpg',
+  'project-rga/potraits/baby/RGA03631.jpg',
+  'project-rga/potraits/baby/RGA03639.jpg',
+  'project-rga/potraits/baby/RGA03656.jpg',
+  'project-rga/potraits/baby/RGA03664.jpg',
+  'project-rga/potraits/baby/RGA03667.jpg',
+]
+const fallbackEvents = [
+  'project-rga/potraits/events/RGA03248-2.jpg',
+  'project-rga/potraits/events/RGA03250.jpg',
+  'project-rga/potraits/events/RGA03281.jpg',
+  'project-rga/potraits/events/RGA03341.jpg',
+  'project-rga/potraits/events/RGA03884.jpg',
+  'project-rga/potraits/events/RGA03886.jpg',
+  'project-rga/potraits/events/RGA03898.jpg',
+  'project-rga/potraits/events/RGA03987.jpg',
+  'project-rga/potraits/events/RGA03994.jpg',
+  'project-rga/potraits/events/RGA04058.jpg',
+  'project-rga/potraits/events/RGA04064.jpg',
+  'project-rga/potraits/events/RGA04135.jpg',
+  'project-rga/potraits/events/RGA04158.jpg',
+  'project-rga/potraits/events/RGA04191.jpg',
+  'project-rga/potraits/events/RGA04205.jpg',
+]
+const fallbackLandscapes = [
+  'project-rga/landscapes/RGA02744.jpg',
+  'project-rga/landscapes/RGA02755.jpg',
+  'project-rga/landscapes/RGA02761.jpg',
+  'project-rga/landscapes/RGA02807.jpg',
+  'project-rga/landscapes/RGA03800.jpg',
+]
 
 type Category = 'all' | 'portraits' | 'baby' | 'events' | 'landscapes'
 
@@ -16,6 +58,31 @@ const categories: { key: Category; label: string }[] = [
   { key: 'events', label: 'Events' },
   { key: 'landscapes', label: 'Landscapes' },
 ]
+
+/* ── Scroll-reveal hook ─────────────────────────────────────────── */
+function useReveal<T extends HTMLElement>() {
+  const ref = useRef<T>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      el.classList.add('revealed')
+      return
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          el.classList.add('revealed')
+          observer.disconnect()
+        }
+      },
+      { threshold: 0.08 },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+  return ref
+}
 
 /* ── Portfolio Lightbox ─────────────────────────────────────────── */
 function PortfolioLightbox({
@@ -144,7 +211,7 @@ export function PortfolioPage() {
     }
   }, [galleryData])
 
-  /* Seeded shuffle for "All" — deterministic per day, fresh each visit */
+  /* Shuffled mix for "All" — stable per render cycle */
   const shuffledAll = useMemo(() => {
     const all = [
       ...assetsByCategory.portraits,
@@ -152,18 +219,8 @@ export function PortfolioPage() {
       ...assetsByCategory.events,
       ...assetsByCategory.landscapes,
     ]
-    // Simple seeded PRNG (mulberry32) — seed from today's date so order
-    // is stable within a session but changes daily.
-    const today = new Date()
-    let seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate()
-    const random = () => {
-      seed |= 0; seed = (seed + 0x6d2b79f5) | 0
-      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-    }
     for (let i = all.length - 1; i > 0; i--) {
-      const j = Math.floor(random() * (i + 1));
+      const j = Math.floor(Math.random() * (i + 1));
       [all[i], all[j]] = [all[j], all[i]]
     }
     return all

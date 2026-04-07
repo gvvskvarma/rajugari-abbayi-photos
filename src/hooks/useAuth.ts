@@ -178,7 +178,6 @@ export function useAuth(options?: UseAuthOptions) {
     setAuthCodeReady(false)
     setAuthMessage('')
     options?.onSignOut?.()
-    window.location.hash = '#home'
   }
 
   return {

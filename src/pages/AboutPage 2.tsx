@@ -1,9 +1,33 @@
+import { useEffect, useRef } from 'react'
 import { instagramUrl, contactEmail } from '../lib/constants'
 import { useDocumentMeta } from '../hooks/useDocumentMeta.ts'
-import { useReveal } from '../hooks/useReveal'
 import { createResponsiveAsset, ResponsiveImage } from '../lib/media.tsx'
 
 const aboutPhoto = createResponsiveAsset('project-rga/about/about-vishnu.jpg')
+
+function useReveal<T extends HTMLElement>() {
+  const ref = useRef<T>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      el.classList.add('revealed')
+      return
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          el.classList.add('revealed')
+          observer.disconnect()
+        }
+      },
+      { threshold: 0.12 }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+  return ref
+}
 
 export function AboutPage() {
   useDocumentMeta('About', 'Meet Vishnu Varma — the story behind Rajugari Abbayi Photography. Natural light, real moments, cinematic storytelling.')

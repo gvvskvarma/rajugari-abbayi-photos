@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { AdminActivityItem, AdminActivityKind } from '../types'
 import { useAuth } from '../hooks/useAuth'
 import { useAdminData } from '../context/AdminDataContext.tsx'
@@ -7,6 +8,7 @@ import { AdminActivityPanel } from '../components/AdminActivityPanel'
 import { SkeletonCardList } from '../components/Skeleton'
 
 export function AdminClientsPage() {
+  const navigate = useNavigate()
   const { session, role } = useAuth()
   const {
     adminClients,
@@ -71,7 +73,7 @@ export function AdminClientsPage() {
           className="button ghost"
           type="button"
           onClick={() => {
-            window.location.hash = '#/upload'
+            navigate('/upload')
           }}
         >
           New upload
@@ -128,7 +130,7 @@ export function AdminClientsPage() {
             className="admin-client-card"
             type="button"
             onClick={() => {
-              window.location.hash = '#/admin/clients/' + client.id
+              navigate('/admin/clients/' + client.id)
             }}
           >
             <div className="admin-client-card-head">

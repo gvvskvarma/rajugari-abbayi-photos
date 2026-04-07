@@ -1,5 +1,6 @@
 import { useMemo, useReducer, useRef } from 'react'
 import type { ChangeEvent, DragEvent, FormEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { workerRequest } from '../hooks/useApi'
 import { useAdminData } from '../context/AdminDataContext.tsx'
@@ -11,6 +12,7 @@ import { queryClient } from '../lib/queryClient'
 import { queryKeys } from '../lib/queryKeys'
 
 export function UploadPage() {
+  const navigate = useNavigate()
   const { session, role, getAccessToken } = useAuth()
   const { adminClients, recordAdminActivity, adminBusy, adminError } = useAdminData()
 
@@ -294,7 +296,7 @@ export function UploadPage() {
     )
     dispatch({ type: 'RESET' })
     dispatch({ type: 'SET_MESSAGE', message: `Upload complete for ${targetEmail}. Opening the client folder now.` })
-    window.location.hash = '#/admin/clients/' + clientId
+    navigate('/admin/clients/' + clientId)
     void queryClient.invalidateQueries({ queryKey: queryKeys.adminClients(session.user.id) })
   }
 

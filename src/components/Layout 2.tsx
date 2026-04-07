@@ -1,4 +1,4 @@
-import { Outlet, useNavigate } from 'react-router-dom'
+import { Outlet } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import '../App.css'
 import { isSupabaseConfigured } from '../lib/supabase'
@@ -8,7 +8,6 @@ import { queryClient } from '../lib/queryClient'
 import { AdminDataProvider } from '../context/AdminDataContext.tsx'
 
 export function Layout() {
-  const navigate = useNavigate()
   const {
     session,
     role,
@@ -25,7 +24,7 @@ export function Layout() {
     handleSendOtp,
     handleVerifyOtp,
     handleSignOut,
-  } = useAuth({ onSignOut: () => navigate('/') })
+  } = useAuth()
 
   return (
     <div className="page">

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
 import type {
   AdminActivityItem,
@@ -29,6 +29,7 @@ import { queryKeys } from '../lib/queryKeys'
 
 export function AdminClientDetailPage() {
   const { clientId } = useParams<{ clientId: string }>()
+  const navigate = useNavigate()
   const { session, role, getAccessToken } = useAuth()
   const {
     adminClients,
@@ -391,7 +392,7 @@ export function AdminClientDetailPage() {
     setAdminAssetSearch('')
     setSelectedAdminAssetIds([])
     closeAdminLightbox()
-    window.location.hash = '#/admin/clients'
+    navigate('/admin/clients')
     recordAdminActivity('delete', 'Deleted client', `Removed ${label ?? deleteClientId}`, { clientId: deleteClientId })
   }
 
@@ -512,7 +513,7 @@ export function AdminClientDetailPage() {
             <h2>No client selected</h2>
             <p>Pick a client from the folder list to view their work.</p>
           </div>
-          <button className="button ghost" type="button" onClick={() => { window.location.hash = '#/admin/clients' }}>
+          <button className="button ghost" type="button" onClick={() => { navigate('/admin/clients') }}>
             Back to folders
           </button>
         </div>
@@ -534,8 +535,8 @@ export function AdminClientDetailPage() {
             </p>
           </div>
           <div className="admin-head-actions">
-            <button className="button ghost" type="button" onClick={() => { window.location.hash = '#/admin/clients' }}>Back</button>
-            <button className="button ghost" type="button" onClick={() => { window.location.hash = '#/upload' }}>Upload more</button>
+            <button className="button ghost" type="button" onClick={() => { navigate('/admin/clients') }}>Back</button>
+            <button className="button ghost" type="button" onClick={() => { navigate('/upload') }}>Upload more</button>
             <button className="button ghost" type="button" onClick={() => setAdminClientEditMode((current) => !current)}>
               {adminClientEditMode ? 'Close edit' : 'Edit client'}
             </button>
