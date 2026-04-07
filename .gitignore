@@ -27,3 +27,5 @@ dist-ssr
 supabase/.temp/
 worker/.wrangler/
 .wrangler/
+.claude/
+* 2.*
