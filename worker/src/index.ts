@@ -161,10 +161,19 @@ app.use('/api/*', async (c, next) => {
   await next()
 })
 
+/** Safe error messages that can be shown to clients (everything else is internal) */
+const SAFE_ERROR_PATTERNS = [
+  /not found/i, /unauthorized/i, /forbidden/i, /expired/i,
+  /invalid.*token/i, /login.*session/i, /required/i, /already exists/i,
+]
+
 app.onError((error, c) => {
   const origin = resolveAllowedOrigin(c.env, c.req.header('Origin'))
-  const status = error instanceof Error && error.message.toLowerCase().includes('not found') ? 404 : 500
-  return jsonError(error instanceof Error ? error.message : 'Unexpected error', status, origin)
+  const message = error instanceof Error ? error.message : 'Unexpected error'
+  const isSafe = SAFE_ERROR_PATTERNS.some((pattern) => pattern.test(message))
+  const status = message.toLowerCase().includes('not found') ? 404 : 500
+  console.error('[worker error]', message)
+  return jsonError(isSafe ? message : 'An internal error occurred', status, origin)
 })
 
 const supabaseRequest = async <T>(
@@ -230,6 +239,19 @@ const signToken = async (version: string, secret: string, payloadB64: string) =>
   return bytesToBase64Url(new Uint8Array(signature))
 }
 
+/** Constant-time comparison to prevent timing attacks on token signatures */
+const timingSafeEqual = (a: string, b: string): boolean => {
+  if (a.length !== b.length) return false
+  const encoder = textEncoder
+  const aBuf = encoder.encode(a)
+  const bBuf = encoder.encode(b)
+  let mismatch = 0
+  for (let i = 0; i < aBuf.length; i++) {
+    mismatch |= aBuf[i] ^ bBuf[i]
+  }
+  return mismatch === 0
+}
+
 const createUploadToken = async (secret: string, payload: UploadTokenPayload) => {
   const payloadB64 = base64UrlEncode(JSON.stringify(payload))
   const signature = await signToken(uploadTokenVersion, secret, payloadB64)
@@ -243,7 +265,7 @@ const verifyUploadToken = async (secret: string, token: string): Promise<UploadT
   }
 
   const expectedSignature = await signToken(uploadTokenVersion, secret, payloadB64)
-  if (expectedSignature !== signature) {
+  if (!timingSafeEqual(expectedSignature, signature)) {
     throw new Error('Invalid upload token')
   }
 
@@ -284,7 +306,7 @@ const verifyPreviewToken = async (secret: string, token: string): Promise<Previe
   }
 
   const expectedSignature = await signToken(previewTokenVersion, secret, payloadB64)
-  if (expectedSignature !== signature) {
+  if (!timingSafeEqual(expectedSignature, signature)) {
     throw new Error('Invalid preview token')
   }
 
@@ -315,7 +337,7 @@ const verifyDownloadToken = async (secret: string, token: string): Promise<Downl
   }
 
   const expectedSignature = await signToken(downloadTokenVersion, secret, payloadB64)
-  if (expectedSignature !== signature) {
+  if (!timingSafeEqual(expectedSignature, signature)) {
     throw new Error('Invalid download token')
   }
 
@@ -835,9 +857,12 @@ const ensureAdminOwnedAsset = async (env: Env, user: User, assetId: string) => {
   return asset
 }
 
-const parseNullableText = (value: unknown): string | null => {
+const MAX_SHORT_TEXT = 255
+const MAX_LONG_TEXT = 5000
+
+const parseNullableText = (value: unknown, maxLength = MAX_SHORT_TEXT): string | null => {
   if (typeof value !== 'string') return null
-  const trimmed = value.trim()
+  const trimmed = value.trim().slice(0, maxLength)
   return trimmed.length > 0 ? trimmed : null
 }
 
@@ -1047,7 +1072,7 @@ app.post('/api/v1/admin/clients', async (c) => {
           full_name: fullName,
           email,
           phone: parseNullableText(body.phone),
-          notes: parseNullableText(body.notes),
+          notes: parseNullableText(body.notes, MAX_LONG_TEXT),
         }),
       }
     )
@@ -1070,7 +1095,7 @@ app.patch('/api/v1/admin/clients/:clientId', async (c) => {
     if (typeof body.fullName === 'string') payload.full_name = parseNullableText(body.fullName)
     if (typeof body.email === 'string') payload.email = parseNullableText(body.email)?.toLowerCase() ?? null
     if (typeof body.phone === 'string') payload.phone = parseNullableText(body.phone)
-    if (typeof body.notes === 'string') payload.notes = parseNullableText(body.notes)
+    if (typeof body.notes === 'string') payload.notes = parseNullableText(body.notes, MAX_LONG_TEXT)
     if (Object.keys(payload).length === 0) return jsonError('No fields provided for update', 400)
 
     const updated = await supabaseRequest<
@@ -1098,23 +1123,23 @@ app.delete('/api/v1/admin/clients/:clientId', async (c) => {
     const clientId = c.req.param('clientId')
     if (!clientId) return jsonError('clientId is required', 400)
 
+    // Collect R2 keys before deleting DB records
     const projects = await supabaseRequest<Array<{ id: string }>>(
       c.env,
       `projects?client_id=eq.${encodeURIComponent(clientId)}&owner_user_id=eq.${encodeURIComponent(user.id)}&select=id`
     )
     const projectIds = projects.map((project) => project.id)
+    let r2Keys: string[] = []
     if (projectIds.length > 0) {
       const projectFilter = projectIds.map((id) => `project_id.eq.${encodeURIComponent(id)}`).join(',')
       const assets = await supabaseRequest<Array<{ r2_object_key: string }>>(
         c.env,
         `assets?or=(${projectFilter})&select=r2_object_key`
       )
-      await deleteStoredAssets(
-        c.env,
-        assets.map((asset) => asset.r2_object_key)
-      )
+      r2Keys = assets.map((asset) => asset.r2_object_key)
     }
 
+    // Delete DB first — if this fails, R2 files remain (safe); reverse would orphan DB records
     await supabaseRequest(
       c.env,
       `clients?id=eq.${encodeURIComponent(clientId)}&owner_user_id=eq.${encodeURIComponent(user.id)}`,
@@ -1123,6 +1148,11 @@ app.delete('/api/v1/admin/clients/:clientId', async (c) => {
         headers: { Prefer: 'return=minimal' },
       }
     )
+
+    // Clean up R2 after DB success — orphaned files are harmless, orphaned DB records are not
+    if (r2Keys.length > 0) {
+      await deleteStoredAssets(c.env, r2Keys)
+    }
 
     return c.json({ ok: true }, 200, responseHeaders(c))
   } catch (error) {
@@ -1193,7 +1223,7 @@ app.post('/api/v1/admin/projects', async (c) => {
           owner_user_id: user.id,
           client_id: clientId,
           name,
-          description: parseNullableText(body.description),
+          description: parseNullableText(body.description, MAX_LONG_TEXT),
           shoot_date: parseNullableText(body.shootDate),
           location: parseNullableText(body.location),
           status: parseProjectStatus(body.status) ?? 'draft',
@@ -1223,7 +1253,7 @@ app.patch('/api/v1/admin/projects/:projectId', async (c) => {
 
     const payload: Record<string, string | null> = {}
     if (typeof body.name === 'string') payload.name = parseNullableText(body.name)
-    if (typeof body.description === 'string') payload.description = parseNullableText(body.description)
+    if (typeof body.description === 'string') payload.description = parseNullableText(body.description, MAX_LONG_TEXT)
     if (typeof body.shootDate === 'string') payload.shoot_date = parseNullableText(body.shootDate)
     if (typeof body.location === 'string') payload.location = parseNullableText(body.location)
     if (body.status !== undefined) {
@@ -1270,11 +1300,9 @@ app.delete('/api/v1/admin/projects/:projectId', async (c) => {
       c.env,
       `assets?project_id=eq.${encodeURIComponent(projectId)}&owner_user_id=eq.${encodeURIComponent(user.id)}&select=r2_object_key`
     )
-    await deleteStoredAssets(
-      c.env,
-      assets.map((asset) => asset.r2_object_key)
-    )
+    const r2Keys = assets.map((asset) => asset.r2_object_key)
 
+    // Delete DB first, then R2 — orphaned files are harmless, orphaned DB records are not
     await supabaseRequest(
       c.env,
       `projects?id=eq.${encodeURIComponent(projectId)}&owner_user_id=eq.${encodeURIComponent(user.id)}`,
@@ -1283,6 +1311,10 @@ app.delete('/api/v1/admin/projects/:projectId', async (c) => {
         headers: { Prefer: 'return=minimal' },
       }
     )
+
+    if (r2Keys.length > 0) {
+      await deleteStoredAssets(c.env, r2Keys)
+    }
 
     return c.json({ ok: true }, 200, responseHeaders(c))
   } catch (error) {
@@ -1302,6 +1334,11 @@ const handleRequestUploadUrl = async (c: Context<{ Bindings: Env }>) => {
 
     if (!body.deliveryId || !body.fileName || !body.contentType || !body.fileSize) {
       return jsonError('deliveryId, fileName, contentType, fileSize are required', 400)
+    }
+
+    const allowedMimePatterns = ['image/', 'video/', 'application/pdf']
+    if (!allowedMimePatterns.some((prefix) => body.contentType.startsWith(prefix))) {
+      return jsonError('Only image, video, and PDF files are allowed', 400)
     }
 
     if (body.fileSize <= 0 || body.fileSize > maxUploadBytes) {
