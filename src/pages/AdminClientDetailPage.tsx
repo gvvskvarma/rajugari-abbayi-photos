@@ -1,501 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { useMutation } from '@tanstack/react-query'
-import type {
-  AdminActivityItem,
-  AdminActivityKind,
-  AdminClient,
-  AdminLightboxState,
-  AdminProject,
-  AdminProjectView,
-  DeleteConfirmationState,
-} from '../types'
-import { useAuth } from '../hooks/useAuth'
-import { workerRequest, loadWorkerBlob, triggerBrowserDownload } from '../hooks/useApi'
-import { useAdminData } from '../context/AdminDataContext.tsx'
-import { useAdminActivity } from '../hooks/queries/useAdminActivity'
+import { useAdminClientDetail } from '../hooks/useAdminClientDetail'
 import { DeleteConfirmationModal } from '../components/DeleteConfirmationModal'
 import { AdminActivityPanel } from '../components/AdminActivityPanel'
 import { AdminClientEditForm } from '../components/AdminClientEditForm'
 import { AdminProjectCard } from '../components/AdminProjectCard'
 import { AdminBulkActions } from '../components/AdminBulkActions'
 import { AdminDetailToolbar } from '../components/AdminDetailToolbar'
-import { supabase } from '../lib/supabase'
-import { ADMIN_PROJECT_CHUNK_SIZE, getAssetKind } from '../lib/helpers'
-import { getDisplayFileName, sanitizeDownloadName } from '../lib/upload'
 import { AdminLightbox } from '../components/AdminLightbox'
-import { queryClient } from '../lib/queryClient'
-import { queryKeys } from '../lib/queryKeys'
 
 export function AdminClientDetailPage() {
-  const { clientId } = useParams<{ clientId: string }>()
-  const navigate = useNavigate()
-  const { session, role, getAccessToken } = useAuth()
-  const {
-    adminClients,
-    setAdminClients,
-    adminClientById,
-    adminProjectById,
-    adminAssetById,
-    loadAdminData,
-    recordAdminActivity,
-    adminBusy,
-    adminError,
-    setAdminError,
-    adminActionMessage,
-    setAdminActionMessage,
-    setAdminBusy,
-  } = useAdminData()
-
-  // --- local state ---
-  const [adminClientEditMode, setAdminClientEditMode] = useState(false)
-  const [adminClientDraft, setAdminClientDraft] = useState({
-    fullName: '',
-    email: '',
-    phone: '',
-    notes: '',
-  })
-  const [adminAssetSearch, setAdminAssetSearch] = useState('')
-  const [adminProjectSort, setAdminProjectSort] = useState<'recent' | 'name' | 'files'>('recent')
-  const [adminAssetTypeFilter, setAdminAssetTypeFilter] = useState<'all' | 'images' | 'videos' | 'other'>('all')
-  const [adminProjectFilterId, setAdminProjectFilterId] = useState('all')
-  const [selectedAdminAssetIds, setSelectedAdminAssetIds] = useState<string[]>([])
-  const [adminAssetPreviewUrls, setAdminAssetPreviewUrls] = useState<Record<string, string>>({})
-  const [adminProjectRenderLimits, setAdminProjectRenderLimits] = useState<Record<string, number>>({})
-  const [adminLightbox, setAdminLightbox] = useState<AdminLightboxState | null>(null)
-  const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmationState | null>(null)
-
-  // --- activity via TanStack Query ---
-  const [kindFilter, setKindFilter] = useState<'all' | AdminActivityKind>('all')
-  const [activityExpanded, setActivityExpanded] = useState(false)
-  const { data: activities = [], isLoading: activityBusy, error: activityError } = useAdminActivity(clientId)
-
-  // --- computed ---
-  const selectedAdminClient = useMemo(
-    () => adminClients.find((client) => client.id === clientId) ?? null,
-    [adminClients, clientId]
-  )
-
-  const selectedAdminClientProjectViews = useMemo<AdminProjectView[]>(() => {
-    if (!selectedAdminClient) return []
-
-    const query = adminAssetSearch.trim().toLowerCase()
-    const projectViews = selectedAdminClient.projects
-      .filter((project) => adminProjectFilterId === 'all' || project.id === adminProjectFilterId)
-      .map((project) => {
-        const projectAssets = selectedAdminClient.assets.filter((asset) => asset.project_id === project.id)
-        const filteredAssets = projectAssets.filter((asset) => {
-          const searchMatch =
-            !query ||
-            [asset.filename, asset.mime_type, project.name].join(' ').toLowerCase().includes(query)
-          const typeMatch =
-            adminAssetTypeFilter === 'all' || getAssetKind(asset.mime_type) === adminAssetTypeFilter
-          return searchMatch && typeMatch
-        })
-        const renderLimit = adminProjectRenderLimits[project.id] ?? ADMIN_PROJECT_CHUNK_SIZE
-        const visibleAssets = filteredAssets.slice(0, renderLimit)
-        const latestActivityAt =
-          [project.updated_at, ...projectAssets.map((asset) => asset.created_at)]
-            .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] ?? project.updated_at
-
-        return { project, totalAssets: filteredAssets.length, visibleAssets, latestActivityAt }
-      })
-
-    projectViews.sort((left, right) => {
-      if (adminProjectSort === 'name') return left.project.name.localeCompare(right.project.name)
-      if (adminProjectSort === 'files') return right.totalAssets - left.totalAssets
-      return new Date(right.latestActivityAt).getTime() - new Date(left.latestActivityAt).getTime()
-    })
-
-    return projectViews
-  }, [adminAssetSearch, adminAssetTypeFilter, adminProjectFilterId, adminProjectRenderLimits, adminProjectSort, selectedAdminClient])
-
-  const selectedAdminVisibleAssets = useMemo(
-    () => selectedAdminClientProjectViews.flatMap((entry) => entry.visibleAssets),
-    [selectedAdminClientProjectViews]
-  )
-
-  const adminLightboxAssets = useMemo(() => {
-    if (!adminLightbox) return []
-    const project = selectedAdminClientProjectViews.find((entry) => entry.project.id === adminLightbox.projectId)
-    return (project?.visibleAssets ?? []).filter((asset) => asset.mime_type.startsWith('image/'))
-  }, [adminLightbox, selectedAdminClientProjectViews])
-
-  const adminLightboxIndex = useMemo(() => {
-    if (!adminLightbox) return -1
-    return adminLightboxAssets.findIndex((asset) => asset.id === adminLightbox.assetId)
-  }, [adminLightbox, adminLightboxAssets])
-
-  const adminLightboxAsset = adminLightboxIndex >= 0 ? adminLightboxAssets[adminLightboxIndex] : null
-
-  // --- effects ---
-
-  useEffect(() => {
-    if (!selectedAdminClient) {
-      setAdminClientEditMode(false)
-      setAdminClientDraft({ fullName: '', email: '', phone: '', notes: '' })
-      return
-    }
-    setAdminClientDraft({
-      fullName: selectedAdminClient.full_name,
-      email: selectedAdminClient.email,
-      phone: selectedAdminClient.phone ?? '',
-      notes: selectedAdminClient.notes ?? '',
-    })
-  }, [selectedAdminClient?.id]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    setSelectedAdminAssetIds((current) =>
-      current.filter((assetId) => selectedAdminVisibleAssets.some((asset) => asset.id === assetId))
-    )
-  }, [selectedAdminVisibleAssets])
-
-  useEffect(() => {
-    if (adminProjectFilterId === 'all') return
-    if (!selectedAdminClient?.projects.some((project) => project.id === adminProjectFilterId)) {
-      setAdminProjectFilterId('all')
-    }
-  }, [adminProjectFilterId, selectedAdminClient?.id]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    setAdminProjectRenderLimits({})
-  }, [selectedAdminClient?.id]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!adminLightbox) return
-    if (adminLightboxAssets.length === 0) { setAdminLightbox(null); return }
-    if (adminLightboxIndex === -1) {
-      setAdminLightbox({ projectId: adminLightbox.projectId, assetId: adminLightboxAssets[0].id })
-    }
-  }, [adminLightbox, adminLightboxAssets, adminLightboxIndex])
-
-  useEffect(() => {
-    if (!supabase || !session?.user.id || role !== 'admin' || selectedAdminVisibleAssets.length === 0) return
-    const missingPreviewAssets = selectedAdminVisibleAssets.filter(
-      (asset) => asset.mime_type.startsWith('image/') && !adminAssetPreviewUrls[asset.id]
-    )
-    if (missingPreviewAssets.length === 0) return
-    let cancelled = false
-    const loadPreviewUrls = async () => {
-      const token = await getAccessToken()
-      if (!token) return
-      const payload = await workerRequest<{ urls: Record<string, string> }>(
-        '/api/v1/media/preview-url-batch', token,
-        { method: 'POST', body: { assetIds: missingPreviewAssets.map((asset) => asset.id), variant: 'preview' } }
-      )
-      if (cancelled) return
-      setAdminAssetPreviewUrls((current) => ({ ...current, ...(payload.urls ?? {}) }))
-    }
-    void loadPreviewUrls()
-    return () => { cancelled = true }
-  }, [adminAssetPreviewUrls, getAccessToken, role, selectedAdminVisibleAssets, session?.user.id])
-
-  // --- mutations ---
-
-  const saveClientMutation = useMutation({
-    mutationFn: async (draft: { fullName: string; email: string; phone: string; notes: string }) => {
-      if (!selectedAdminClient) throw new Error('No client selected')
-      const token = await getAccessToken()
-      if (!token) throw new Error('Login session expired. Please log in again.')
-      return workerRequest<{ client: AdminClient }>(
-        `/api/v1/admin/clients/${selectedAdminClient.id}`, token,
-        { method: 'PATCH', body: { fullName: draft.fullName, email: draft.email, phone: draft.phone, notes: draft.notes } }
-      )
-    },
-    onSuccess: (data) => {
-      setAdminClients((current) =>
-        current.map((client) => (client.id === data.client.id ? { ...client, ...data.client } : client))
-      )
-      setAdminClientEditMode(false)
-      recordAdminActivity('edit', 'Updated client', data.client.full_name, { clientId: data.client.id })
-      void queryClient.invalidateQueries({ queryKey: queryKeys.adminActivity(clientId) })
-    },
-    onError: (error) => {
-      setAdminError(error instanceof Error ? error.message : 'Unable to update client')
-    },
-  })
-
-  // --- handlers ---
-
-  const openAdminLightbox = async (projectId: string, assetId: string) => {
-    const asset = selectedAdminClientProjectViews
-      .find((entry) => entry.project.id === projectId)
-      ?.visibleAssets.find((entry) => entry.id === assetId)
-    if (!asset || !asset.mime_type.startsWith('image/')) return
-    setAdminLightbox({ projectId, assetId })
-    if (adminAssetPreviewUrls[asset.id]) return
-    try {
-      const token = await getAccessToken()
-      if (!token) return
-      const payload = await workerRequest<{ url: string }>('/api/v1/media/preview-url', token, {
-        method: 'POST', body: { assetId: asset.id },
-      })
-      setAdminAssetPreviewUrls((current) => ({ ...current, [asset.id]: payload.url }))
-    } catch { /* lightbox can still open */ }
-  }
-
-  const closeAdminLightbox = () => setAdminLightbox(null)
-
-  const moveAdminLightbox = (direction: 'prev' | 'next') => {
-    const currentLightbox = adminLightbox
-    if (!currentLightbox || !adminLightboxAsset || adminLightboxIndex < 0) return
-    const nextIndex = direction === 'next' ? adminLightboxIndex + 1 : adminLightboxIndex - 1
-    if (nextIndex < 0 || nextIndex >= adminLightboxAssets.length) return
-    setAdminLightbox({ projectId: currentLightbox.projectId, assetId: adminLightboxAssets[nextIndex].id })
-  }
-
-  const toggleSelectedAdminAsset = (assetId: string) => {
-    setSelectedAdminAssetIds((current) =>
-      current.includes(assetId) ? current.filter((id) => id !== assetId) : [...current, assetId]
-    )
-  }
-
-  const clearSelectedAdminAssets = () => setSelectedAdminAssetIds([])
-
-  const selectVisibleAdminAssets = () =>
-    setSelectedAdminAssetIds((current) => {
-      const next = new Set(current)
-      selectedAdminVisibleAssets.forEach((asset) => next.add(asset.id))
-      return [...next]
-    })
-
-  const loadMoreAdminProjectAssets = (projectId: string) => {
-    setAdminProjectRenderLimits((current) => ({
-      ...current,
-      [projectId]: (current[projectId] ?? ADMIN_PROJECT_CHUNK_SIZE) + ADMIN_PROJECT_CHUNK_SIZE,
-    }))
-  }
-
-  const handleOpenAsset = async (assetId: string, mode: 'view' | 'download') => {
-    if (!supabase) return
-    try {
-      const token = await getAccessToken()
-      if (!token) { setAdminError('Login session expired. Please log in again.'); return }
-      const endpoint = mode === 'view' ? '/api/v1/media/preview-url' : '/api/v1/media/signed-url'
-      const payload = await workerRequest<{ signedUrl?: string; url?: string }>(endpoint, token, {
-        method: 'POST', body: { assetId, mode },
-      })
-      const nextUrl = payload.url ?? payload.signedUrl
-      if (!nextUrl) throw new Error('Missing asset URL')
-      window.open(nextUrl, '_blank', 'noopener,noreferrer')
-      if (mode === 'download') {
-        const adminAsset = selectedAdminClient?.assets.find((entry) => entry.id === assetId)
-        recordAdminActivity('download', 'Downloaded file', getDisplayFileName(adminAsset?.filename ?? assetId), {
-          clientId: selectedAdminClient?.id ?? null, projectId: adminAsset?.project_id ?? null, assetId,
-        })
-      }
-    } catch (error) {
-      setAdminError(error instanceof Error ? error.message : 'Unable to open file')
-    }
-  }
-
-  const downloadAdminArchive = async (
-    path: string, body: unknown, filename: string,
-    activity?: {
-      kind: AdminActivityKind; title: string; detail: string
-      context?: { clientId?: string | null; projectId?: string | null; assetId?: string | null; metadata?: Record<string, unknown> }
-    }
-  ) => {
-    if (!supabase) return
-    try {
-      setAdminActionMessage(`Preparing ${filename}...`)
-      setAdminBusy(true)
-      const token = await getAccessToken()
-      if (!token) { setAdminError('Login session expired. Please log in again.'); return }
-      const blob = await loadWorkerBlob(path, token, { method: 'POST', body })
-      triggerBrowserDownload(blob, filename)
-      if (activity) recordAdminActivity(activity.kind, activity.title, activity.detail, activity.context)
-    } catch (error) {
-      setAdminError(error instanceof Error ? error.message : 'Unable to download files')
-    } finally {
-      setAdminBusy(false)
-      setAdminActionMessage('')
-    }
-  }
-
-  const handleDownloadAdminProject = async (project: AdminProject) => {
-    if (!supabase || !session?.user.id || role !== 'admin') return
-    const projectAssetIds = selectedAdminClient?.assets
-      .filter((asset) => asset.project_id === project.id).map((asset) => asset.id) ?? []
-    if (projectAssetIds.length === 0) { setAdminError('No files found for this folder.'); return }
-    await downloadAdminArchive('/api/v1/admin/downloads', { assetIds: projectAssetIds, filename: project.name },
-      `${sanitizeDownloadName(project.name)}.zip`, {
-        kind: 'download', title: 'Downloaded folder', detail: project.name,
-        context: { clientId: selectedAdminClient?.id ?? null, projectId: project.id, metadata: { count: projectAssetIds.length } },
-      })
-  }
-
-  const handleDownloadSelectedAdminAssets = async () => {
-    if (!supabase || !session?.user.id || role !== 'admin' || selectedAdminAssetIds.length === 0) return
-    const clientName = selectedAdminClient?.full_name ?? 'selected-files'
-    await downloadAdminArchive('/api/v1/admin/downloads', { assetIds: selectedAdminAssetIds, filename: clientName },
-      `${sanitizeDownloadName(clientName)}-selected.zip`, {
-        kind: 'download', title: 'Downloaded selection',
-        detail: `${selectedAdminAssetIds.length} selected files from ${clientName}`,
-        context: { clientId: selectedAdminClient?.id ?? null, metadata: { count: selectedAdminAssetIds.length, assetIds: selectedAdminAssetIds } },
-      })
-  }
-
-  const performDeleteAdminAsset = async (
-    assetId: string, label?: string,
-    context?: { clientId?: string | null; projectId?: string | null; assetId?: string | null; metadata?: Record<string, unknown> },
-    options?: { silent?: boolean }
-  ) => {
-    if (!supabase || !session?.user.id || role !== 'admin') return
-    const token = await getAccessToken()
-    if (!token) { setAdminError('Login session expired. Please log in again.'); return }
-    await workerRequest<{ ok: boolean }>(`/api/v1/admin/assets/${assetId}`, token, { method: 'DELETE' })
-    setAdminClients((current) =>
-      current.map((client) => {
-        const nextAssets = client.assets.filter((asset) => asset.id !== assetId)
-        return { ...client, assets: nextAssets, assetCount: nextAssets.length }
-      })
-    )
-    setSelectedAdminAssetIds((current) => current.filter((id) => id !== assetId))
-    if (adminLightbox?.assetId === assetId) closeAdminLightbox()
-    if (!options?.silent) {
-      recordAdminActivity('delete', 'Deleted file', `Removed ${label ?? assetId}`, {
-        clientId: context?.clientId ?? selectedAdminClient?.id ?? null,
-        projectId: context?.projectId ?? null, assetId: context?.assetId ?? assetId, metadata: context?.metadata,
-      })
-      void queryClient.invalidateQueries({ queryKey: queryKeys.adminActivity(clientId) })
-    }
-  }
-
-  const performDeleteAdminAssets = async (assetIds: string[]) => {
-    for (const assetId of assetIds) await performDeleteAdminAsset(assetId, undefined, undefined, { silent: true })
-    recordAdminActivity('delete', `Deleted ${assetIds.length} file${assetIds.length === 1 ? '' : 's'}`,
-      'Removed selected files from the admin folder',
-      { clientId: selectedAdminClient?.id ?? null, metadata: { count: assetIds.length, assetIds } })
-    void queryClient.invalidateQueries({ queryKey: queryKeys.adminActivity(clientId) })
-  }
-
-  const performDeleteAdminProject = async (projectId: string, label?: string) => {
-    if (!supabase || !session?.user.id || role !== 'admin') return
-    const token = await getAccessToken()
-    if (!token) { setAdminError('Login session expired. Please log in again.'); return }
-    await workerRequest<{ ok: boolean }>(`/api/v1/admin/projects/${projectId}`, token, { method: 'DELETE' })
-    await loadAdminData()
-    setSelectedAdminAssetIds([])
-    if (adminLightbox?.projectId === projectId) closeAdminLightbox()
-    recordAdminActivity('delete', 'Deleted folder', `Removed ${label ?? projectId}`, { clientId: selectedAdminClient?.id ?? null, projectId })
-    void queryClient.invalidateQueries({ queryKey: queryKeys.adminActivity(clientId) })
-  }
-
-  const performDeleteAdminClient = async (deleteClientId: string, label?: string) => {
-    if (!supabase || !session?.user.id || role !== 'admin') return
-    const token = await getAccessToken()
-    if (!token) { setAdminError('Login session expired. Please log in again.'); return }
-    await workerRequest<{ ok: boolean }>(`/api/v1/admin/clients/${deleteClientId}`, token, { method: 'DELETE' })
-    setAdminClients((current) => current.filter((client) => client.id !== deleteClientId))
-    setAdminClientEditMode(false)
-    setAdminAssetSearch('')
-    setSelectedAdminAssetIds([])
-    closeAdminLightbox()
-    navigate('/admin/clients')
-    recordAdminActivity('delete', 'Deleted client', `Removed ${label ?? deleteClientId}`, { clientId: deleteClientId })
-  }
-
-  const openDeleteConfirmation = (payload: DeleteConfirmationState) => setDeleteConfirmation(payload)
-  const closeDeleteConfirmation = () => setDeleteConfirmation(null)
-
-  const confirmDeleteConfirmation = async () => {
-    const current = deleteConfirmation
-    if (!current) return
-    setDeleteConfirmation(null)
-    setAdminActionMessage(current.progressLabel)
-    setAdminBusy(true)
-    setAdminError('')
-    try { await current.onConfirm() }
-    catch (error) { setAdminError(error instanceof Error ? error.message : 'Unable to complete delete') }
-    finally { setAdminBusy(false); setAdminActionMessage('') }
-  }
-
-  const handleDeleteAdminAsset = (assetId: string) => {
-    if (!supabase || !session?.user.id || role !== 'admin' || !selectedAdminClient) return
-    const asset = selectedAdminVisibleAssets.find((entry) => entry.id === assetId)
-      ?? selectedAdminClient.assets.find((entry) => entry.id === assetId)
-    if (!asset) { setAdminError('File not found.'); return }
-    openDeleteConfirmation({
-      title: `Delete ${getDisplayFileName(asset.filename)}?`,
-      description: 'This permanently removes the file from the folder, customer view, and database.',
-      confirmLabel: 'Delete file', progressLabel: 'Deleting file...',
-      onConfirm: () => performDeleteAdminAsset(assetId, getDisplayFileName(asset.filename), {
-        clientId: selectedAdminClient.id, projectId: asset.project_id, assetId: asset.id,
-      }),
-    })
-  }
-
-  const handleDeleteAdminProject = (project: AdminProject) => {
-    if (!supabase || !session?.user.id || role !== 'admin') return
-    openDeleteConfirmation({
-      title: `Delete folder ${project.name}?`,
-      description: 'This removes the project, its uploaded files, the customer folder data, and the database records.',
-      confirmLabel: 'Delete folder', progressLabel: 'Deleting folder...',
-      onConfirm: () => performDeleteAdminProject(project.id, project.name),
-    })
-  }
-
-  const handleBulkDeleteAdminAssets = () => {
-    if (!supabase || !session?.user.id || role !== 'admin' || selectedAdminAssetIds.length === 0) return
-    const assetIds = [...selectedAdminAssetIds]
-    openDeleteConfirmation({
-      title: `Delete ${assetIds.length} selected file${assetIds.length === 1 ? '' : 's'}?`,
-      description: 'This permanently removes the files from the folder, customer view, and database.',
-      confirmLabel: 'Delete selected',
-      progressLabel: `Deleting ${assetIds.length} selected file${assetIds.length === 1 ? '' : 's'}...`,
-      onConfirm: async () => { await performDeleteAdminAssets(assetIds); setSelectedAdminAssetIds([]) },
-    })
-  }
-
-  const handleDeleteAdminClient = () => {
-    if (!supabase || !session?.user.id || role !== 'admin' || !selectedAdminClient) return
-    openDeleteConfirmation({
-      title: `Delete ${selectedAdminClient.full_name}?`,
-      description: 'This removes the client, projects, deliveries, uploaded files, and database records.',
-      confirmLabel: 'Delete client', progressLabel: 'Deleting client...',
-      onConfirm: () => performDeleteAdminClient(selectedAdminClient.id, selectedAdminClient.full_name),
-    })
-  }
-
-  const handleSaveAdminClient = () => {
-    const fullName = adminClientDraft.fullName.trim()
-    const email = adminClientDraft.email.trim().toLowerCase()
-    const phone = adminClientDraft.phone.trim()
-    const notes = adminClientDraft.notes.trim()
-    if (!fullName || !email) { setAdminError('Client full name and email are required.'); return }
-    setAdminBusy(true)
-    setAdminError('')
-    saveClientMutation.mutate(
-      { fullName, email, phone, notes },
-      { onSettled: () => setAdminBusy(false) }
-    )
-  }
-
-  const handleCancelEdit = () => {
-    if (!selectedAdminClient) return
-    setAdminClientDraft({
-      fullName: selectedAdminClient.full_name,
-      email: selectedAdminClient.email,
-      phone: selectedAdminClient.phone ?? '',
-      notes: selectedAdminClient.notes ?? '',
-    })
-    setAdminClientEditMode(false)
-  }
-
-  const getAdminActivityContext = useCallback(
-    (entry: AdminActivityItem) => {
-      const client = entry.clientId ? adminClientById.get(entry.clientId) : null
-      const project = entry.projectId ? adminProjectById.get(entry.projectId) : null
-      const asset = entry.assetId ? adminAssetById.get(entry.assetId) : null
-      const itemCount = typeof entry.metadata?.count === 'number' ? entry.metadata.count : null
-      return { client, project, asset, itemCount }
-    },
-    [adminClientById, adminProjectById, adminAssetById]
-  )
+  const detail = useAdminClientDetail()
 
   // --- auth guard ---
-  if (!session?.user.id || role !== 'admin') {
+  if (!detail.session?.user.id || detail.role !== 'admin') {
     return (
       <section className="portal-section admin-screen">
         <h2>Client folder</h2>
@@ -504,7 +20,7 @@ export function AdminClientDetailPage() {
     )
   }
 
-  if (!selectedAdminClient) {
+  if (!detail.selectedAdminClient) {
     return (
       <section className="portal-section admin-screen">
         <div className="portal-head admin-screen-head">
@@ -513,13 +29,15 @@ export function AdminClientDetailPage() {
             <h2>No client selected</h2>
             <p>Pick a client from the folder list to view their work.</p>
           </div>
-          <button className="button ghost" type="button" onClick={() => { navigate('/admin/clients') }}>
+          <button className="button ghost" type="button" onClick={() => { detail.navigate('/admin/clients') }}>
             Back to folders
           </button>
         </div>
       </section>
     )
   }
+
+  const client = detail.selectedAdminClient
 
   // --- main render ---
   return (
@@ -528,130 +46,130 @@ export function AdminClientDetailPage() {
         <div className="portal-head admin-screen-head">
           <div>
             <p className="eyebrow">Client folder</p>
-            <h2>{selectedAdminClient.full_name}</h2>
+            <h2>{client.full_name}</h2>
             <p>
-              {selectedAdminClient.email}
-              {selectedAdminClient.phone ? ` · ${selectedAdminClient.phone}` : ''}
+              {client.email}
+              {client.phone ? ` · ${client.phone}` : ''}
             </p>
           </div>
           <div className="admin-head-actions">
-            <button className="button ghost" type="button" onClick={() => { navigate('/admin/clients') }}>Back</button>
-            <button className="button ghost" type="button" onClick={() => { navigate('/upload') }}>Upload more</button>
-            <button className="button ghost" type="button" onClick={() => setAdminClientEditMode((current) => !current)}>
-              {adminClientEditMode ? 'Close edit' : 'Edit client'}
+            <button className="button ghost" type="button" onClick={() => { detail.navigate('/admin/clients') }}>Back</button>
+            <button className="button ghost" type="button" onClick={() => { detail.navigate('/upload') }}>Upload more</button>
+            <button className="button ghost" type="button" onClick={() => detail.setAdminClientEditMode((current) => !current)}>
+              {detail.adminClientEditMode ? 'Close edit' : 'Edit client'}
             </button>
-            <button className="button ghost" type="button" onClick={() => void handleDeleteAdminClient()}>Delete client</button>
+            <button className="button ghost" type="button" onClick={() => void detail.handleDeleteAdminClient()}>Delete client</button>
           </div>
         </div>
 
         <div className="admin-detail-summary">
-          <div className="admin-stat-card"><span>Projects</span><strong>{selectedAdminClient.projectCount}</strong></div>
-          <div className="admin-stat-card"><span>Files</span><strong>{selectedAdminClient.assetCount}</strong></div>
-          <div className="admin-stat-card"><span>Updated</span><strong>{new Date(selectedAdminClient.latestUpdatedAt).toLocaleDateString()}</strong></div>
+          <div className="admin-stat-card"><span>Projects</span><strong>{client.projectCount}</strong></div>
+          <div className="admin-stat-card"><span>Files</span><strong>{client.assetCount}</strong></div>
+          <div className="admin-stat-card"><span>Updated</span><strong>{new Date(client.latestUpdatedAt).toLocaleDateString()}</strong></div>
         </div>
 
-        {adminError && <p className="portal-error">{adminError}</p>}
+        {detail.adminError && <p className="portal-error">{detail.adminError}</p>}
 
         <AdminDetailToolbar
-          assetSearch={adminAssetSearch}
-          projectSort={adminProjectSort}
-          assetTypeFilter={adminAssetTypeFilter}
-          projectFilterId={adminProjectFilterId}
-          projects={selectedAdminClient.projects}
-          selectedCount={selectedAdminAssetIds.length}
-          visibleCount={selectedAdminVisibleAssets.length}
-          searchTrimmed={adminAssetSearch.trim()}
-          clientNotes={selectedAdminClient.notes}
-          onAssetSearchChange={setAdminAssetSearch}
-          onProjectSortChange={setAdminProjectSort}
-          onAssetTypeFilterChange={setAdminAssetTypeFilter}
-          onProjectFilterIdChange={setAdminProjectFilterId}
+          assetSearch={detail.adminAssetSearch}
+          projectSort={detail.adminProjectSort}
+          assetTypeFilter={detail.adminAssetTypeFilter}
+          projectFilterId={detail.adminProjectFilterId}
+          projects={client.projects}
+          selectedCount={detail.selectedAdminAssetIds.length}
+          visibleCount={detail.selectedAdminVisibleAssets.length}
+          searchTrimmed={detail.adminAssetSearch.trim()}
+          clientNotes={client.notes}
+          onAssetSearchChange={detail.setAdminAssetSearch}
+          onProjectSortChange={detail.setAdminProjectSort}
+          onAssetTypeFilterChange={detail.setAdminAssetTypeFilter}
+          onProjectFilterIdChange={detail.setAdminProjectFilterId}
         />
 
         <AdminActivityPanel
           title="Recent activity"
-          activities={activities}
-          busy={activityBusy}
-          error={activityError instanceof Error ? activityError.message : activityError ? String(activityError) : ''}
-          kindFilter={kindFilter}
-          onKindFilterChange={setKindFilter}
-          expanded={activityExpanded}
-          onToggleExpanded={() => setActivityExpanded((prev) => !prev)}
+          activities={detail.activities}
+          busy={detail.activityBusy}
+          error={detail.activityError instanceof Error ? detail.activityError.message : detail.activityError ? String(detail.activityError) : ''}
+          kindFilter={detail.kindFilter}
+          onKindFilterChange={detail.setKindFilter}
+          expanded={detail.activityExpanded}
+          onToggleExpanded={() => detail.setActivityExpanded((prev) => !prev)}
           contextHint="Showing activity for the selected client folder."
-          getContext={getAdminActivityContext}
+          getContext={detail.getAdminActivityContext}
         />
 
         <AdminBulkActions
-          selectedCount={selectedAdminAssetIds.length}
-          visibleCount={selectedAdminVisibleAssets.length}
-          busy={adminBusy}
-          actionMessage={adminActionMessage}
-          onSelectVisible={selectVisibleAdminAssets}
-          onClearSelection={clearSelectedAdminAssets}
-          onDownloadSelected={() => void handleDownloadSelectedAdminAssets()}
-          onDeleteSelected={() => void handleBulkDeleteAdminAssets()}
+          selectedCount={detail.selectedAdminAssetIds.length}
+          visibleCount={detail.selectedAdminVisibleAssets.length}
+          busy={detail.adminBusy}
+          actionMessage={detail.adminActionMessage}
+          onSelectVisible={detail.selectVisibleAdminAssets}
+          onClearSelection={detail.clearSelectedAdminAssets}
+          onDownloadSelected={() => void detail.handleDownloadSelectedAdminAssets()}
+          onDeleteSelected={() => void detail.handleBulkDeleteAdminAssets()}
         />
 
-        {adminClientEditMode && (
+        {detail.adminClientEditMode && (
           <AdminClientEditForm
-            draft={adminClientDraft}
-            onDraftChange={setAdminClientDraft}
-            onSave={() => void handleSaveAdminClient()}
-            onCancel={handleCancelEdit}
-            busy={adminBusy}
+            draft={detail.adminClientDraft}
+            onDraftChange={detail.setAdminClientDraft}
+            onSave={() => void detail.handleSaveAdminClient()}
+            onCancel={detail.handleCancelEdit}
+            busy={detail.adminBusy}
           />
         )}
 
         <div className="admin-project-stack">
-          {selectedAdminClientProjectViews.length === 0 ? (
+          {detail.selectedAdminClientProjectViews.length === 0 ? (
             <p className="portal-hint">
-              {selectedAdminClient.projects.length === 0
+              {client.projects.length === 0
                 ? 'No projects yet for this client.'
                 : 'No files match the current filters.'}
             </p>
           ) : (
-            selectedAdminClientProjectViews.map(({ project, totalAssets, visibleAssets, latestActivityAt }) => (
+            detail.selectedAdminClientProjectViews.map(({ project, totalAssets, visibleAssets, latestActivityAt }) => (
               <AdminProjectCard
                 key={project.id}
                 project={project}
                 totalAssets={totalAssets}
                 visibleAssets={visibleAssets}
                 latestActivityAt={latestActivityAt}
-                selectedAssetIds={selectedAdminAssetIds}
-                previewUrls={adminAssetPreviewUrls}
-                onToggleAssetSelection={toggleSelectedAdminAsset}
-                onOpenLightbox={(pid, aid) => void openAdminLightbox(pid, aid)}
-                onDownloadAsset={(aid) => void handleOpenAsset(aid, 'download')}
-                onDeleteAsset={handleDeleteAdminAsset}
-                onDownloadProject={(p) => void handleDownloadAdminProject(p)}
-                onDeleteProject={handleDeleteAdminProject}
-                onLoadMore={loadMoreAdminProjectAssets}
+                selectedAssetIds={detail.selectedAdminAssetIds}
+                previewUrls={detail.adminAssetPreviewUrls}
+                onToggleAssetSelection={detail.toggleSelectedAdminAsset}
+                onOpenLightbox={(pid, aid) => void detail.openAdminLightbox(pid, aid)}
+                onDownloadAsset={(aid) => void detail.handleOpenAsset(aid, 'download')}
+                onDeleteAsset={detail.handleDeleteAdminAsset}
+                onDownloadProject={(p) => void detail.handleDownloadAdminProject(p)}
+                onDeleteProject={detail.handleDeleteAdminProject}
+                onLoadMore={detail.loadMoreAdminProjectAssets}
               />
             ))
           )}
         </div>
 
-        {adminLightboxAsset && adminLightbox && (
+        {detail.adminLightboxAsset && detail.adminLightbox && (
           <AdminLightbox
-            asset={adminLightboxAsset}
-            previewUrl={adminAssetPreviewUrls[adminLightboxAsset.id]}
-            index={adminLightboxIndex}
-            total={adminLightboxAssets.length}
-            onClose={closeAdminLightbox}
-            onMove={moveAdminLightbox}
-            onDownload={(assetId) => void handleOpenAsset(assetId, 'download')}
+            asset={detail.adminLightboxAsset}
+            previewUrl={detail.adminAssetPreviewUrls[detail.adminLightboxAsset.id]}
+            index={detail.adminLightboxIndex}
+            total={detail.adminLightboxAssets.length}
+            onClose={detail.closeAdminLightbox}
+            onMove={detail.moveAdminLightbox}
+            onDownload={(assetId) => void detail.handleOpenAsset(assetId, 'download')}
           />
         )}
       </section>
 
-      {deleteConfirmation && (
+      {detail.deleteConfirmation && (
         <DeleteConfirmationModal
-          title={deleteConfirmation.title}
-          description={deleteConfirmation.description}
-          confirmLabel={deleteConfirmation.confirmLabel}
-          busy={adminBusy}
-          onConfirm={() => void confirmDeleteConfirmation()}
-          onCancel={closeDeleteConfirmation}
+          title={detail.deleteConfirmation.title}
+          description={detail.deleteConfirmation.description}
+          confirmLabel={detail.deleteConfirmation.confirmLabel}
+          busy={detail.adminBusy}
+          onConfirm={() => void detail.confirmDeleteConfirmation()}
+          onCancel={detail.closeDeleteConfirmation}
         />
       )}
     </>
