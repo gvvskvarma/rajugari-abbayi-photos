@@ -1,0 +1,17 @@
+{
+  "name": "Rajugari Abbayi Photography",
+  "short_name": "RGA Photos",
+  "description": "Photography portfolio by Vishnu Varma. Landscapes, portraits, events, and booking.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d0f15",
+  "theme_color": "#0d0f15",
+  "icons": [
+    {
+      "src": "/logo/logo-200.png",
+      "sizes": "200x200",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
