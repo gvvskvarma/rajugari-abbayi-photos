@@ -38,12 +38,13 @@ export function CustomerLightbox({
   const hasPrev = index > 0
   const hasNext = index < total - 1
 
-  // Trigger slide animation on asset change
+  /* eslint-disable react-hooks/set-state-in-effect -- sync imageKey with prop for slide animation */
   useEffect(() => {
     if (asset.id !== imageKey) {
       setImageKey(asset.id)
     }
   }, [asset.id, imageKey])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleMove = (direction: 'prev' | 'next') => {
     if (direction === 'prev' && !hasPrev) return
@@ -95,6 +96,7 @@ export function CustomerLightbox({
   }
 
   return (
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <div
       ref={trapRef}
       className="customer-lightbox"
@@ -102,6 +104,7 @@ export function CustomerLightbox({
       aria-modal="true"
       aria-label={`Photo ${index + 1} of ${total}`}
       onClick={onClose}
+      onKeyDown={(event) => { if (event.key === 'Escape') onClose() }}
       onTouchStart={(event) => {
         touchStartRef.current = event.touches[0]?.clientX ?? null
       }}
@@ -118,20 +121,19 @@ export function CustomerLightbox({
         }
       }}
     >
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
       <div className="customer-lightbox-panel" onClick={(event) => event.stopPropagation()}>
-        {/* Close button */}
         <button className="customer-lightbox-close" type="button" onClick={onClose} aria-label="Close">
           ✕
         </button>
 
-        {/* Image stage with click zones */}
         <div
           className={`customer-lightbox-stage ${slideDirection ? `lightbox-slide-${slideDirection}` : ''}`}
           onClick={handleStageClick}
           role="presentation"
         >
           {displayUrl ? (
-            <img key={imageKey} src={displayUrl} alt={`Photo ${index + 1} of ${total}`} />
+            <img key={imageKey} src={displayUrl} alt={`${asset.filename} — ${index + 1} of ${total}`} />
           ) : (
             <div className="customer-lightbox-loading">Loading preview…</div>
           )}

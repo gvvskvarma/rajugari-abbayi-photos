@@ -33,6 +33,7 @@ export function DeleteConfirmationModal({
   }, [onCancel])
 
   return (
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <div
       ref={trapRef}
       className="admin-confirm-modal"
@@ -41,7 +42,9 @@ export function DeleteConfirmationModal({
       aria-labelledby="admin-confirm-title"
       aria-describedby="admin-confirm-description"
       onClick={onCancel}
+      onKeyDown={(event) => { if (event.key === 'Escape') onCancel() }}
     >
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
       <div className="admin-confirm-panel" onClick={(event) => event.stopPropagation()}>
         <div className="admin-confirm-copy">
           <p className="eyebrow">Confirm delete</p>

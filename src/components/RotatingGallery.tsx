@@ -19,6 +19,7 @@ export const RotatingGallery = ({
   const [incomingIndex, setIncomingIndex] = useState<number | null>(null)
   const [isTransitioning, setIsTransitioning] = useState(false)
 
+  /* eslint-disable react-hooks/set-state-in-effect -- reset gallery state when image list changes */
   useEffect(() => {
     if (images.length === 0) {
       setDisplayIndex(0)
@@ -28,6 +29,7 @@ export const RotatingGallery = ({
     }
     setDisplayIndex((current) => current % images.length)
   }, [images.length])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (images.length === 0 || isTransitioning || incomingIndex !== null) return

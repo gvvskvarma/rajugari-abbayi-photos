@@ -5,16 +5,15 @@ import { Layout } from './components/Layout.tsx'
 import { LegacyRedirect } from './components/LegacyRedirect.tsx'
 
 /* Auto-reload on stale chunk (happens after a new deployment) */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function lazyRetry(factory: () => Promise<any>, name: string) {
+function lazyRetry(factory: () => Promise<Record<string, unknown>>, name: string) {
   return lazy(() =>
     factory()
-      .then((m: Record<string, unknown>) => {
+      .then((m) => {
         // Chunk loaded successfully — clear the retry flag so future
         // failures (e.g. navigating to another page after another deploy)
         // can also trigger a reload.
         sessionStorage.removeItem('chunk-retry')
-        return { default: m[name] as React.ComponentType<any> }
+        return { default: m[name] as React.ComponentType }
       })
       .catch(() => {
         const key = 'chunk-retry'
@@ -23,7 +22,7 @@ function lazyRetry(factory: () => Promise<any>, name: string) {
           window.location.reload()
         }
         // After a failed retry, return null so React doesn't crash
-        return { default: (() => null) as React.ComponentType<any> }
+        return { default: (() => null) as React.ComponentType }
       }),
   )
 }

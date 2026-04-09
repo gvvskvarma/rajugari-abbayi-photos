@@ -71,6 +71,7 @@ function PortfolioLightbox({
   }
 
   return (
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <div
       ref={trapRef}
       className="customer-lightbox"
@@ -78,6 +79,7 @@ function PortfolioLightbox({
       aria-modal="true"
       aria-label={`Photo ${index + 1} of ${total}`}
       onClick={onClose}
+      onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}
       onTouchStart={(e) => { touchStartRef.current = e.touches[0]?.clientX ?? null }}
       onTouchEnd={(e) => {
         const start = touchStartRef.current
@@ -88,6 +90,7 @@ function PortfolioLightbox({
         handleMove(delta < 0 ? 'next' : 'prev')
       }}
     >
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
       <div className="customer-lightbox-panel" onClick={(e) => e.stopPropagation()}>
         <button className="customer-lightbox-close" type="button" onClick={onClose} aria-label="Close">
           ✕
@@ -176,7 +179,9 @@ export function PortfolioPage() {
   }, [activeCategory, assetsByCategory, shuffledAll])
 
   /* Close lightbox on category change */
+  /* eslint-disable react-hooks/set-state-in-effect -- reset lightbox when tab changes */
   useEffect(() => setLightboxIndex(null), [activeCategory])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   return (
     <>

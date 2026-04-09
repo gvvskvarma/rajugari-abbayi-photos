@@ -44,6 +44,7 @@ const uniqueSources = (sources: Array<{ src?: string; srcSet?: string }>) => {
     })
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const createResponsiveAsset = (originalPath: string): ResponsiveAsset => {
   const normalizedPath = normalizeMediaPath(originalPath)
   const optimizedBase = normalizedPath
@@ -85,6 +86,7 @@ export const createResponsiveAsset = (originalPath: string): ResponsiveAsset => 
   }
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const getPrimaryPreloadSource = (asset: ResponsiveAsset) => asset.sources[0]?.src ?? ''
 
 export const ResponsiveImage = ({
@@ -99,9 +101,11 @@ export const ResponsiveImage = ({
 
   const [candidateIndex, setCandidateIndex] = useState(0)
 
+  /* eslint-disable react-hooks/set-state-in-effect -- reset fallback index when asset changes */
   useEffect(() => {
     setCandidateIndex(0)
   }, [asset])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const candidate = candidates[Math.min(candidateIndex, Math.max(candidates.length - 1, 0))]
   if (!candidate) return null

@@ -28,9 +28,11 @@ export function AdminLightbox({
   const hasPrev = index > 0
   const hasNext = index < total - 1
 
+  /* eslint-disable react-hooks/set-state-in-effect -- sync imageKey with prop for slide animation */
   useEffect(() => {
     if (asset.id !== imageKey) setImageKey(asset.id)
   }, [asset.id, imageKey])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleMove = (direction: 'prev' | 'next') => {
     if (direction === 'prev' && !hasPrev) return
@@ -64,6 +66,7 @@ export function AdminLightbox({
   }
 
   return (
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <div
       ref={trapRef}
       className="customer-lightbox"
@@ -71,6 +74,7 @@ export function AdminLightbox({
       aria-modal="true"
       aria-label={`Photo ${index + 1} of ${total}`}
       onClick={onClose}
+      onKeyDown={(event) => { if (event.key === 'Escape') onClose() }}
       onTouchStart={(event) => {
         touchStartRef.current = event.touches[0]?.clientX ?? null
       }}
@@ -84,6 +88,7 @@ export function AdminLightbox({
         else handleMove('prev')
       }}
     >
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
       <div className="customer-lightbox-panel" onClick={(event) => event.stopPropagation()}>
         <button className="customer-lightbox-close" type="button" onClick={onClose} aria-label="Close">
           ✕
@@ -95,7 +100,7 @@ export function AdminLightbox({
           role="presentation"
         >
           {previewUrl ? (
-            <img key={imageKey} src={previewUrl} alt={`Photo ${index + 1} of ${total}`} />
+            <img key={imageKey} src={previewUrl} alt={`${asset.filename} — ${index + 1} of ${total}`} />
           ) : (
             <div className="customer-lightbox-loading">Loading preview…</div>
           )}

@@ -54,13 +54,16 @@ export function useAuth(options?: UseAuthOptions) {
     }
   }, [])
 
+  /* eslint-disable react-hooks/set-state-in-effect -- reset auth UI when session changes (external auth state) */
   useEffect(() => {
     if (!session) return
     setAuthMenuOpen(false)
     setAuthCode('')
     setAuthCodeReady(false)
     setAuthMessage('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user.id])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (!supabase || !session?.user.id) return

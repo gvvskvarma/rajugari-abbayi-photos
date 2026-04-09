@@ -150,9 +150,11 @@ export function useAdminClientDetail() {
     }
   }, [adminProjectFilterId, selectedAdminClient?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* eslint-disable react-hooks/set-state-in-effect -- reset render limits when client changes */
   useEffect(() => {
     setAdminProjectRenderLimits({})
   }, [selectedAdminClient?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (!adminLightbox) return

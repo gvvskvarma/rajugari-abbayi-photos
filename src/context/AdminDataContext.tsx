@@ -42,6 +42,7 @@ type AdminDataContextValue = {
 
 const AdminDataContext = createContext<AdminDataContextValue | null>(null)
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAdminData() {
   const ctx = useContext(AdminDataContext)
   if (!ctx) throw new Error('useAdminData must be used within AdminDataProvider')
