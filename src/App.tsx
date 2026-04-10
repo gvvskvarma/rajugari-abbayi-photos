@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import './App.css'
 import { Layout } from './components/Layout.tsx'
+import { AdminLayout } from './components/AdminLayout.tsx'
 import { LegacyRedirect } from './components/LegacyRedirect.tsx'
 
 /* Auto-reload on stale chunk (happens after a new deployment) */
@@ -51,9 +52,14 @@ const router = createBrowserRouter([
       { path: '/about', element: <LazyPage><AboutPage /></LazyPage> },
       { path: '/book', element: <LazyPage><BookPage /></LazyPage> },
       { path: '/my-pictures', element: <LazyPage><MyPicturesPage /></LazyPage> },
-      { path: '/upload', element: <LazyPage><UploadPage /></LazyPage> },
-      { path: '/admin/clients', element: <LazyPage><AdminClientsPage /></LazyPage> },
-      { path: '/admin/clients/:clientId', element: <LazyPage><AdminClientDetailPage /></LazyPage> },
+      {
+        element: <AdminLayout />,
+        children: [
+          { path: '/upload', element: <LazyPage><UploadPage /></LazyPage> },
+          { path: '/admin/clients', element: <LazyPage><AdminClientsPage /></LazyPage> },
+          { path: '/admin/clients/:clientId', element: <LazyPage><AdminClientDetailPage /></LazyPage> },
+        ],
+      },
       { path: '/share/:token', element: <LazyPage><ShareViewPage /></LazyPage> },
       { path: '*', element: <LegacyRedirect /> },
     ],

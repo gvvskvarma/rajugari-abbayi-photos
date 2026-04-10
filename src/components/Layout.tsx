@@ -7,7 +7,6 @@ import { useAuth } from '../hooks/useAuth'
 import { personalInstagramUrl } from '../lib/constants'
 import { queryClient } from '../lib/queryClient'
 import { AuthProvider } from '../context/AuthContext'
-import { AdminDataProvider } from '../context/AdminDataContext.tsx'
 
 function LayoutInner() {
   const navigate = useNavigate()
@@ -146,9 +145,7 @@ function LayoutInner() {
 
       <main id="main-content">
         <QueryClientProvider client={queryClient}>
-          <AdminDataProvider>
-            <Outlet />
-          </AdminDataProvider>
+          <Outlet />
         </QueryClientProvider>
       </main>
 
