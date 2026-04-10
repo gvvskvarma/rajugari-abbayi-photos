@@ -10,7 +10,7 @@ import type {
   AdminProjectView,
   DeleteConfirmationState,
 } from '../types'
-import { useAuth } from './useAuth'
+import { useAuthContext } from '../context/AuthContext'
 import { workerRequest, loadWorkerBlob, triggerBrowserDownload } from './useApi'
 import { useAdminData } from '../context/AdminDataContext.tsx'
 import { useAdminActivity } from './queries/useAdminActivity'
@@ -23,7 +23,7 @@ import { queryKeys } from '../lib/queryKeys'
 export function useAdminClientDetail() {
   const { clientId } = useParams<{ clientId: string }>()
   const navigate = useNavigate()
-  const { session, role, getAccessToken } = useAuth()
+  const { session, role, getAccessToken } = useAuthContext()
   const {
     adminClients,
     setAdminClients,

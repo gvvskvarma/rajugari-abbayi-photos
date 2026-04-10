@@ -1,12 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import type { AdminActivityItem } from '../../types'
 import { workerRequest } from '../useApi'
-import { useAuth } from '../useAuth'
+import { useAuthContext } from '../../context/AuthContext'
 import { queryKeys } from '../../lib/queryKeys'
 import { ADMIN_ACTIVITY_LIMIT } from '../../lib/helpers'
 
 export function useAdminActivity(clientId?: string) {
-  const { session, role, getAccessToken } = useAuth()
+  const { session, role, getAccessToken } = useAuthContext()
 
   return useQuery({
     queryKey: queryKeys.adminActivity(clientId),

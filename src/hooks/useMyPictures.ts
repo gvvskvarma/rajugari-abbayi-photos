@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import type { CustomerLightboxState, ShareLinkScope } from '../types'
-import { useAuth } from './useAuth'
+import { useAuthContext } from '../context/AuthContext'
 import { loadWorkerBlob, triggerBrowserDownload, workerRequest } from './useApi'
 import { sanitizeDownloadName } from '../lib/upload'
 import { useMyDeliveries } from './queries/useMyDeliveries'
@@ -9,7 +9,7 @@ import { useThumbnailBatch } from './queries/useThumbnailBatch'
 import { usePreviewUrl } from './queries/usePreviewUrl'
 
 export function useMyPictures() {
-  const { session, getAccessToken } = useAuth()
+  const { session, getAccessToken } = useAuthContext()
   const email = session?.user.email
 
   // ── Query hooks ───────────────────────────────────────────────────────

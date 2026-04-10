@@ -1,7 +1,7 @@
 import { useMemo, useReducer, useRef } from 'react'
 import type { ChangeEvent, DragEvent, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../hooks/useAuth'
+import { useAuthContext } from '../context/AuthContext'
 import { workerRequest } from '../hooks/useApi'
 import { useAdminData } from '../context/AdminDataContext.tsx'
 import { supabase } from '../lib/supabase'
@@ -13,7 +13,7 @@ import { queryKeys } from '../lib/queryKeys'
 
 export function UploadPage() {
   const navigate = useNavigate()
-  const { session, role, getAccessToken } = useAuth()
+  const { session, role, getAccessToken } = useAuthContext()
   const { adminClients, recordAdminActivity, adminBusy, adminError } = useAdminData()
 
   const [state, dispatch] = useReducer(uploadFormReducer, uploadFormInitialState)

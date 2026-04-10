@@ -1,7 +1,7 @@
 import { createContext, useContext, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
-import { useAuth } from '../hooks/useAuth'
+import { useAuthContext } from './AuthContext'
 import { workerRequest } from '../hooks/useApi'
 import { useAdminClients } from '../hooks/queries/useAdminClients'
 import { queryClient } from '../lib/queryClient'
@@ -50,7 +50,7 @@ export function useAdminData() {
 }
 
 export function AdminDataProvider({ children }: { children: ReactNode }) {
-  const { session, role, getAccessToken } = useAuth()
+  const { session, role, getAccessToken } = useAuthContext()
   const [adminBusy, setAdminBusy] = useState(false)
   const [adminError, setAdminError] = useState('')
   const [adminActionMessage, setAdminActionMessage] = useState('')

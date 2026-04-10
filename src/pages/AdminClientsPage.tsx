@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { AdminActivityItem, AdminActivityKind } from '../types'
-import { useAuth } from '../hooks/useAuth'
+import { useAuthContext } from '../context/AuthContext'
 import { useAdminData } from '../context/AdminDataContext.tsx'
 import { useAdminActivity } from '../hooks/queries/useAdminActivity'
 import { AdminActivityPanel } from '../components/AdminActivityPanel'
@@ -9,7 +9,7 @@ import { SkeletonCardList } from '../components/Skeleton'
 
 export function AdminClientsPage() {
   const navigate = useNavigate()
-  const { session, role } = useAuth()
+  const { session, role } = useAuthContext()
   const {
     adminClients,
     adminBusy,

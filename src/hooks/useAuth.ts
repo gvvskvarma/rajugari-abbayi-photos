@@ -1,58 +1,25 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { supabase } from '../lib/supabase'
-import type { Role } from '../types'
-import { toFirstName } from '../lib/helpers'
-
-type AuthSession = { user: { id: string; email?: string } } | null
+import { useAuthContext } from '../context/AuthContext'
 
 type UseAuthOptions = {
   onSignOut?: () => void
 }
 
+/**
+ * Auth UI hook — used exclusively by Layout for the login/logout menu.
+ * Core session/role/getAccessToken live in AuthContext.
+ */
 export function useAuth(options?: UseAuthOptions) {
+  const { session } = useAuthContext()
+
   const [authMenuOpen, setAuthMenuOpen] = useState(false)
   const [emailInput, setEmailInput] = useState('')
   const [authCode, setAuthCode] = useState('')
   const [authCodeReady, setAuthCodeReady] = useState(false)
   const [authMessage, setAuthMessage] = useState('')
   const [authBusy, setAuthBusy] = useState(false)
-  const [profileDisplayName, setProfileDisplayName] = useState('')
-  const [session, setSession] = useState<AuthSession>(null)
-  const [role, setRole] = useState<Role>('customer')
-
-  useEffect(() => {
-    if (!supabase) return
-    const client = supabase
-
-    const boot = async () => {
-      const { data } = await client.auth.getSession()
-      const nextSession = data.session
-      if (!nextSession?.user) {
-        setSession(null)
-        setRole('customer')
-        setProfileDisplayName('')
-        return
-      }
-      setSession({ user: { id: nextSession.user.id, email: nextSession.user.email ?? undefined } })
-    }
-
-    void boot()
-
-    const { data: listener } = client.auth.onAuthStateChange((_event, nextSession) => {
-      if (!nextSession?.user) {
-        setSession(null)
-        setRole('customer')
-        setProfileDisplayName('')
-        return
-      }
-      setSession({ user: { id: nextSession.user.id, email: nextSession.user.email ?? undefined } })
-    })
-
-    return () => {
-      listener.subscription.unsubscribe()
-    }
-  }, [])
 
   /* Reset auth UI when session changes (external auth state) */
   useEffect(() => {
@@ -63,43 +30,6 @@ export function useAuth(options?: UseAuthOptions) {
     setAuthMessage('')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user.id])
-
-  useEffect(() => {
-    if (!supabase || !session?.user.id) return
-    const client = supabase
-
-    const fetchRole = async () => {
-      const { data } = await client
-        .from('profiles')
-        .select('role, display_name')
-        .eq('id', session.user.id)
-        .single()
-
-      if (!data) {
-        setRole('customer')
-        setProfileDisplayName('')
-        return
-      }
-
-      setRole(data.role === 'admin' ? 'admin' : 'customer')
-      setProfileDisplayName(data.display_name ?? '')
-    }
-
-    void fetchRole()
-  }, [session?.user.id])
-
-  const loginLabel = useMemo(() => {
-    if (!session) return 'LOGIN'
-    return toFirstName(profileDisplayName) || toFirstName(session.user.email) || 'LOGIN'
-  }, [profileDisplayName, session])
-
-  const getAccessToken = async () => {
-    if (!supabase) return ''
-    const {
-      data: { session: authSession },
-    } = await supabase.auth.getSession()
-    return authSession?.access_token ?? ''
-  }
 
   const handleSendOtp = async (event: FormEvent) => {
     event.preventDefault()
@@ -183,10 +113,6 @@ export function useAuth(options?: UseAuthOptions) {
   }
 
   return {
-    session,
-    role,
-    profileDisplayName,
-    loginLabel,
     authMenuOpen,
     setAuthMenuOpen,
     emailInput,
@@ -199,6 +125,5 @@ export function useAuth(options?: UseAuthOptions) {
     handleSendOtp,
     handleVerifyOtp,
     handleSignOut,
-    getAccessToken,
   }
 }

@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import type { DeliveryCard } from '../../types/models'
-import { useAuth } from '../useAuth'
+import { useAuthContext } from '../../context/AuthContext'
 import { workerRequest } from '../useApi'
 import { queryKeys } from '../../lib/queryKeys'
 
 export function useMyDeliveries(email: string | undefined) {
-  const { getAccessToken } = useAuth()
+  const { getAccessToken } = useAuthContext()
 
   return useQuery({
     queryKey: queryKeys.myDeliveries(email ?? ''),
