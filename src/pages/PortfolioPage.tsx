@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { createResponsiveAsset, ResponsiveImage } from '../lib/media.tsx'
-import type { ResponsiveAsset } from '../types'
 import { fallbackPortraits, fallbackBaby, fallbackEvents, fallbackLandscapes } from '../lib/galleryFallbacks'
 import { useHomepageGallery } from '../hooks/queries/useHomepageGallery.ts'
 import { useDocumentMeta } from '../hooks/useDocumentMeta.ts'
-import { useFocusTrap } from '../hooks/useFocusTrap.ts'
 import { useReveal } from '../hooks/useReveal'
+import { Lightbox } from '../components/Lightbox'
 
 type Category = 'all' | 'portraits' | 'baby' | 'events' | 'landscapes'
+
+const validCategories: Category[] = ['all', 'portraits', 'baby', 'events', 'landscapes']
 
 const categories: { key: Category; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -17,119 +19,18 @@ const categories: { key: Category; label: string }[] = [
   { key: 'landscapes', label: 'Landscapes' },
 ]
 
-/* ── Portfolio Lightbox ─────────────────────────────────────────── */
-function PortfolioLightbox({
-  assets,
-  index,
-  onClose,
-  onMove,
-}: {
-  assets: ResponsiveAsset[]
-  index: number
-  onClose: () => void
-  onMove: (direction: 'prev' | 'next') => void
-}) {
-  const trapRef = useFocusTrap(true)
-  const touchStartRef = useRef<number | null>(null)
-  const [slideDirection, setSlideDirection] = useState<'left' | 'right' | null>(null)
-
-  const total = assets.length
-  const hasPrev = index > 0
-  const hasNext = index < total - 1
-
-  const handleMove = useCallback(
-    (direction: 'prev' | 'next') => {
-      if (direction === 'prev' && !hasPrev) return
-      if (direction === 'next' && !hasNext) return
-      setSlideDirection(direction === 'next' ? 'left' : 'right')
-      onMove(direction)
-    },
-    [hasPrev, hasNext, onMove],
-  )
-
-  useEffect(() => {
-    if (!slideDirection) return
-    const timeout = window.setTimeout(() => setSlideDirection(null), 280)
-    return () => window.clearTimeout(timeout)
-  }, [slideDirection, index])
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); onClose() }
-      if (event.key === 'ArrowLeft') { event.preventDefault(); handleMove('prev') }
-      if (event.key === 'ArrowRight') { event.preventDefault(); handleMove('next') }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose, handleMove])
-
-  const handleStageClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect()
-    const x = event.clientX - rect.left
-    if (x < rect.width * 0.35) handleMove('prev')
-    else if (x > rect.width * 0.65) handleMove('next')
-  }
-
-  return (
-    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- dialog backdrop dismiss
-    <div
-      ref={trapRef}
-      className="customer-lightbox"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Photo ${index + 1} of ${total}`}
-      onClick={onClose}
-      onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}
-      onTouchStart={(e) => { touchStartRef.current = e.touches[0]?.clientX ?? null }}
-      onTouchEnd={(e) => {
-        const start = touchStartRef.current
-        touchStartRef.current = null
-        if (start === null) return
-        const delta = (e.changedTouches[0]?.clientX ?? 0) - start
-        if (Math.abs(delta) < 48) return
-        handleMove(delta < 0 ? 'next' : 'prev')
-      }}
-    >
-      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- stop propagation on panel */}
-      <div className="customer-lightbox-panel" role="document" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-        <button className="customer-lightbox-close" type="button" onClick={onClose} aria-label="Close">
-          ✕
-        </button>
-        <div
-          className={`customer-lightbox-stage ${slideDirection ? `lightbox-slide-${slideDirection}` : ''}`}
-          onClick={handleStageClick}
-          role="presentation"
-        >
-          <ResponsiveImage
-            key={assets[index].key}
-            asset={assets[index]}
-            alt={`Photo ${index + 1} of ${total}`}
-            sizes="100vw"
-            loading="eager"
-          />
-          {hasPrev && (
-            <button className="lightbox-nav lightbox-nav-prev" type="button" onClick={(e) => { e.stopPropagation(); handleMove('prev') }} aria-label="Previous photo">
-              ‹
-            </button>
-          )}
-          {hasNext && (
-            <button className="lightbox-nav lightbox-nav-next" type="button" onClick={(e) => { e.stopPropagation(); handleMove('next') }} aria-label="Next photo">
-              ›
-            </button>
-          )}
-        </div>
-        <div className="customer-lightbox-bar">
-          <span className="customer-lightbox-counter">{index + 1} / {total}</span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 /* ── Portfolio Page ──────────────────────────────────────────────── */
 export function PortfolioPage() {
   useDocumentMeta('Portfolio', 'Curated portraits, baby shoots, events, and landscapes by Rajugari Abbayi Photography.')
-  const [activeCategory, setActiveCategory] = useState<Category>('portraits')
+  const [searchParams] = useSearchParams()
+
+  /* Read initial tab from ?tab= query param, default to portraits */
+  const initialTab = (() => {
+    const param = searchParams.get('tab')?.toLowerCase() as Category | undefined
+    return param && validCategories.includes(param) ? param : 'portraits'
+  })()
+
+  const [activeCategory, setActiveCategory] = useState<Category>(initialTab)
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const { data: galleryData } = useHomepageGallery()
 
@@ -155,8 +56,6 @@ export function PortfolioPage() {
       ...assetsByCategory.events,
       ...assetsByCategory.landscapes,
     ]
-    // Simple seeded PRNG (mulberry32) — seed from today's date so order
-    // is stable within a session but changes daily.
     const today = new Date()
     let seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate()
     const random = () => {
@@ -233,9 +132,10 @@ export function PortfolioPage() {
 
       {/* ── LIGHTBOX ── */}
       {lightboxIndex !== null && (
-        <PortfolioLightbox
-          assets={filteredAssets}
+        <Lightbox
+          imageKey={filteredAssets[lightboxIndex].key}
           index={lightboxIndex}
+          total={filteredAssets.length}
           onClose={() => setLightboxIndex(null)}
           onMove={(dir) =>
             setLightboxIndex((prev) => {
@@ -245,6 +145,15 @@ export function PortfolioPage() {
                 : Math.max(prev - 1, 0)
             })
           }
+          renderImage={() => (
+            <ResponsiveImage
+              key={filteredAssets[lightboxIndex].key}
+              asset={filteredAssets[lightboxIndex]}
+              alt={`Photo ${lightboxIndex + 1} of ${filteredAssets.length}`}
+              sizes="100vw"
+              loading="eager"
+            />
+          )}
         />
       )}
     </>

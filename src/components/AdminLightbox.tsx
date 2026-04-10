@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useFocusTrap } from '../hooks/useFocusTrap'
+import { Lightbox } from './Lightbox'
 
 interface AdminLightboxProps {
   asset: { id: string; filename: string }
@@ -20,122 +19,29 @@ export function AdminLightbox({
   onMove,
   onDownload,
 }: AdminLightboxProps) {
-  const trapRef = useFocusTrap(true)
-  const touchStartRef = useRef<number | null>(null)
-  const [slideDirection, setSlideDirection] = useState<'left' | 'right' | null>(null)
-
-  /* Use asset.id directly as the image key — no need for separate state */
-  const imageKey = asset.id
-
-  const hasPrev = index > 0
-  const hasNext = index < total - 1
-
-  const handleMove = useCallback((direction: 'prev' | 'next') => {
-    if (direction === 'prev' && !hasPrev) return
-    if (direction === 'next' && !hasNext) return
-    setSlideDirection(direction === 'next' ? 'left' : 'right')
-    onMove(direction)
-  }, [hasPrev, hasNext, onMove])
-
-  useEffect(() => {
-    if (!slideDirection) return
-    const timeout = window.setTimeout(() => setSlideDirection(null), 280)
-    return () => window.clearTimeout(timeout)
-  }, [slideDirection, asset.id])
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); onClose(); return }
-      if (event.key === 'ArrowLeft') { event.preventDefault(); handleMove('prev'); return }
-      if (event.key === 'ArrowRight') { event.preventDefault(); handleMove('next') }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose, handleMove])
-
-  const handleStageClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect()
-    const x = event.clientX - rect.left
-    const width = rect.width
-    if (x < width * 0.35) handleMove('prev')
-    else if (x > width * 0.65) handleMove('next')
-  }
-
   return (
-    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- dialog backdrop dismiss
-    <div
-      ref={trapRef}
-      className="customer-lightbox"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Photo ${index + 1} of ${total}`}
-      onClick={onClose}
-      onKeyDown={(event) => { if (event.key === 'Escape') onClose() }}
-      onTouchStart={(event) => {
-        touchStartRef.current = event.touches[0]?.clientX ?? null
-      }}
-      onTouchEnd={(event) => {
-        const start = touchStartRef.current
-        touchStartRef.current = null
-        if (start === null) return
-        const delta = event.changedTouches[0]?.clientX - start
-        if (Math.abs(delta) < 48) return
-        if (delta < 0) handleMove('next')
-        else handleMove('prev')
-      }}
-    >
-      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- stop propagation on panel */}
-      <div className="customer-lightbox-panel" role="document" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-        <button className="customer-lightbox-close" type="button" onClick={onClose} aria-label="Close">
-          ✕
-        </button>
-
-        <div
-          className={`customer-lightbox-stage ${slideDirection ? `lightbox-slide-${slideDirection}` : ''}`}
-          onClick={handleStageClick}
-          role="presentation"
+    <Lightbox
+      imageKey={asset.id}
+      index={index}
+      total={total}
+      onClose={onClose}
+      onMove={onMove}
+      renderImage={() =>
+        previewUrl ? (
+          <img key={asset.id} src={previewUrl} alt={`${asset.filename} — ${index + 1} of ${total}`} />
+        ) : (
+          <div className="customer-lightbox-loading">Loading preview…</div>
+        )
+      }
+      bottomBar={
+        <button
+          className="button ghost"
+          type="button"
+          onClick={() => onDownload(asset.id)}
         >
-          {previewUrl ? (
-            <img key={imageKey} src={previewUrl} alt={`${asset.filename} — ${index + 1} of ${total}`} />
-          ) : (
-            <div className="customer-lightbox-loading">Loading preview…</div>
-          )}
-
-          {hasPrev && (
-            <button
-              className="lightbox-nav lightbox-nav-prev"
-              type="button"
-              onClick={(e) => { e.stopPropagation(); handleMove('prev') }}
-              aria-label="Previous photo"
-            >
-              ‹
-            </button>
-          )}
-          {hasNext && (
-            <button
-              className="lightbox-nav lightbox-nav-next"
-              type="button"
-              onClick={(e) => { e.stopPropagation(); handleMove('next') }}
-              aria-label="Next photo"
-            >
-              ›
-            </button>
-          )}
-        </div>
-
-        <div className="customer-lightbox-bar">
-          <span className="customer-lightbox-counter">
-            {index + 1} / {total}
-          </span>
-          <button
-            className="button ghost"
-            type="button"
-            onClick={() => onDownload(asset.id)}
-          >
-            Download
-          </button>
-        </div>
-      </div>
-    </div>
+          Download
+        </button>
+      }
+    />
   )
 }

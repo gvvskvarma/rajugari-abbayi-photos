@@ -7,6 +7,8 @@ type RotatingGalleryProps = {
   subtitle: string
   images: ResponsiveAsset[]
   cycleStep: number
+  /** Optional link — wraps the entire card in an anchor */
+  href?: string
 }
 
 export const RotatingGallery = ({
@@ -14,6 +16,7 @@ export const RotatingGallery = ({
   subtitle,
   images,
   cycleStep,
+  href,
 }: RotatingGalleryProps) => {
   const [displayIndex, setDisplayIndex] = useState(0)
   const [incomingIndex, setIncomingIndex] = useState<number | null>(null)
@@ -72,37 +75,47 @@ export const RotatingGallery = ({
   const incoming =
     incomingIndex !== null && images.length > 0 ? images[incomingIndex % images.length] : undefined
 
-  return (
-    <div className="rotator">
-      <div className="rotator-card">
-        {active ? (
-          <div className="rotator-image-stack">
+  const card = (
+    <div className="rotator-card">
+      {active ? (
+        <div className="rotator-image-stack">
+          <ResponsiveImage
+            asset={active}
+            alt={title}
+            className="rotator-image"
+            sizes="(max-width: 680px) 92vw, 46vw"
+          />
+          {incoming && isTransitioning && (
             <ResponsiveImage
-              asset={active}
+              asset={incoming}
               alt={title}
-              className="rotator-image"
+              className="rotator-image rotator-image-enter"
               sizes="(max-width: 680px) 92vw, 46vw"
             />
-            {incoming && isTransitioning && (
-              <ResponsiveImage
-                asset={incoming}
-                alt={title}
-                className="rotator-image rotator-image-enter"
-                sizes="(max-width: 680px) 92vw, 46vw"
-              />
-            )}
-          </div>
-        ) : (
-          <div className="rotator-placeholder">
-            <p>Add {title} photos</p>
-            <span>Add files to project-rga folders</span>
-          </div>
-        )}
-        <div className="rotator-overlay">
-          <p>{title}</p>
-          <span>{subtitle}</span>
+          )}
         </div>
+      ) : (
+        <div className="rotator-placeholder">
+          <p>Add {title} photos</p>
+          <span>Add files to project-rga folders</span>
+        </div>
+      )}
+      <div className="rotator-overlay">
+        <p>{title}</p>
+        <span>{subtitle}</span>
       </div>
+    </div>
+  )
+
+  return (
+    <div className="rotator">
+      {href ? (
+        <a href={href} className="rotator-link" aria-label={`View ${title}`}>
+          {card}
+        </a>
+      ) : (
+        card
+      )}
     </div>
   )
 }

@@ -2151,6 +2151,12 @@ main > section {
   gap: 14px;
 }
 
+.rotator-link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+
 .rotator-card {
   position: relative;
   min-height: 380px;

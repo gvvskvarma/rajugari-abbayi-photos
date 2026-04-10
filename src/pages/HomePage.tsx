@@ -143,10 +143,10 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
           <p>Portraits, celebrations, and the quiet moments in between.</p>
         </div>
         <div className="rotator-grid">
-          <RotatingGallery title="Portraits" subtitle="Real people, real vibes" images={portraitAssets} cycleStep={cycleStep} />
-          <RotatingGallery title="Baby shoots" subtitle="Tiny humans, big smiles" images={babyAssets} cycleStep={cycleStep} />
-          <RotatingGallery title="Events" subtitle="The energy, captured" images={eventAssets} cycleStep={cycleStep} />
-          <RotatingGallery title="Landscapes" subtitle="Wide skies, golden light" images={landscapeAssets} cycleStep={cycleStep} />
+          <RotatingGallery title="Portraits" subtitle="Real people, real vibes" images={portraitAssets} cycleStep={cycleStep} href="/work?tab=portraits" />
+          <RotatingGallery title="Baby shoots" subtitle="Tiny humans, big smiles" images={babyAssets} cycleStep={cycleStep} href="/work?tab=baby" />
+          <RotatingGallery title="Events" subtitle="The energy, captured" images={eventAssets} cycleStep={cycleStep} href="/work?tab=events" />
+          <RotatingGallery title="Landscapes" subtitle="Wide skies, golden light" images={landscapeAssets} cycleStep={cycleStep} href="/work?tab=landscapes" />
         </div>
       </section>
 
