@@ -33,7 +33,7 @@ export function DeleteConfirmationModal({
   }, [onCancel])
 
   return (
-    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- dialog backdrop dismiss
     <div
       ref={trapRef}
       className="admin-confirm-modal"
@@ -44,8 +44,8 @@ export function DeleteConfirmationModal({
       onClick={onCancel}
       onKeyDown={(event) => { if (event.key === 'Escape') onCancel() }}
     >
-      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
-      <div className="admin-confirm-panel" onClick={(event) => event.stopPropagation()}>
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- stop propagation on panel */}
+      <div className="admin-confirm-panel" role="document" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
         <div className="admin-confirm-copy">
           <p className="eyebrow">Confirm delete</p>
           <h3 id="admin-confirm-title">{title}</h3>

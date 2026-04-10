@@ -14,7 +14,7 @@ export function useMyPictures() {
 
   // ── Query hooks ───────────────────────────────────────────────────────
   const deliveriesQuery = useMyDeliveries(email)
-  const myDeliveries = deliveriesQuery.data ?? []
+  const myDeliveries = useMemo(() => deliveriesQuery.data ?? [], [deliveriesQuery.data])
 
   const imageAssetIds = useMemo(
     () =>

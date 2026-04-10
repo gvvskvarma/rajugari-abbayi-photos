@@ -71,7 +71,7 @@ function PortfolioLightbox({
   }
 
   return (
-    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- dialog backdrop dismiss
     <div
       ref={trapRef}
       className="customer-lightbox"
@@ -90,8 +90,8 @@ function PortfolioLightbox({
         handleMove(delta < 0 ? 'next' : 'prev')
       }}
     >
-      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
-      <div className="customer-lightbox-panel" onClick={(e) => e.stopPropagation()}>
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- stop propagation on panel */}
+      <div className="customer-lightbox-panel" role="document" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
         <button className="customer-lightbox-close" type="button" onClick={onClose} aria-label="Close">
           ✕
         </button>
@@ -178,10 +178,8 @@ export function PortfolioPage() {
     return assetsByCategory[activeCategory]
   }, [activeCategory, assetsByCategory, shuffledAll])
 
-  /* Close lightbox on category change */
-  /* eslint-disable react-hooks/set-state-in-effect -- reset lightbox when tab changes */
+  /* eslint-disable-next-line react-hooks/set-state-in-effect -- close lightbox on category change */
   useEffect(() => setLightboxIndex(null), [activeCategory])
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   return (
     <>

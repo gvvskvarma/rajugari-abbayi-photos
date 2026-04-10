@@ -15,7 +15,7 @@ export function ShareViewPage() {
 
   // ── Share gallery query ────────────────────────────────────────────
   const galleryQuery = useShareGallery(token)
-  const shareAssets = galleryQuery.data?.assets ?? []
+  const shareAssets = useMemo(() => galleryQuery.data?.assets ?? [], [galleryQuery.data?.assets])
   const shareDeliveryId = galleryQuery.data?.deliveryId ?? ''
   const shareExpiresAt = galleryQuery.data?.expiresAt ?? ''
   const shareLinkScope = galleryQuery.data?.scopeType ?? 'all'

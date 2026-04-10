@@ -13,7 +13,7 @@ function lazyRetry(factory: () => Promise<Record<string, unknown>>, name: string
         // failures (e.g. navigating to another page after another deploy)
         // can also trigger a reload.
         sessionStorage.removeItem('chunk-retry')
-        return { default: m[name] as React.ComponentType }
+        return { default: m[name] as React.ComponentType<Record<string, never>> }
       })
       .catch(() => {
         const key = 'chunk-retry'
@@ -22,7 +22,7 @@ function lazyRetry(factory: () => Promise<Record<string, unknown>>, name: string
           window.location.reload()
         }
         // After a failed retry, return null so React doesn't crash
-        return { default: (() => null) as React.ComponentType }
+        return { default: (() => null) as unknown as React.ComponentType<Record<string, never>> }
       }),
   )
 }

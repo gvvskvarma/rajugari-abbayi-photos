@@ -148,13 +148,11 @@ export function useAdminClientDetail() {
     if (!selectedAdminClient?.projects.some((project) => project.id === adminProjectFilterId)) {
       setAdminProjectFilterId('all')
     }
-  }, [adminProjectFilterId, selectedAdminClient?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [adminProjectFilterId, selectedAdminClient])
 
-  /* eslint-disable react-hooks/set-state-in-effect -- reset render limits when client changes */
   useEffect(() => {
     setAdminProjectRenderLimits({})
-  }, [selectedAdminClient?.id]) // eslint-disable-line react-hooks/exhaustive-deps
-  /* eslint-enable react-hooks/set-state-in-effect */
+  }, [selectedAdminClient?.id])
 
   useEffect(() => {
     if (!adminLightbox) return

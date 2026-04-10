@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 
 interface AdminLightboxProps {
@@ -23,23 +23,19 @@ export function AdminLightbox({
   const trapRef = useFocusTrap(true)
   const touchStartRef = useRef<number | null>(null)
   const [slideDirection, setSlideDirection] = useState<'left' | 'right' | null>(null)
-  const [imageKey, setImageKey] = useState(asset.id)
+
+  /* Use asset.id directly as the image key — no need for separate state */
+  const imageKey = asset.id
 
   const hasPrev = index > 0
   const hasNext = index < total - 1
 
-  /* eslint-disable react-hooks/set-state-in-effect -- sync imageKey with prop for slide animation */
-  useEffect(() => {
-    if (asset.id !== imageKey) setImageKey(asset.id)
-  }, [asset.id, imageKey])
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  const handleMove = (direction: 'prev' | 'next') => {
+  const handleMove = useCallback((direction: 'prev' | 'next') => {
     if (direction === 'prev' && !hasPrev) return
     if (direction === 'next' && !hasNext) return
     setSlideDirection(direction === 'next' ? 'left' : 'right')
     onMove(direction)
-  }
+  }, [hasPrev, hasNext, onMove])
 
   useEffect(() => {
     if (!slideDirection) return
@@ -66,7 +62,7 @@ export function AdminLightbox({
   }
 
   return (
-    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- dialog backdrop dismiss
     <div
       ref={trapRef}
       className="customer-lightbox"
@@ -88,8 +84,8 @@ export function AdminLightbox({
         else handleMove('prev')
       }}
     >
-      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
-      <div className="customer-lightbox-panel" onClick={(event) => event.stopPropagation()}>
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- stop propagation on panel */}
+      <div className="customer-lightbox-panel" role="document" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
         <button className="customer-lightbox-close" type="button" onClick={onClose} aria-label="Close">
           ✕
         </button>
