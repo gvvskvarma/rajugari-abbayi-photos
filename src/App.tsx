@@ -37,6 +37,7 @@ const AdminClientDetailPage = lazyRetry(() => import('./pages/AdminClientDetailP
 const ShareViewPage = lazyRetry(() => import('./pages/ShareViewPage.tsx'), 'ShareViewPage')
 const AboutPage = lazyRetry(() => import('./pages/AboutPage.tsx'), 'AboutPage')
 const PortfolioPage = lazyRetry(() => import('./pages/PortfolioPage.tsx'), 'PortfolioPage')
+const LivePage = lazyRetry(() => import('./pages/LivePage.tsx'), 'LivePage')
 
 function LazyPage({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<div className="portal-section"><p className="portal-hint">Loading...</p></div>}>{children}</Suspense>
@@ -50,6 +51,7 @@ const router = createBrowserRouter([
       { path: '/work', element: <LazyPage><PortfolioPage /></LazyPage> },
       { path: '/portfolio', element: <LazyPage><PortfolioPage /></LazyPage> },
       { path: '/about', element: <LazyPage><AboutPage /></LazyPage> },
+      { path: '/live', element: <LazyPage><LivePage /></LazyPage> },
       { path: '/book', element: <LazyPage><BookPage /></LazyPage> },
       { path: '/my-pictures', element: <LazyPage><MyPicturesPage /></LazyPage> },
       {
