@@ -60,7 +60,7 @@ function LayoutInner() {
             {session && role === 'admin' && <a href="/admin/clients">Clients</a>}
             {!(session && role === 'admin') && <a href="/work">Work</a>}
             {!(session && role === 'admin') && <a href="/about">About</a>}
-            {!(session && role === 'admin') && <a href="/live">Live</a>}
+            <a href="/live">Live</a>
             {!(session && role === 'admin') && <a href="/book">Contact</a>}
           </nav>
 
