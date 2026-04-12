@@ -548,6 +548,64 @@ const buildPreviewUrlForAsset = async (
   }
 }
 
+/** Batch-optimised preview URL builder — 2 queries total instead of 2N */
+const buildPreviewUrlBatch = async (
+  env: Env,
+  origin: string,
+  access: PreviewAccessContext,
+  assetIds: string[],
+  variant: MediaVariant = 'preview'
+) => {
+  if (assetIds.length === 0) return {}
+
+  const assetFilter = assetIds.map((id) => `id.eq.${encodeURIComponent(id)}`).join(',')
+  const [allAssets, allDeliveryAssets] = await Promise.all([
+    supabaseRequest<Array<{ id: string; delivery_id: string | null; r2_object_key: string; mime_type: string }>>(
+      env,
+      `assets?or=(${assetFilter})&select=id,delivery_id,r2_object_key,mime_type`
+    ),
+    supabaseRequest<Array<{ asset_id: string; delivery_id: string }>>(
+      env,
+      `delivery_assets?or=(${assetIds.map((id) => `asset_id.eq.${encodeURIComponent(id)}`).join(',')})&select=asset_id,delivery_id`
+    ),
+  ])
+
+  const assetMap = new Map(allAssets.map((a) => [a.id, a]))
+  const deliveryAssetMap = new Map(allDeliveryAssets.map((da) => [da.asset_id, da.delivery_id]))
+
+  const results: Record<string, string> = {}
+
+  await Promise.allSettled(
+    assetIds.map(async (assetId) => {
+      const asset = assetMap.get(assetId)
+      if (!asset) return
+      if (asset.r2_object_key.startsWith('pending/')) return
+
+      const deliveryId = asset.delivery_id ?? deliveryAssetMap.get(assetId)
+      if (!deliveryId) return
+
+      if (access.kind === 'share') {
+        if (access.context.link.delivery_id !== deliveryId) return
+        if (access.context.link.scope_type === 'selected' && !access.context.selectedAssetIds.has(asset.id)) return
+      } else {
+        try { await ensureDeliveryAccess(env, access.user, deliveryId, 'view') } catch { return }
+      }
+
+      const token = await createPreviewToken(env.SUPABASE_SERVICE_ROLE_KEY, {
+        v: 1,
+        assetId: asset.id,
+        deliveryId,
+        issuedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      })
+
+      results[assetId] = `${origin}/api/v1/media/${variant}?token=${encodeURIComponent(token)}`
+    })
+  )
+
+  return results
+}
+
 const ensureAdminAndOwnedDelivery = async (env: Env, user: User, deliveryId: string) => {
   if (user.role !== 'admin') throw new Error('Admin access required')
 
@@ -1681,16 +1739,9 @@ app.post('/api/v1/media/preview-url-batch', async (c) => {
     const access = await resolvePreviewAccessContext(c.env, authHeader, body.shareToken)
     const variant: MediaVariant = body.variant === 'thumb' ? 'thumb' : 'preview'
     const origin = new URL(c.req.url).origin
-    const entries = await Promise.allSettled(
-      assetIds.map((assetId) => buildPreviewUrlForAsset(c.env, origin, access, assetId, variant))
-    )
 
-    const urls = Object.fromEntries(
-      entries.flatMap((entry) => {
-        if (entry.status !== 'fulfilled') return []
-        return [[entry.value.assetId, entry.value.url]] as const
-      })
-    )
+    /* Batch: 2 queries total instead of 2N */
+    const urls = await buildPreviewUrlBatch(c.env, origin, access, assetIds, variant)
 
     return c.json({ urls, expiresInSeconds: 300 }, 200, responseHeaders(c))
   } catch (error) {
@@ -2202,54 +2253,61 @@ app.get('/api/v1/my-pictures', async (c) => {
     const projectClientById = new Map(projects.map((project) => [project.id, project.client_id ?? null] as const))
     const clientById = new Map(clients.map((client) => [client.id, client] as const))
 
-    const deliveryPayloads = await Promise.all(
-      activeRecipients.map(async (recipient) => {
-        const deliveryId = recipient.delivery_id
-        const projectId = deliveryToProject.get(deliveryId) ?? null
-        const project = projectId ? projectById.get(projectId) ?? null : null
-        const clientId = projectId ? projectClientById.get(projectId) ?? null : null
-        const client = clientId ? clientById.get(clientId) ?? null : null
-        const assetRules = await getDeliveryAssetRules(c.env, deliveryId)
-        const visibleAssetIds = [...assetRules.values()]
-          .filter((rule) => rule.canView)
-          .map((rule) => rule.assetId)
+    /* Batch: fetch all delivery_assets and assets in 2 queries instead of 2N */
+    const deliveryAssetFilter = deliveryIds.map((id) => `delivery_id.eq.${encodeURIComponent(id)}`).join(',')
+    const allDeliveryAssets = await supabaseRequest<Array<{ delivery_id: string; asset_id: string }>>(
+      c.env,
+      `delivery_assets?or=(${deliveryAssetFilter})&select=delivery_id,asset_id`
+    )
 
-        if (visibleAssetIds.length === 0) {
-          return {
-            deliveryId,
-            projectName: project?.name ?? null,
-            clientName: client?.full_name ?? null,
-            projectStatus: project?.status ?? null,
-            accessMode: recipient.access_mode,
-            expiresAt: recipient.expires_at,
-            assets: [],
-          }
-        }
+    /* Group asset IDs by delivery */
+    const deliveryAssetMap = new Map<string, string[]>()
+    for (const da of allDeliveryAssets) {
+      const list = deliveryAssetMap.get(da.delivery_id) ?? []
+      list.push(da.asset_id)
+      deliveryAssetMap.set(da.delivery_id, list)
+    }
 
-        const assetFilter = visibleAssetIds.map((id) => `id.eq.${id}`).join(',')
-        const assets = await supabaseRequest<
+    const allAssetIds = [...new Set(allDeliveryAssets.map((da) => da.asset_id))]
+    const allAssets = allAssetIds.length
+      ? await supabaseRequest<
           Array<{ id: string; filename: string; mime_type: string; bytes: number; r2_object_key: string }>
         >(
           c.env,
-          `assets?or=(${assetFilter})&select=id,filename,mime_type,bytes,r2_object_key&order=created_at.desc`
+          `assets?or=(${allAssetIds.map((id) => `id.eq.${encodeURIComponent(id)}`).join(',')})&select=id,filename,mime_type,bytes,r2_object_key&order=created_at.desc`
         )
-        const uploadedAssets = assets.filter((asset) => !asset.r2_object_key.startsWith('pending/'))
+      : []
 
-        return {
-          deliveryId,
-          projectName: project?.name ?? null,
-          clientName: client?.full_name ?? null,
-          projectStatus: project?.status ?? null,
-          accessMode: recipient.access_mode,
-          expiresAt: recipient.expires_at,
-          assets: uploadedAssets.map((asset) => ({
-            ...asset,
-            canView: true,
-            canDownload: recipient.access_mode !== 'viewer' && (assetRules.get(asset.id)?.canDownload ?? false),
-          })),
-        }
-      })
-    )
+    const assetById = new Map(allAssets.map((a) => [a.id, a]))
+
+    const deliveryPayloads = activeRecipients.map((recipient) => {
+      const deliveryId = recipient.delivery_id
+      const projectId = deliveryToProject.get(deliveryId) ?? null
+      const project = projectId ? projectById.get(projectId) ?? null : null
+      const clientId = projectId ? projectClientById.get(projectId) ?? null : null
+      const client = clientId ? clientById.get(clientId) ?? null : null
+      const visibleAssetIds = deliveryAssetMap.get(deliveryId) ?? []
+
+      const uploadedAssets = visibleAssetIds
+        .map((id) => assetById.get(id))
+        .filter((asset): asset is NonNullable<typeof asset> =>
+          Boolean(asset && !asset.r2_object_key.startsWith('pending/'))
+        )
+
+      return {
+        deliveryId,
+        projectName: project?.name ?? null,
+        clientName: client?.full_name ?? null,
+        projectStatus: project?.status ?? null,
+        accessMode: recipient.access_mode,
+        expiresAt: recipient.expires_at,
+        assets: uploadedAssets.map((asset) => ({
+          ...asset,
+          canView: true,
+          canDownload: recipient.access_mode !== 'viewer',
+        })),
+      }
+    })
 
     return c.json(
       {
