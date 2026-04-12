@@ -152,7 +152,7 @@ export function LivePage() {
           <div className="live-page-embed-wrapper">
             <span className="live-page-badge">YouTube Live</span>
             <iframe
-              src="https://www.youtube.com/embed/live_stream?channel=UCYourChannelID"
+              src="https://www.youtube.com/embed/live_stream?channel=UCRc_IOjhoBtuCmjEe14Ru4Q"
               title={`${displayTitle} — Live Stream`}
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               referrerPolicy="strict-origin-when-cross-origin"
