@@ -41,6 +41,11 @@ export function LivePage() {
     setSaveMessage('')
     try {
       const token = await getAccessToken()
+      if (!token) {
+        setSaveMessage('Session expired. Please log out and log in again.')
+        setSaving(false)
+        return
+      }
       await workerRequest('/api/v1/live-config', token, {
         method: 'PATCH',
         body: { title: editTitle, description: editDescription },
