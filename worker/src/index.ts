@@ -112,9 +112,14 @@ app.patch('/api/v1/live-config', async (c) => {
 
     if (Object.keys(payload).length <= 1) return jsonError('No fields provided for update', 400)
 
+    /* Fetch the single config row ID first */
+    const existing = await supabaseRequest<Array<{ id: string }>>(c.env, 'live_config?select=id&limit=1')
+    const configId = existing[0]?.id
+    if (!configId) return jsonError('Live config not initialized', 404)
+
     const updated = await supabaseRequest<
       Array<{ title: string; description: string; updated_at: string }>
-    >(c.env, 'live_config?select=title,description,updated_at', {
+    >(c.env, `live_config?id=eq.${encodeURIComponent(configId)}&select=title,description,updated_at`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
     })
