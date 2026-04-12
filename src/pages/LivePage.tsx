@@ -56,6 +56,7 @@ export function LivePage() {
   }
 
   /* Dynamic content from config */
+  const hasEvent = Boolean(config?.title)
   const displayTitle = config?.title || 'Rajugari Abbayi Photography'
   const displayDescription =
     config?.description ||
@@ -125,8 +126,16 @@ export function LivePage() {
       {/* ── HERO ── */}
       <section className="live-page-hero reveal-section" ref={heroRef}>
         <p className="eyebrow">Watch Live</p>
-        <h1>{displayTitle}</h1>
-        <p className="live-page-subtitle">{displayDescription}</p>
+        <h1 className={hasEvent ? 'live-page-event-title' : ''}>{displayTitle}</h1>
+        {hasEvent && config?.description ? (
+          <div className="live-page-event-details">
+            {config.description.split('\n').map((line, i) => (
+              <p key={i}>{line}</p>
+            ))}
+          </div>
+        ) : (
+          <p className="live-page-subtitle">{displayDescription}</p>
+        )}
         <div className="live-page-hero-actions">
           <a
             className="button primary"
