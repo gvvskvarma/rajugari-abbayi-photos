@@ -121,6 +121,7 @@ app.patch('/api/v1/live-config', async (c) => {
       Array<{ title: string; description: string; updated_at: string }>
     >(c.env, `live_config?id=eq.${encodeURIComponent(configId)}&select=title,description,updated_at`, {
       method: 'PATCH',
+      headers: { Prefer: 'return=representation' },
       body: JSON.stringify(payload),
     })
 
