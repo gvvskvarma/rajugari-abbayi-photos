@@ -2786,6 +2786,77 @@ img.rotator-image {
 
 /* ── Live page ─────────────────────────────────────────────────── */
 
+.live-page-admin-panel {
+  border-radius: 20px;
+  border: 1px solid rgba(209, 176, 127, 0.2);
+  background: rgba(22, 24, 33, 0.7);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.live-page-admin-header h3 {
+  margin: 8px 0 0;
+  font-size: 1.1rem;
+}
+
+.live-page-admin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.live-page-admin-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  font-weight: 500;
+}
+
+.live-page-admin-form input,
+.live-page-admin-form textarea {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: rgba(15, 17, 24, 0.6);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.95rem;
+  resize: vertical;
+  transition: border-color 0.2s ease;
+}
+
+.live-page-admin-form input:focus,
+.live-page-admin-form textarea:focus {
+  outline: none;
+  border-color: rgba(209, 176, 127, 0.5);
+}
+
+.live-page-admin-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.live-page-admin-preview p {
+  margin: 0 0 6px;
+  font-size: 0.9rem;
+}
+
+.live-page-admin-preview .muted {
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+.live-page-admin-message {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--accent);
+}
+
 .live-page-hero {
   position: relative;
   overflow: hidden;
