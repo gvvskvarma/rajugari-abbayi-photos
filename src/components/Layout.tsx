@@ -31,7 +31,6 @@ function LayoutInner() {
   } = useAuth({ onSignOut: () => navigate('/') })
 
   return (
-    <QueryClientProvider client={queryClient}>
     <div className="page">
       <a href="#main-content" className="skip-link">Skip to content</a>
       <header className="topbar">
@@ -157,14 +156,15 @@ function LayoutInner() {
         <p>© 2026 Rajugari_Abbayi Photography. Crafted with intention.</p>
       </footer>
     </div>
-    </QueryClientProvider>
   )
 }
 
 export function Layout() {
   return (
-    <AuthProvider>
-      <LayoutInner />
-    </AuthProvider>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <LayoutInner />
+      </AuthProvider>
+    </QueryClientProvider>
   )
 }
