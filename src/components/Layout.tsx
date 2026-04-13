@@ -4,6 +4,7 @@ import '../App.css'
 import { isSupabaseConfigured } from '../lib/supabase'
 import { useAuthContext } from '../context/AuthContext'
 import { useAuth } from '../hooks/useAuth'
+import { useLiveConfig } from '../hooks/queries/useLiveConfig'
 import { personalInstagramUrl } from '../lib/constants'
 import { queryClient } from '../lib/queryClient'
 import { AuthProvider } from '../context/AuthContext'
@@ -11,6 +12,9 @@ import { AuthProvider } from '../context/AuthContext'
 function LayoutInner() {
   const navigate = useNavigate()
   const { session, role, loginLabel } = useAuthContext()
+  const { data: liveData } = useLiveConfig()
+  const isLive = liveData?.config?.isLive ?? false
+  const isAdmin = Boolean(session && role === 'admin')
   const {
     authMenuOpen,
     setAuthMenuOpen,
@@ -27,6 +31,7 @@ function LayoutInner() {
   } = useAuth({ onSignOut: () => navigate('/') })
 
   return (
+    <QueryClientProvider client={queryClient}>
     <div className="page">
       <a href="#main-content" className="skip-link">Skip to content</a>
       <header className="topbar">
@@ -60,7 +65,7 @@ function LayoutInner() {
             {session && role === 'admin' && <a href="/admin/clients">Clients</a>}
             {!(session && role === 'admin') && <a href="/work">Work</a>}
             {!(session && role === 'admin') && <a href="/about">About</a>}
-            <a href="/live">Live</a>
+            {(isLive || isAdmin) && <a href="/live">{isLive ? 'Live' : 'Live (off)'}</a>}
             {!(session && role === 'admin') && <a href="/book">Contact</a>}
           </nav>
 
@@ -145,15 +150,14 @@ function LayoutInner() {
       </header>
 
       <main id="main-content">
-        <QueryClientProvider client={queryClient}>
-          <Outlet />
-        </QueryClientProvider>
+        <Outlet />
       </main>
 
       <footer className="footer">
         <p>© 2026 Rajugari_Abbayi Photography. Crafted with intention.</p>
       </footer>
     </div>
+    </QueryClientProvider>
   )
 }
 

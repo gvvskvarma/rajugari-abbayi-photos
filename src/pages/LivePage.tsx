@@ -18,6 +18,7 @@ export function LivePage() {
   const isAdmin = Boolean(session && role === 'admin')
   const { data: liveData } = useLiveConfig()
   const config = liveData?.config
+  const isLive = config?.isLive ?? false
   const queryClient = useQueryClient()
 
   const [showPlayer, setShowPlayer] = useState(false)
@@ -28,6 +29,7 @@ export function LivePage() {
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveMessage, setSaveMessage] = useState('')
+  const [toggling, setToggling] = useState(false)
 
   const startEditing = () => {
     setEditTitle(config?.title ?? '')
@@ -60,6 +62,23 @@ export function LivePage() {
     }
   }
 
+  const handleToggleLive = async () => {
+    setToggling(true)
+    try {
+      const token = await getAccessToken()
+      if (!token) return
+      await workerRequest('/api/v1/live-config', token, {
+        method: 'PATCH',
+        body: { isLive: !isLive },
+      })
+      await queryClient.invalidateQueries({ queryKey: queryKeys.liveConfig() })
+    } catch {
+      // silent — toggle will revert via query refetch
+    } finally {
+      setToggling(false)
+    }
+  }
+
   /* Dynamic content from config */
   const hasEvent = Boolean(config?.title)
   const displayTitle = config?.title || 'Rajugari Abbayi Photography'
@@ -71,6 +90,28 @@ export function LivePage() {
   const playerRef = useReveal<HTMLElement>()
   const channelRef = useReveal<HTMLElement>()
 
+  /* Non-admin visitors see "no live" message when stream is off */
+  if (!isLive && !isAdmin) {
+    return (
+      <section className="live-page-channel reveal-section" ref={channelRef} style={{ marginTop: 0 }}>
+        <p className="eyebrow">Live</p>
+        <h2>No live stream right now</h2>
+        <p>
+          Check back later or visit our YouTube channel for past sessions,
+          cinematic reels, and photography highlights.
+        </p>
+        <a
+          className="button primary"
+          href={youtubeChannelUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Go to YouTube Channel
+        </a>
+      </section>
+    )
+  }
+
   return (
     <>
       {/* ── ADMIN CONTROLS ── */}
@@ -80,6 +121,23 @@ export function LivePage() {
             <p className="eyebrow">Admin</p>
             <h3>Live Stream Settings</h3>
           </div>
+
+          {/* Live toggle */}
+          <div className="live-page-admin-toggle-row">
+            <span className="live-page-admin-toggle-label">
+              {isLive ? 'Stream is LIVE' : 'Stream is OFF'}
+            </span>
+            <button
+              type="button"
+              className={`live-page-toggle ${isLive ? 'is-on' : ''}`}
+              onClick={() => void handleToggleLive()}
+              disabled={toggling}
+              aria-label={isLive ? 'Turn off live stream' : 'Turn on live stream'}
+            >
+              <span className="live-page-toggle-knob" />
+            </button>
+          </div>
+
           {editing ? (
             <div className="live-page-admin-form">
               <label>

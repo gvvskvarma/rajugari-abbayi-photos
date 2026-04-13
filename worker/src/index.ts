@@ -81,14 +81,14 @@ app.get('/api/v1/health', (c) =>
 app.get('/api/v1/live-config', async (c) => {
   try {
     const rows = await supabaseRequest<
-      Array<{ title: string; description: string; updated_at: string }>
-    >(c.env, 'live_config?select=title,description,updated_at&limit=1')
+      Array<{ title: string; description: string; is_live: boolean; updated_at: string }>
+    >(c.env, 'live_config?select=title,description,is_live,updated_at&limit=1')
 
     const row = rows[0]
     return c.json(
       {
         config: row
-          ? { title: row.title, description: row.description, updatedAt: row.updated_at }
+          ? { title: row.title, description: row.description, isLive: row.is_live, updatedAt: row.updated_at }
           : null,
       },
       200,
@@ -103,11 +103,12 @@ app.patch('/api/v1/live-config', async (c) => {
   try {
     const user = await getUserFromBearer(c.env, c.req.header('authorization'))
     ensureAdmin(user)
-    const body = await c.req.json<{ title?: string; description?: string }>()
+    const body = await c.req.json<{ title?: string; description?: string; isLive?: boolean }>()
 
-    const payload: Record<string, string | null> = {}
+    const payload: Record<string, string | boolean | null> = {}
     if (typeof body.title === 'string') payload.title = body.title.trim().slice(0, MAX_SHORT_TEXT)
     if (typeof body.description === 'string') payload.description = body.description.trim().slice(0, MAX_LONG_TEXT)
+    if (typeof body.isLive === 'boolean') payload.is_live = body.isLive
     payload.updated_at = new Date().toISOString()
 
     if (Object.keys(payload).length <= 1) return jsonError('No fields provided for update', 400)
@@ -118,8 +119,8 @@ app.patch('/api/v1/live-config', async (c) => {
     if (!configId) return jsonError('Live config not initialized', 404)
 
     const updated = await supabaseRequest<
-      Array<{ title: string; description: string; updated_at: string }>
-    >(c.env, `live_config?id=eq.${encodeURIComponent(configId)}&select=title,description,updated_at`, {
+      Array<{ title: string; description: string; is_live: boolean; updated_at: string }>
+    >(c.env, `live_config?id=eq.${encodeURIComponent(configId)}&select=title,description,is_live,updated_at`, {
       method: 'PATCH',
       headers: { Prefer: 'return=representation' },
       body: JSON.stringify(payload),
@@ -128,7 +129,7 @@ app.patch('/api/v1/live-config', async (c) => {
     const row = updated[0]
     if (!row) return jsonError('Config not found', 404)
     return c.json(
-      { config: { title: row.title, description: row.description, updatedAt: row.updated_at } },
+      { config: { title: row.title, description: row.description, isLive: row.is_live, updatedAt: row.updated_at } },
       200,
       responseHeaders(c)
     )

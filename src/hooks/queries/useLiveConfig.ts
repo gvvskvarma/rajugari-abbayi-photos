@@ -5,6 +5,7 @@ import { apiBaseUrl } from '../../lib/constants'
 export type LiveConfig = {
   title: string
   description: string
+  isLive: boolean
   updatedAt: string
 }
 
