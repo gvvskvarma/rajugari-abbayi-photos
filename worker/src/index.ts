@@ -10,13 +10,13 @@ import {
   resolveAllowedOrigin, buildBaseHeaders, responseHeaders, jsonError, SAFE_ERROR_PATTERNS,
   supabaseRequest, getUserFromBearer, ensureAdmin, ensureDeliveryAccess,
   ensureAdminAndOwnedDelivery, ensureAdminOwnedAsset,
-  createUploadToken, verifyUploadToken, createPreviewToken, verifyPreviewToken,
+  createUploadToken, verifyUploadToken, verifyPreviewToken,
   createDownloadToken, verifyDownloadToken,
   buildR2SignedUrl, resolvePreviewAccessContext, buildPreviewUrlForAsset, buildPreviewUrlBatch,
   getDeliveryAssetRules, getShareLinkContext,
-  insertAdminActivity, serializeAdminActivity, normalizeActivityMetadata,
+  insertAdminActivity, serializeAdminActivity,
   logDownloadEvent, deleteStoredAssets, streamZipResponse,
-  parseNullableText, sanitizeFileName, parseProjectStatus, getDisplayFileName,
+  parseNullableText, sanitizeFileName, parseProjectStatus,
   sha256Hex, sanitizeArchiveEntryName,
 } from './lib'
 
@@ -62,8 +62,6 @@ app.onError((error, c) => {
 
 /* ── Routes ──────────────────────────────────────────────────────── */
 
-/* Type-only imports used within route handler bodies below */
-type _A = AdminActivityRow; type _B = AdminActivityKind; type _C = MediaVariant; type _D = Mode; type _E = ShareLinkScope
 
 
 app.get('/api/v1/health', (c) =>
