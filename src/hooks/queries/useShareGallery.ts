@@ -27,6 +27,7 @@ export function useShareGallery(token: string | undefined) {
       return payload
     },
     enabled: !!token,
-    staleTime: Infinity,
+    staleTime: 5 * 60 * 1000, // 5 min — re-check expiry on stale tabs
+    refetchOnWindowFocus: true,
   })
 }
