@@ -7,6 +7,7 @@ import {
   insertAdminActivity, serializeAdminActivity,
   deleteStoredAssets, streamZipResponse,
   parseNullableText, parseProjectStatus, sanitizeArchiveEntryName,
+  filterUuids,
 } from '../lib'
 
 const admin = new Hono<{ Bindings: Env }>()
@@ -418,15 +419,17 @@ admin.post('/downloads', async (c) => {
     const user = await getUserFromBearer(c.env, c.req.header('authorization'))
     ensureAdmin(user)
     const body = await c.req.json<{ assetIds?: string[]; filename?: string }>()
-    const assetIds = [...new Set((body.assetIds ?? []).filter((assetId) => typeof assetId === 'string' && assetId.trim()))]
+    /* Validate UUIDs (interpolated into PostgREST or=() filter) and filter at
+       SQL level rather than fetching every asset the admin owns. */
+    const assetIds = [...new Set(filterUuids(body.assetIds ?? []))]
     if (assetIds.length === 0) return jsonError('assetIds are required', 400)
 
-    const assets = await supabaseRequest<Array<{ id: string; filename: string; r2_object_key: string }>>(
+    const assetFilter = assetIds.map((id) => `id.eq.${id}`).join(',')
+    const selectedAssets = await supabaseRequest<Array<{ id: string; filename: string; r2_object_key: string }>>(
       c.env,
-      `assets?owner_user_id=eq.${encodeURIComponent(user.id)}&select=id,filename,r2_object_key,created_at&order=created_at.asc`
+      `assets?owner_user_id=eq.${encodeURIComponent(user.id)}&or=(${assetFilter})&select=id,filename,r2_object_key,created_at&order=created_at.asc`
     )
 
-    const selectedAssets = assets.filter((asset) => assetIds.includes(asset.id))
     if (selectedAssets.length === 0) return jsonError('No matching assets found', 404)
 
     const archiveName = `${sanitizeArchiveEntryName(body.filename ?? 'selected-files')}.zip`
@@ -445,10 +448,9 @@ admin.delete('/assets/:assetId', async (c) => {
     if (!assetId) return jsonError('assetId is required', 400)
 
     const asset = await ensureAdminOwnedAsset(c.env, user, assetId)
-    if (!asset.r2_object_key.startsWith('pending/')) {
-      await c.env.R2_MEDIA_BUCKET.delete(asset.r2_object_key)
-    }
 
+    /* DB first, then R2 — orphaned R2 files are harmless (storage cost only),
+       but orphaned DB rows pointing at missing files break galleries. */
     await supabaseRequest(
       c.env,
       `assets?id=eq.${encodeURIComponent(assetId)}&owner_user_id=eq.${encodeURIComponent(user.id)}`,
@@ -457,6 +459,16 @@ admin.delete('/assets/:assetId', async (c) => {
       },
       true
     )
+
+    if (!asset.r2_object_key.startsWith('pending/')) {
+      try {
+        await c.env.R2_MEDIA_BUCKET.delete(asset.r2_object_key)
+      } catch (r2Error) {
+        // Log but don't fail — DB row is gone, the file is now orphaned
+        // and can be cleaned up by a background job.
+        console.error('[asset-delete] R2 cleanup failed:', asset.r2_object_key, r2Error)
+      }
+    }
 
     return c.json({ ok: true, assetId }, 200, responseHeaders(c))
   } catch (error) {

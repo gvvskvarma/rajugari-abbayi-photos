@@ -44,6 +44,7 @@ const uniqueSources = (sources: Array<{ src?: string; srcSet?: string }>) => {
     })
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const createResponsiveAsset = (originalPath: string): ResponsiveAsset => {
   const normalizedPath = normalizeMediaPath(originalPath)
   const optimizedBase = normalizedPath
@@ -85,6 +86,7 @@ export const createResponsiveAsset = (originalPath: string): ResponsiveAsset => 
   }
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const getPrimaryPreloadSource = (asset: ResponsiveAsset) => asset.sources[0]?.src ?? ''
 
 export const ResponsiveImage = ({

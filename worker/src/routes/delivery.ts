@@ -5,6 +5,7 @@ import {
   supabaseRequest, getUserFromBearer, ensureDeliveryAccess,
   getDeliveryAssetRules, getShareLinkContext,
   logDownloadEvent, streamZipResponse, sha256Hex,
+  filterUuids,
 } from '../lib'
 
 const delivery = new Hono<{ Bindings: Env }>()
@@ -65,8 +66,10 @@ delivery.post('/:deliveryId/download', async (c) => {
     await ensureDeliveryAccess(c.env, user, deliveryId, 'download')
 
     const body = await c.req.json<{ assetIds?: string[] }>()
+    /* Validate UUIDs — these get interpolated into PostgREST or=(...) filters
+       below, where unescaped commas/parens could alter filter semantics. */
     const requestedIds = body.assetIds && body.assetIds.length > 0
-      ? [...new Set(body.assetIds.filter((id) => typeof id === 'string' && id.trim()))]
+      ? [...new Set(filterUuids(body.assetIds))]
       : null
 
     const assetRules = await getDeliveryAssetRules(c.env, deliveryId)
@@ -94,15 +97,19 @@ delivery.post('/:deliveryId/download', async (c) => {
 
     const requesterIp = c.req.header('CF-Connecting-IP')
     const ipHash = requesterIp ? await sha256Hex(requesterIp) : null
-    for (const asset of uploadedAssets) {
-      await logDownloadEvent(c.env, {
-        deliveryId,
-        assetId: asset.id,
-        requesterProfileId: user.id,
-        ipHash,
-        userAgent: c.req.header('User-Agent') ?? null,
-      })
-    }
+    /* Parallel log inserts — was serial (N round trips added latency before
+       zip stream could start for large deliveries). */
+    await Promise.all(
+      uploadedAssets.map((asset) =>
+        logDownloadEvent(c.env, {
+          deliveryId,
+          assetId: asset.id,
+          requesterProfileId: user.id,
+          ipHash,
+          userAgent: c.req.header('User-Agent') ?? null,
+        })
+      )
+    )
 
     const archiveName = `photos-${deliveryId.slice(0, 8)}.zip`
     return streamZipResponse(c, uploadedAssets, archiveName)
@@ -185,7 +192,8 @@ shareLinks.post('/', async (c) => {
       return jsonError('Viewer accounts cannot create share links', 403)
     }
 
-    const assetIds = [...new Set((body.assetIds ?? []).map((assetId) => assetId.trim()).filter(Boolean))]
+    /* Validate UUIDs — interpolated into PostgREST or=(...) filters below */
+    const assetIds = [...new Set(filterUuids((body.assetIds ?? []).map((id) => (typeof id === 'string' ? id.trim() : id))))]
     const scope: ShareLinkScope = body.scope === 'selected' || (body.scope !== 'all' && assetIds.length > 0) ? 'selected' : 'all'
     if (scope === 'selected' && assetIds.length === 0) {
       return jsonError('Select at least one file for a selected-files link', 400)
@@ -273,7 +281,7 @@ shareLinks.post('/', async (c) => {
     return c.json(
       {
         token: shareLink.token ?? token,
-        url: `${c.env.APP_ORIGIN}/#share/${shareLink.token ?? token}`,
+        url: `${c.env.APP_ORIGIN}/share/${shareLink.token ?? token}`,
         scopeType: shareLink.scope_type ?? scope,
         expiresAt,
       },

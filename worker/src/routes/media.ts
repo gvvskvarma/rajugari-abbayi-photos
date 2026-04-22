@@ -4,9 +4,9 @@ import type { Env, Mode, MediaVariant } from '../types'
 import {
   responseHeaders, jsonError,
   supabaseRequest, getUserFromBearer, ensureDeliveryAccess,
-  verifyPreviewToken, createDownloadToken, verifyDownloadToken,
+  createPreviewToken, verifyPreviewToken, createDownloadToken, verifyDownloadToken,
   buildR2SignedUrl, resolvePreviewAccessContext, buildPreviewUrlForAsset, buildPreviewUrlBatch,
-  getShareLinkContext,
+  getShareLinkContext, getTokenSigningSecret,
   logDownloadEvent, sha256Hex,
 } from '../lib'
 
@@ -74,7 +74,19 @@ media.post('/signed-url', async (c) => {
         return buildDownloadTokenResponse(c, asset, deliveryId)
       }
 
-      const signedUrl = await buildR2SignedUrl(c.env, 'GET', asset.r2_object_key, 300, mode)
+      /* Share-link view: route through internal preview-token proxy rather
+         than exposing a raw R2 presigned URL. Raw URLs leak the R2 host,
+         bucket, object key and a 5-min-valid signature that could be
+         re-shared externally, bypassing scope enforcement. */
+      const origin = new URL(c.req.url).origin
+      const previewToken = await createPreviewToken(getTokenSigningSecret(c.env), {
+        v: 1,
+        assetId: asset.id,
+        deliveryId,
+        issuedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      })
+      const signedUrl = `${origin}/api/v1/media/preview?token=${encodeURIComponent(previewToken)}`
       return c.json({ signedUrl, expiresInSeconds: 300, mode }, 200, responseHeaders(c))
     }
 
@@ -116,7 +128,7 @@ async function buildDownloadTokenResponse(
   deliveryId: string,
 ) {
   const origin = new URL(c.req.url).origin
-  const downloadToken = await createDownloadToken(c.env.SUPABASE_SERVICE_ROLE_KEY, {
+  const downloadToken = await createDownloadToken(getTokenSigningSecret(c.env), {
     v: 1,
     assetId: asset.id,
     deliveryId,
@@ -173,7 +185,7 @@ media.get('/preview', async (c) => {
     const token = c.req.query('token')
     if (!token) return jsonError('token is required', 400)
 
-    const payload = await verifyPreviewToken(c.env.SUPABASE_SERVICE_ROLE_KEY, token)
+    const payload = await verifyPreviewToken(getTokenSigningSecret(c.env), token)
     const assets = await supabaseRequest<
       Array<{ id: string; delivery_id: string | null; r2_object_key: string; mime_type: string; filename: string }>
     >(
@@ -211,7 +223,7 @@ media.get('/download', async (c) => {
     const token = c.req.query('token')
     if (!token) return jsonError('token is required', 400)
 
-    const payload = await verifyDownloadToken(c.env.SUPABASE_SERVICE_ROLE_KEY, token)
+    const payload = await verifyDownloadToken(getTokenSigningSecret(c.env), token)
 
     const object = await c.env.R2_MEDIA_BUCKET.get(payload.r2ObjectKey)
     if (!object) {
@@ -239,7 +251,7 @@ media.get('/thumb', async (c) => {
     const token = c.req.query('token')
     if (!token) return jsonError('token is required', 400)
 
-    const payload = await verifyPreviewToken(c.env.SUPABASE_SERVICE_ROLE_KEY, token)
+    const payload = await verifyPreviewToken(getTokenSigningSecret(c.env), token)
     const assets = await supabaseRequest<
       Array<{ id: string; delivery_id: string | null; r2_object_key: string; mime_type: string; filename: string }>
     >(

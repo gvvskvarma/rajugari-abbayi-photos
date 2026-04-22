@@ -49,6 +49,13 @@ export type Env = {
   R2_ACCESS_KEY_ID: string
   R2_SECRET_ACCESS_KEY: string
   APP_ORIGIN: string
+  /**
+   * Optional secret used to HMAC-sign upload/preview/download tokens.
+   * If unset, falls back to SUPABASE_SERVICE_ROLE_KEY for backwards compatibility.
+   * Should be set to a random 32+ byte value in production so SRK rotation
+   * doesn't invalidate live tokens.
+   */
+  TOKEN_SIGNING_SECRET?: string
 }
 
 export type User = {

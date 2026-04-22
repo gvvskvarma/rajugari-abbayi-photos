@@ -1,5 +1,4 @@
 import type { Context } from 'hono'
-import { Zip, ZipPassThrough } from 'fflate'
 import type {
   Env, User, Role, Mode, MediaVariant,
   UploadTokenPayload, PreviewTokenPayload, DownloadTokenPayload,
@@ -108,6 +107,14 @@ const base64UrlDecode = (value: string) => {
   const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
   return textDecoder.decode(bytes)
 }
+
+/**
+ * Resolve the secret used to HMAC-sign tokens.
+ * Prefers TOKEN_SIGNING_SECRET if set; otherwise falls back to SUPABASE_SERVICE_ROLE_KEY
+ * for backwards compatibility with existing deployments.
+ */
+export const getTokenSigningSecret = (env: Env): string =>
+  env.TOKEN_SIGNING_SECRET || env.SUPABASE_SERVICE_ROLE_KEY
 
 const signToken = async (version: string, secret: string, payloadB64: string) => {
   const key = await crypto.subtle.importKey(
@@ -220,6 +227,46 @@ export const ensureAdminAndOwnedDelivery = async (env: Env, user: User, delivery
   if (!deliveries[0]) throw new Error('Delivery not found or not owned by admin')
 }
 
+/**
+ * Idempotent: ensure a delivery_assets mapping exists for (deliveryId, assetId).
+ * Heals upload finalize partial failures where assets row was created but the
+ * mapping row failed to insert, leaving the file invisible to the gallery.
+ */
+/**
+ * Validate that a string is a UUID. Used before interpolating user-supplied IDs
+ * into PostgREST `or=(id.eq.X,...)` filters — PostgREST treats `,` and `)` as
+ * structural, so a crafted ID could otherwise alter the filter semantics.
+ */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+export const isUuid = (value: unknown): value is string =>
+  typeof value === 'string' && UUID_RE.test(value)
+
+/**
+ * Filter an array down to valid UUIDs. Anything that doesn't match is silently
+ * dropped — caller should check `result.length === input.length` if a mismatch
+ * should fail loudly.
+ */
+export const filterUuids = (values: unknown[]): string[] =>
+  values.filter(isUuid)
+
+export const ensureDeliveryAssetMapping = async (env: Env, deliveryId: string, assetId: string) => {
+  const existing = await supabaseRequest<Array<{ asset_id: string }>>(
+    env,
+    `delivery_assets?delivery_id=eq.${encodeURIComponent(deliveryId)}&asset_id=eq.${encodeURIComponent(assetId)}&select=asset_id&limit=1`
+  )
+  if (existing[0]) return
+  await supabaseRequest(
+    env,
+    'delivery_assets',
+    {
+      method: 'POST',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({ delivery_id: deliveryId, asset_id: assetId }),
+    },
+    true
+  )
+}
+
 export const ensureAdminOwnedAsset = async (env: Env, user: User, assetId: string) => {
   ensureAdmin(user)
   const assets = await supabaseRequest<Array<{ id: string; r2_object_key: string }>>(env, `assets?id=eq.${encodeURIComponent(assetId)}&owner_user_id=eq.${encodeURIComponent(user.id)}&select=id,r2_object_key&limit=1`)
@@ -314,7 +361,7 @@ export const buildPreviewUrlForAsset = async (env: Env, origin: string, access: 
   } else {
     await ensureDeliveryAccess(env, access.user, deliveryId, 'view')
   }
-  const token = await createPreviewToken(env.SUPABASE_SERVICE_ROLE_KEY, { v: 1, assetId: asset.id, deliveryId, issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString() })
+  const token = await createPreviewToken(getTokenSigningSecret(env), { v: 1, assetId: asset.id, deliveryId, issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString() })
   return { assetId: asset.id, url: `${origin}/api/v1/media/${variant}?token=${encodeURIComponent(token)}` }
 }
 
@@ -339,7 +386,7 @@ export const buildPreviewUrlBatch = async (env: Env, origin: string, access: Pre
     } else {
       try { await ensureDeliveryAccess(env, access.user, deliveryId, 'view') } catch { return }
     }
-    const token = await createPreviewToken(env.SUPABASE_SERVICE_ROLE_KEY, { v: 1, assetId: asset.id, deliveryId, issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString() })
+    const token = await createPreviewToken(getTokenSigningSecret(env), { v: 1, assetId: asset.id, deliveryId, issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString() })
     results[assetId] = `${origin}/api/v1/media/${variant}?token=${encodeURIComponent(token)}`
   }))
   return results
@@ -435,13 +482,10 @@ const uniquifyArchiveEntryName = (filename: string, seen: Set<string>) => {
 }
 
 export const streamZipResponse = async (c: Context<{ Bindings: Env }>, entries: Array<{ filename: string; r2_object_key: string }>, archiveName: string) => {
-  for (const entry of entries) {
-    const object = await c.env.R2_MEDIA_BUCKET.head(entry.r2_object_key)
-    if (!object) throw new Error(`File missing in storage for ${entry.filename}. Re-upload required.`)
-  }
+  const { Zip: ZipCtor, ZipPassThrough: ZipPassThroughCtor } = await import('fflate')
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      const zip = new Zip((error, chunk, final) => {
+      const zip = new ZipCtor((error, chunk, final) => {
         if (error) { controller.error(error); return }
         if (chunk) controller.enqueue(chunk)
         if (final) controller.close()
@@ -449,10 +493,30 @@ export const streamZipResponse = async (c: Context<{ Bindings: Env }>, entries: 
       void (async () => {
         try {
           const seenNames = new Set<string>()
-          for (const entry of entries) {
-            const object = await c.env.R2_MEDIA_BUCKET.get(entry.r2_object_key)
+          /* Prefetch next object while streaming the current one.
+             We kick off GET N+1 as soon as we start streaming N. */
+          const PREFETCH_AHEAD = 2
+          const pending: Array<Promise<R2ObjectBody | null>> = []
+          const getObject = (key: string) =>
+            c.env.R2_MEDIA_BUCKET.get(key) as Promise<R2ObjectBody | null>
+
+          // seed the prefetch window
+          for (let i = 0; i < Math.min(PREFETCH_AHEAD, entries.length); i++) {
+            pending.push(getObject(entries[i].r2_object_key))
+          }
+
+          for (let i = 0; i < entries.length; i++) {
+            const entry = entries[i]
+            const object = await pending.shift()
             if (!object?.body) throw new Error(`File missing in storage for ${entry.filename}. Re-upload required.`)
-            const archiveEntry = new ZipPassThrough(uniquifyArchiveEntryName(entry.filename, seenNames))
+
+            // kick off the next prefetch as soon as we start streaming current
+            const nextIdx = i + PREFETCH_AHEAD
+            if (nextIdx < entries.length) {
+              pending.push(getObject(entries[nextIdx].r2_object_key))
+            }
+
+            const archiveEntry = new ZipPassThroughCtor(uniquifyArchiveEntryName(entry.filename, seenNames))
             zip.add(archiveEntry)
             const reader = object.body.getReader()
             while (true) {

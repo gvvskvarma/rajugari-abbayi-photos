@@ -5,8 +5,8 @@ import {
   maxUploadBytes, uploadUrlExpirySeconds,
   responseHeaders, jsonError,
   supabaseRequest, getUserFromBearer,
-  ensureAdminAndOwnedDelivery,
-  createUploadToken, verifyUploadToken,
+  ensureAdminAndOwnedDelivery, ensureDeliveryAssetMapping,
+  createUploadToken, verifyUploadToken, getTokenSigningSecret,
   buildR2SignedUrl, sanitizeFileName,
 } from '../lib'
 
@@ -49,7 +49,7 @@ const handleRequestUploadUrl = async (c: Context<{ Bindings: Env }>) => {
     const uploadToken = crypto.randomUUID().replace(/-/g, '')
     const expiresAt = new Date(Date.now() + uploadUrlExpirySeconds * 1000).toISOString()
     const uploadUrl = await buildR2SignedUrl(c.env, 'PUT', objectKey, uploadUrlExpirySeconds, 'view')
-    const signedUploadToken = await createUploadToken(c.env.SUPABASE_SERVICE_ROLE_KEY, {
+    const signedUploadToken = await createUploadToken(getTokenSigningSecret(c.env), {
       v: 1,
       uploadId: uploadToken,
       ownerUserId: user.id,
@@ -101,14 +101,16 @@ upload.post('/complete', async (c) => {
       !body.uploadToken ||
       !body.fileName ||
       !body.mimeType ||
-      !body.bytes
+      typeof body.bytes !== 'number' ||
+      !Number.isInteger(body.bytes) ||
+      body.bytes < 1
     ) {
-      return jsonError('deliveryId, objectKey, uploadToken, fileName, mimeType, bytes are required', 400)
+      return jsonError('deliveryId, objectKey, uploadToken, fileName, mimeType, bytes are required (bytes must be a positive integer)', 400)
     }
 
     await ensureAdminAndOwnedDelivery(c.env, user, body.deliveryId)
 
-    const session = await verifyUploadToken(c.env.SUPABASE_SERVICE_ROLE_KEY, body.uploadToken)
+    const session = await verifyUploadToken(getTokenSigningSecret(c.env), body.uploadToken)
     if (session.ownerUserId !== user.id) return jsonError('Upload token does not match the current admin', 403)
     if (session.deliveryId !== body.deliveryId) return jsonError('Upload token does not match this delivery', 403)
     if (session.objectKey !== body.objectKey) return jsonError('Upload token does not match this file', 403)
@@ -130,12 +132,15 @@ upload.post('/complete', async (c) => {
 
     const kind = body.mimeType.startsWith('video/') ? 'video' : 'photo'
 
+    /* Idempotency: if asset already exists for this object key, ensure
+       delivery_assets mapping exists too (heals partial-failure state). */
     const existingAssets = await supabaseRequest<Array<{ id: string }>>(
       c.env,
       `assets?r2_object_key=eq.${encodeURIComponent(body.objectKey)}&select=id&limit=1`
     )
     const existingAssetId = existingAssets[0]?.id
     if (existingAssetId) {
+      await ensureDeliveryAssetMapping(c.env, body.deliveryId, existingAssetId)
       return c.json(
         {
           ok: true,
@@ -169,19 +174,37 @@ upload.post('/complete', async (c) => {
     const assetId = insertedAssets[0]?.id
     if (!assetId) return jsonError('Asset insert failed', 500)
 
-    await supabaseRequest(
-      c.env,
-      'delivery_assets',
-      {
-        method: 'POST',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({
-          delivery_id: body.deliveryId,
-          asset_id: assetId,
-        }),
-      },
-      true
-    )
+    /* Compensating cleanup: if delivery_assets insert fails, the asset row
+       would be invisible to the gallery forever. Roll back the asset row
+       so the next attempt can re-create it cleanly. */
+    try {
+      await supabaseRequest(
+        c.env,
+        'delivery_assets',
+        {
+          method: 'POST',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            delivery_id: body.deliveryId,
+            asset_id: assetId,
+          }),
+        },
+        true
+      )
+    } catch (mappingError) {
+      // Best-effort rollback — if this fails too, manual repair is needed
+      try {
+        await supabaseRequest(
+          c.env,
+          `assets?id=eq.${encodeURIComponent(assetId)}`,
+          { method: 'DELETE', headers: { Prefer: 'return=minimal' } },
+          true
+        )
+      } catch {
+        // swallow — original error is the one to surface
+      }
+      throw mappingError
+    }
 
     return c.json(
       {

@@ -93,7 +93,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [profileDisplayName, session])
 
   const getAccessToken = async () => {
-    if (!supabase) return ''
+    /* Gate on current session state. During logout or before auth, return empty
+       so mutations in flight don't continue with an expired/bogus token. */
+    if (!supabase || !session) return ''
     const {
       data: { session: authSession },
     } = await supabase.auth.getSession()

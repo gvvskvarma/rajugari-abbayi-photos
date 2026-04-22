@@ -22,8 +22,14 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Typecheck
+      - name: Typecheck (frontend)
         run: npx tsc -p tsconfig.app.json --noEmit
+
+      - name: Typecheck (worker)
+        working-directory: worker
+        run: |
+          npm ci
+          npx tsc --noEmit
 
       - name: Test
         run: npx vitest run
