@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
 import type { Role } from '../types'
@@ -92,19 +92,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return toFirstName(profileDisplayName) || toFirstName(session.user.email) || 'LOGIN'
   }, [profileDisplayName, session])
 
-  const getAccessToken = async () => {
-    /* Gate on current session state. During logout or before auth, return empty
-       so mutations in flight don't continue with an expired/bogus token. */
+  /* Gate on current session state. During logout or before auth, return empty
+     so mutations in flight don't continue with an expired/bogus token.
+     Wrapped in useCallback so the memoized context value stays stable. */
+  const getAccessToken = useCallback(async () => {
     if (!supabase || !session) return ''
     const {
       data: { session: authSession },
     } = await supabase.auth.getSession()
     return authSession?.access_token ?? ''
-  }
+  }, [session])
 
   const value = useMemo<AuthContextValue>(
     () => ({ session, role, profileDisplayName, loginLabel, getAccessToken }),
-    [session, role, profileDisplayName, loginLabel],
+    [session, role, profileDisplayName, loginLabel, getAccessToken],
   )
 
   return <AuthContext value={value}>{children}</AuthContext>
