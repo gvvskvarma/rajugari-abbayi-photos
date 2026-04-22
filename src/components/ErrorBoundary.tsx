@@ -1,5 +1,6 @@
 import { Component } from 'react'
 import type { ErrorInfo, ReactNode } from 'react'
+import { reportError } from '../lib/sentry'
 
 type Props = { children: ReactNode }
 type State = { hasError: boolean }
@@ -16,6 +17,9 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('ErrorBoundary caught:', error, info.componentStack)
+    reportError(error, {
+      react: { componentStack: info.componentStack ?? 'unavailable' },
+    })
   }
 
   render() {

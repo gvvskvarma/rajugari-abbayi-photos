@@ -4,6 +4,7 @@ import {
   rateWindowMs, routeRateLimits, routeLimits,
   resolveAllowedOrigin, buildBaseHeaders, responseHeaders, jsonError, SAFE_ERROR_PATTERNS,
 } from './lib'
+import { reportWorkerError } from './sentry'
 
 /* ── Route modules ─────────────────────────────────────────────── */
 import { live } from './routes/live'
@@ -53,6 +54,15 @@ app.onError((error, c) => {
   const isSafe = SAFE_ERROR_PATTERNS.some((pattern) => pattern.test(message))
   const status = message.toLowerCase().includes('not found') ? 404 : 500
   console.error('[worker error]', message)
+
+  /* Fire-and-forget Sentry reporting (no-op if SENTRY_DSN unset).
+     Don't await — the user's response shouldn't wait on logging. */
+  void reportWorkerError(c.env, error, {
+    requestUrl: c.req.url,
+    requestMethod: c.req.method,
+    status,
+  })
+
   return jsonError(isSafe ? message : 'An internal error occurred', status, origin)
 })
 

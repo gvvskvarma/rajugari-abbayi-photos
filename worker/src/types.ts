@@ -56,6 +56,11 @@ export type Env = {
    * doesn't invalidate live tokens.
    */
   TOKEN_SIGNING_SECRET?: string
+  /**
+   * Optional Sentry DSN. When set (as a wrangler secret), worker errors are
+   * reported to Sentry via HTTP. Leave unset to disable.
+   */
+  SENTRY_DSN?: string
 }
 
 export type User = {

@@ -35,6 +35,28 @@ Generate optimized derivatives from originals:
 
 This creates `640/1200/1800` JPEG variants in `project-rga/optimized/...`.
 
+## Error tracking (Sentry)
+
+Frontend and worker both support optional Sentry error tracking. Leave env vars unset to disable.
+
+**Frontend (Vercel):**
+
+```bash
+# Set in Vercel dashboard → Settings → Environment Variables:
+VITE_SENTRY_DSN=https://<key>@<org>.ingest.sentry.io/<project>
+```
+
+**Worker (Cloudflare):**
+
+```bash
+cd worker
+wrangler secret put SENTRY_DSN
+# Paste the same DSN from your Sentry project (can be the same project or a
+# separate worker-scoped project — up to you).
+```
+
+When unset, both sides just log to console and move on.
+
 ## Booking form (Formspree)
 
 Set your Formspree endpoint in `.env`:

@@ -25,3 +25,4 @@ R2_BUCKET = "photography-private"
 # wrangler secret put TOKEN_SIGNING_SECRET   # random 32+ bytes (optional — falls back to SRK)
 # wrangler secret put R2_ACCESS_KEY_ID
 # wrangler secret put R2_SECRET_ACCESS_KEY
+# wrangler secret put SENTRY_DSN             # optional — error tracking

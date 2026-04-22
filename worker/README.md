@@ -36,12 +36,30 @@ wrangler secret put R2_ACCESS_KEY_ID
 wrangler secret put R2_SECRET_ACCESS_KEY
 ```
 
+## Optional Worker secrets
+
+```bash
+# Dedicated signing secret for upload/preview/download tokens.
+# If unset, falls back to SUPABASE_SERVICE_ROLE_KEY.
+# Recommended so SRK rotation doesn't invalidate live tokens.
+openssl rand -base64 48 | wrangler secret put TOKEN_SIGNING_SECRET
+
+# Sentry error tracking. Paste the DSN from your Sentry project settings.
+wrangler secret put SENTRY_DSN
+
+# (Optional but recommended) Move ANON_KEY out of wrangler.toml:
+# Current state: SUPABASE_ANON_KEY is in wrangler.toml (it's publishable with
+# role=anon, but best practice is to keep all secrets in wrangler secrets).
+wrangler secret put SUPABASE_ANON_KEY
+# Then delete the SUPABASE_ANON_KEY line from [vars] in wrangler.toml.
+```
+
 ## Required Worker vars
 
 Set in `wrangler.toml` or dashboard:
 
 - `SUPABASE_URL`
-- `SUPABASE_ANON_KEY`
+- `SUPABASE_ANON_KEY` (publishable — can also be a secret; see above)
 - `R2_ACCOUNT_ID`
 - `R2_BUCKET`
 - `APP_ORIGIN`
