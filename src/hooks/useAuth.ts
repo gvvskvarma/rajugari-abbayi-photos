@@ -22,6 +22,7 @@ export function useAuth(options?: UseAuthOptions) {
   const [authBusy, setAuthBusy] = useState(false)
 
   /* Reset auth UI when session changes (external auth state) */
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!session) return
     setAuthMenuOpen(false)
@@ -30,6 +31,7 @@ export function useAuth(options?: UseAuthOptions) {
     setAuthMessage('')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user.id])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleSendOtp = async (event: FormEvent) => {
     event.preventDefault()

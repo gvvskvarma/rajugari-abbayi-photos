@@ -123,6 +123,7 @@ export function useAdminClientDetail() {
 
   // --- effects ---
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!selectedAdminClient) {
       setAdminClientEditMode(false)
@@ -161,6 +162,7 @@ export function useAdminClientDetail() {
       setAdminLightbox({ projectId: adminLightbox.projectId, assetId: adminLightboxAssets[0].id })
     }
   }, [adminLightbox, adminLightboxAssets, adminLightboxIndex])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (!supabase || !session?.user.id || role !== 'admin' || selectedAdminVisibleAssets.length === 0) return
