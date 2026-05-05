@@ -6,14 +6,14 @@ export function useThumbnailBatch(
   assetIds: string[],
   options?: { shareToken?: string; variant?: string; getAccessToken?: () => Promise<string> },
 ) {
-  const sorted = [...assetIds].sort()
+  const normalizedAssetIds = [...new Set(assetIds.map((assetId) => assetId.trim()).filter(Boolean))].sort()
   const variant = options?.variant ?? 'thumb'
   const shareToken = options?.shareToken
   const getAccessToken = options?.getAccessToken
 
   const key = shareToken
-    ? queryKeys.shareThumbnailBatch(shareToken, sorted)
-    : queryKeys.thumbnailBatch(sorted)
+    ? queryKeys.shareThumbnailBatch(shareToken, normalizedAssetIds)
+    : queryKeys.thumbnailBatch(normalizedAssetIds)
 
   return useQuery({
     queryKey: key,
@@ -24,12 +24,12 @@ export function useThumbnailBatch(
         token,
         {
           method: 'POST',
-          body: { assetIds, variant, ...(shareToken ? { shareToken } : {}) },
+          body: { assetIds: normalizedAssetIds, variant, ...(shareToken ? { shareToken } : {}) },
         },
       )
       return payload.urls ?? {}
     },
-    enabled: assetIds.length > 0,
+    enabled: normalizedAssetIds.length > 0,
     staleTime: 10 * 60 * 1000,
   })
 }

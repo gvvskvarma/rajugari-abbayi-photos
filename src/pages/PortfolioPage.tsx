@@ -6,6 +6,7 @@ import { useHomepageGallery } from '../hooks/queries/useHomepageGallery.ts'
 import { useDocumentMeta } from '../hooks/useDocumentMeta.ts'
 import { useReveal } from '../hooks/useReveal'
 import { Lightbox } from '../components/Lightbox'
+import type { ResponsiveAsset } from '../types'
 
 type Category = 'all' | 'portraits' | 'baby' | 'events' | 'landscapes'
 
@@ -18,6 +19,18 @@ const categories: { key: Category; label: string }[] = [
   { key: 'events', label: 'Events' },
   { key: 'landscapes', label: 'Landscapes' },
 ]
+
+function interleaveAssets(groups: ResponsiveAsset[][]) {
+  const maxLength = Math.max(...groups.map((group) => group.length), 0)
+  const result: ResponsiveAsset[] = []
+  for (let index = 0; index < maxLength; index++) {
+    for (const group of groups) {
+      const asset = group[index]
+      if (asset) result.push(asset)
+    }
+  }
+  return result
+}
 
 /* ── Portfolio Page ──────────────────────────────────────────────── */
 export function PortfolioPage() {
@@ -48,34 +61,23 @@ export function PortfolioPage() {
     }
   }, [galleryData])
 
-  /* Seeded shuffle for "All" — deterministic per day, fresh each visit */
-  const shuffledAll = useMemo(() => {
-    const all = [
-      ...assetsByCategory.portraits,
-      ...assetsByCategory.baby,
-      ...assetsByCategory.events,
-      ...assetsByCategory.landscapes,
-    ]
-    const today = new Date()
-    let seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate()
-    const random = () => {
-      seed |= 0; seed = (seed + 0x6d2b79f5) | 0
-      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-    }
-    for (let i = all.length - 1; i > 0; i--) {
-      const j = Math.floor(random() * (i + 1));
-      [all[i], all[j]] = [all[j], all[i]]
-    }
-    return all
-  }, [assetsByCategory])
+  /* Curated "All" view — interleaves categories for variety without randomness */
+  const allAssets = useMemo(
+    () =>
+      interleaveAssets([
+        assetsByCategory.portraits,
+        assetsByCategory.landscapes,
+        assetsByCategory.events,
+        assetsByCategory.baby,
+      ]),
+    [assetsByCategory],
+  )
 
   /* Filtered list based on active tab */
   const filteredAssets = useMemo(() => {
-    if (activeCategory === 'all') return shuffledAll
+    if (activeCategory === 'all') return allAssets
     return assetsByCategory[activeCategory]
-  }, [activeCategory, assetsByCategory, shuffledAll])
+  }, [activeCategory, assetsByCategory, allAssets])
 
   /* eslint-disable-next-line react-hooks/set-state-in-effect -- close lightbox on category change */
   useEffect(() => setLightboxIndex(null), [activeCategory])
