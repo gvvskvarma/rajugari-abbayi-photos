@@ -1,10 +1,66 @@
 import type { Context } from 'hono'
 import type {
-  Env, User, Role, Mode, MediaVariant,
-  UploadTokenPayload, PreviewTokenPayload, DownloadTokenPayload,
-  PreviewAccessContext, AdminActivityKind, AdminActivityRow, DeliveryAssetRule,
-  ShareLinkRow, ShareLinkContext,
+  Env, Mode, MediaVariant, PreviewAccessContext, AdminActivityKind, AdminActivityRow, DeliveryAssetRule,
 } from './types'
+import {
+  buildBaseHeaders,
+  jsonError,
+  resolveAllowedOrigin,
+  responseHeaders,
+  SAFE_ERROR_PATTERNS,
+  supabaseRequest,
+} from './helpers/http'
+import {
+  createDownloadToken,
+  createPreviewToken,
+  createUploadToken,
+  getTokenSigningSecret,
+  timingSafeEqual,
+  verifyDownloadToken,
+  verifyPreviewToken,
+  verifyUploadToken,
+} from './helpers/tokens'
+import {
+  ensureAdmin,
+  ensureAdminAndOwnedDelivery,
+  ensureAdminOwnedAsset,
+  ensureDeliveryAccess,
+  ensureDeliveryAssetMapping,
+  filterUuids,
+  getShareLinkContext,
+  getUserFromBearer,
+  isUuid,
+} from './helpers/access'
+
+export {
+  buildBaseHeaders,
+  jsonError,
+  resolveAllowedOrigin,
+  responseHeaders,
+  SAFE_ERROR_PATTERNS,
+  supabaseRequest,
+} from './helpers/http'
+export {
+  createDownloadToken,
+  createPreviewToken,
+  createUploadToken,
+  getTokenSigningSecret,
+  timingSafeEqual,
+  verifyDownloadToken,
+  verifyPreviewToken,
+  verifyUploadToken,
+} from './helpers/tokens'
+export {
+  ensureAdmin,
+  ensureAdminAndOwnedDelivery,
+  ensureAdminOwnedAsset,
+  ensureDeliveryAccess,
+  ensureDeliveryAssetMapping,
+  filterUuids,
+  getShareLinkContext,
+  getUserFromBearer,
+  isUuid,
+} from './helpers/access'
 
 /* ── Constants ───────────────────────────────────────────────────── */
 
@@ -24,256 +80,6 @@ export const routeLimits: Record<string, number> = {
 
 export const MAX_SHORT_TEXT = 255
 export const MAX_LONG_TEXT = 5000
-
-/* ── CORS / Headers ──────────────────────────────────────────────── */
-
-export const resolveAllowedOrigin = (env: Env, requestOrigin?: string): string => {
-  const allowList = new Set([env.APP_ORIGIN, 'http://localhost:5173', 'http://localhost:5174'])
-  if (requestOrigin && allowList.has(requestOrigin)) return requestOrigin
-  return env.APP_ORIGIN || '*'
-}
-
-export const buildBaseHeaders = (origin: string) => ({
-  'content-type': 'application/json',
-  'access-control-allow-origin': origin,
-  'access-control-allow-headers': 'content-type,authorization',
-  'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS',
-})
-
-export const responseHeaders = (c: Context<{ Bindings: Env }>) =>
-  buildBaseHeaders(resolveAllowedOrigin(c.env, c.req.header('Origin')))
-
-export const jsonError = (message: string, status = 400, origin = '*') =>
-  new Response(JSON.stringify({ error: { message } }), {
-    status,
-    headers: buildBaseHeaders(origin),
-  })
-
-export const SAFE_ERROR_PATTERNS = [
-  /not found/i, /unauthorized/i, /forbidden/i, /expired/i,
-  /invalid.*token/i, /login.*session/i, /required/i, /already exists/i,
-]
-
-/* ── Supabase ────────────────────────────────────────────────────── */
-
-export const supabaseRequest = async <T>(
-  env: Env,
-  path: string,
-  init?: RequestInit,
-  useServiceRole = true
-): Promise<T> => {
-  const url = `${env.SUPABASE_URL}/rest/v1/${path}`
-  const apiKey = useServiceRole ? env.SUPABASE_SERVICE_ROLE_KEY : env.SUPABASE_ANON_KEY
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      apikey: apiKey,
-      Authorization: `Bearer ${apiKey}`,
-      'content-type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-  })
-
-  if (!response.ok) {
-    const text = await response.text()
-    throw new Error(`Supabase request failed (${response.status}): ${text}`)
-  }
-
-  const text = await response.text()
-  if (!text.trim()) return {} as T
-  return JSON.parse(text) as T
-}
-
-/* ── Crypto / Tokens ─────────────────────────────────────────────── */
-
-const textEncoder = new TextEncoder()
-const textDecoder = new TextDecoder()
-const uploadTokenVersion = 'v1'
-const previewTokenVersion = 'v1'
-const downloadTokenVersion = 'dt1'
-
-const bytesToBase64Url = (bytes: Uint8Array) => {
-  let binary = ''
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
-}
-
-const base64UrlEncode = (value: string) => bytesToBase64Url(textEncoder.encode(value))
-
-const base64UrlDecode = (value: string) => {
-  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
-  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
-  const binary = atob(padded)
-  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
-  return textDecoder.decode(bytes)
-}
-
-/**
- * Resolve the secret used to HMAC-sign tokens.
- * Prefers TOKEN_SIGNING_SECRET if set; otherwise falls back to SUPABASE_SERVICE_ROLE_KEY
- * for backwards compatibility with existing deployments.
- */
-export const getTokenSigningSecret = (env: Env): string =>
-  env.TOKEN_SIGNING_SECRET || env.SUPABASE_SERVICE_ROLE_KEY
-
-const signToken = async (version: string, secret: string, payloadB64: string) => {
-  const key = await crypto.subtle.importKey(
-    'raw', textEncoder.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
-  )
-  const signature = await crypto.subtle.sign('HMAC', key, textEncoder.encode(`${version}.${payloadB64}`))
-  return bytesToBase64Url(new Uint8Array(signature))
-}
-
-export const timingSafeEqual = (a: string, b: string): boolean => {
-  if (a.length !== b.length) return false
-  const aBuf = textEncoder.encode(a)
-  const bBuf = textEncoder.encode(b)
-  let mismatch = 0
-  for (let i = 0; i < aBuf.length; i++) mismatch |= aBuf[i] ^ bBuf[i]
-  return mismatch === 0
-}
-
-export const createUploadToken = async (secret: string, payload: UploadTokenPayload) => {
-  const payloadB64 = base64UrlEncode(JSON.stringify(payload))
-  const signature = await signToken(uploadTokenVersion, secret, payloadB64)
-  return `${uploadTokenVersion}.${payloadB64}.${signature}`
-}
-
-export const verifyUploadToken = async (secret: string, token: string): Promise<UploadTokenPayload> => {
-  const [version, payloadB64, signature] = token.split('.')
-  if (version !== uploadTokenVersion || !payloadB64 || !signature) throw new Error('Invalid upload token')
-  const expectedSignature = await signToken(uploadTokenVersion, secret, payloadB64)
-  if (!timingSafeEqual(expectedSignature, signature)) throw new Error('Invalid upload token')
-  const payload = JSON.parse(base64UrlDecode(payloadB64)) as UploadTokenPayload
-  if (!payload.v || !payload.uploadId || !payload.ownerUserId || !payload.deliveryId || !payload.projectId || !payload.objectKey || !payload.originalFilename || !payload.mimeType || !payload.expectedBytes || !payload.issuedAt || !payload.expiresAt) throw new Error('Invalid upload token')
-  if (new Date(payload.expiresAt).getTime() <= Date.now()) throw new Error('Upload session expired')
-  return payload
-}
-
-export const createPreviewToken = async (secret: string, payload: PreviewTokenPayload) => {
-  const payloadB64 = base64UrlEncode(JSON.stringify(payload))
-  const signature = await signToken(previewTokenVersion, secret, payloadB64)
-  return `${previewTokenVersion}.${payloadB64}.${signature}`
-}
-
-export const verifyPreviewToken = async (secret: string, token: string): Promise<PreviewTokenPayload> => {
-  const [version, payloadB64, signature] = token.split('.')
-  if (version !== previewTokenVersion || !payloadB64 || !signature) throw new Error('Invalid preview token')
-  const expectedSignature = await signToken(previewTokenVersion, secret, payloadB64)
-  if (!timingSafeEqual(expectedSignature, signature)) throw new Error('Invalid preview token')
-  const payload = JSON.parse(base64UrlDecode(payloadB64)) as PreviewTokenPayload
-  if (!payload.v || !payload.assetId || !payload.deliveryId || !payload.issuedAt || !payload.expiresAt) throw new Error('Invalid preview token')
-  if (new Date(payload.expiresAt).getTime() <= Date.now()) throw new Error('Preview token expired')
-  return payload
-}
-
-export const createDownloadToken = async (secret: string, payload: DownloadTokenPayload) => {
-  const payloadB64 = base64UrlEncode(JSON.stringify(payload))
-  const signature = await signToken(downloadTokenVersion, secret, payloadB64)
-  return `${downloadTokenVersion}.${payloadB64}.${signature}`
-}
-
-export const verifyDownloadToken = async (secret: string, token: string): Promise<DownloadTokenPayload> => {
-  const [version, payloadB64, signature] = token.split('.')
-  if (version !== downloadTokenVersion || !payloadB64 || !signature) throw new Error('Invalid download token')
-  const expectedSignature = await signToken(downloadTokenVersion, secret, payloadB64)
-  if (!timingSafeEqual(expectedSignature, signature)) throw new Error('Invalid download token')
-  const payload = JSON.parse(base64UrlDecode(payloadB64)) as DownloadTokenPayload
-  if (!payload.v || !payload.assetId || !payload.deliveryId || !payload.r2ObjectKey || !payload.issuedAt || !payload.expiresAt) throw new Error('Invalid download token')
-  if (new Date(payload.expiresAt).getTime() <= Date.now()) throw new Error('Download token expired')
-  return payload
-}
-
-/* ── Auth ─────────────────────────────────────────────────────────── */
-
-export const getUserFromBearer = async (env: Env, authHeader?: string): Promise<User> => {
-  if (!authHeader?.startsWith('Bearer ')) throw new Error('Missing bearer token')
-  const jwt = authHeader.slice('Bearer '.length)
-  const authRes = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
-    headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: `Bearer ${jwt}` },
-  })
-  if (!authRes.ok) throw new Error('Invalid session token')
-  const authUser = (await authRes.json()) as { id: string; email?: string }
-  const email = (authUser.email ?? '').toLowerCase()
-  if (!email) throw new Error('Email not available in session')
-  const profiles = await supabaseRequest<Array<{ role: Role }>>(env, `profiles?id=eq.${encodeURIComponent(authUser.id)}&select=role&limit=1`)
-  const role = profiles[0]?.role === 'admin' ? 'admin' : 'customer'
-  return { id: authUser.id, email, role }
-}
-
-export const ensureAdmin = (user: User) => {
-  if (user.role !== 'admin') throw new Error('Admin access required')
-}
-
-export const ensureDeliveryAccess = async (
-  env: Env, user: User, deliveryId: string, mode: Mode
-): Promise<'owner' | 'viewer' | 'admin'> => {
-  if (user.role === 'admin') {
-    const adminDeliveries = await supabaseRequest<Array<{ id: string }>>(env, `deliveries?id=eq.${encodeURIComponent(deliveryId)}&owner_user_id=eq.${encodeURIComponent(user.id)}&select=id&limit=1`)
-    if (adminDeliveries[0]) return 'admin'
-  }
-  const recipients = await supabaseRequest<Array<{ access_mode: 'owner' | 'viewer'; expires_at: string | null }>>(env, `delivery_recipients?delivery_id=eq.${encodeURIComponent(deliveryId)}&email=eq.${encodeURIComponent(user.email)}&select=access_mode,expires_at&limit=1`)
-  const recipient = recipients[0]
-  if (!recipient) throw new Error('No access to this delivery')
-  if (recipient.expires_at && new Date(recipient.expires_at).getTime() <= Date.now()) throw new Error('Delivery has expired')
-  if (mode === 'download' && recipient.access_mode !== 'owner') throw new Error('Download not allowed for viewer access')
-  return recipient.access_mode
-}
-
-export const ensureAdminAndOwnedDelivery = async (env: Env, user: User, deliveryId: string) => {
-  if (user.role !== 'admin') throw new Error('Admin access required')
-  const deliveries = await supabaseRequest<Array<{ id: string }>>(env, `deliveries?id=eq.${encodeURIComponent(deliveryId)}&owner_user_id=eq.${encodeURIComponent(user.id)}&select=id&limit=1`)
-  if (!deliveries[0]) throw new Error('Delivery not found or not owned by admin')
-}
-
-/**
- * Idempotent: ensure a delivery_assets mapping exists for (deliveryId, assetId).
- * Heals upload finalize partial failures where assets row was created but the
- * mapping row failed to insert, leaving the file invisible to the gallery.
- */
-/**
- * Validate that a string is a UUID. Used before interpolating user-supplied IDs
- * into PostgREST `or=(id.eq.X,...)` filters — PostgREST treats `,` and `)` as
- * structural, so a crafted ID could otherwise alter the filter semantics.
- */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-export const isUuid = (value: unknown): value is string =>
-  typeof value === 'string' && UUID_RE.test(value)
-
-/**
- * Filter an array down to valid UUIDs. Anything that doesn't match is silently
- * dropped — caller should check `result.length === input.length` if a mismatch
- * should fail loudly.
- */
-export const filterUuids = (values: unknown[]): string[] =>
-  values.filter(isUuid)
-
-export const ensureDeliveryAssetMapping = async (env: Env, deliveryId: string, assetId: string) => {
-  const existing = await supabaseRequest<Array<{ asset_id: string }>>(
-    env,
-    `delivery_assets?delivery_id=eq.${encodeURIComponent(deliveryId)}&asset_id=eq.${encodeURIComponent(assetId)}&select=asset_id&limit=1`
-  )
-  if (existing[0]) return
-  await supabaseRequest(
-    env,
-    'delivery_assets',
-    {
-      method: 'POST',
-      headers: { Prefer: 'return=minimal' },
-      body: JSON.stringify({ delivery_id: deliveryId, asset_id: assetId }),
-    },
-    true
-  )
-}
-
-export const ensureAdminOwnedAsset = async (env: Env, user: User, assetId: string) => {
-  ensureAdmin(user)
-  const assets = await supabaseRequest<Array<{ id: string; r2_object_key: string }>>(env, `assets?id=eq.${encodeURIComponent(assetId)}&owner_user_id=eq.${encodeURIComponent(user.id)}&select=id,r2_object_key&limit=1`)
-  const asset = assets[0]
-  if (!asset) throw new Error('Asset not found or not owned by admin')
-  return asset
-}
 
 /* ── R2 / Signed URLs ────────────────────────────────────────────── */
 
@@ -398,17 +204,6 @@ export const getDeliveryAssetRules = async (env: Env, deliveryId: string): Promi
   const rows = await supabaseRequest<Array<{ asset_id: string }>>(env, `delivery_assets?delivery_id=eq.${encodeURIComponent(deliveryId)}&select=asset_id`)
   return new Map(rows.map((row) => [row.asset_id, { assetId: row.asset_id, canView: true, canDownload: true }]))
 }
-
-export const getShareLinkContext = async (env: Env, token: string): Promise<ShareLinkContext | null> => {
-  const links = await supabaseRequest<Array<ShareLinkRow>>(env, `share_links?token=eq.${encodeURIComponent(token)}&select=id,delivery_id,allow_download,expires_at,scope_type&limit=1`)
-  const link = links[0]
-  if (!link) return null
-  const selectedAssetIds = link.scope_type === 'selected'
-    ? new Set((await supabaseRequest<Array<{ asset_id: string }>>(env, `share_link_assets?share_link_id=eq.${encodeURIComponent(link.id)}&select=asset_id`)).map((row) => row.asset_id))
-    : new Set<string>()
-  return { link, selectedAssetIds }
-}
-
 /* ── Admin Activity ──────────────────────────────────────────────── */
 
 export const normalizeActivityMetadata = (value: unknown) => {
