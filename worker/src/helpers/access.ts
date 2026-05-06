@@ -1,4 +1,4 @@
-import type { AdminActivityKind, DeliveryAssetRule, Env, Mode, PreviewAccessContext, Role, ShareLinkContext, ShareLinkRow, User } from '../types'
+import type { Env, Mode, Role, ShareLinkContext, ShareLinkRow, User } from '../types'
 import { supabaseRequest } from './http'
 
 export const getUserFromBearer = async (env: Env, authHeader?: string): Promise<User> => {
