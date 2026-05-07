@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { motion, useReducedMotion } from 'framer-motion'
 import { useFocusTrap } from '../hooks/useFocusTrap'
-import { lightboxBackdrop, lightboxLayoutTransition } from '../lib/motion'
 
 interface LightboxProps {
   /** Unique key for the current image (triggers slide animation on change) */
@@ -19,13 +17,6 @@ interface LightboxProps {
   renderImage: (props: { slideClass: string }) => ReactNode
   /** Optional bottom bar content (counter is always shown) */
   bottomBar?: ReactNode
-  /**
-   * Optional layoutId shared with the source thumbnail so Framer animates
-   * the image scaling from its grid position to fullscreen on open. Pass
-   * `undefined` to disable the shared-layout transition (e.g. when the
-   * user prefers reduced motion).
-   */
-  sharedLayoutId?: string
 }
 
 export function Lightbox({
@@ -36,12 +27,10 @@ export function Lightbox({
   onMove,
   renderImage,
   bottomBar,
-  sharedLayoutId,
 }: LightboxProps) {
   const trapRef = useFocusTrap(true)
   const touchStartRef = useRef<number | null>(null)
   const [slideDirection, setSlideDirection] = useState<'left' | 'right' | null>(null)
-  const reduceMotion = useReducedMotion()
 
   const hasPrev = index > 0
   const hasNext = index < total - 1
@@ -94,10 +83,10 @@ export function Lightbox({
   }
 
   const slideClass = slideDirection ? `lightbox-slide-${slideDirection}` : ''
-  const useSharedLayout = !reduceMotion && Boolean(sharedLayoutId)
 
   return (
-    <motion.div
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- dialog backdrop dismiss
+    <div
       ref={trapRef}
       className="customer-lightbox"
       role="dialog"
@@ -118,10 +107,6 @@ export function Lightbox({
         if (Math.abs(delta) < 48) return
         handleMove(delta < 0 ? 'next' : 'prev')
       }}
-      variants={lightboxBackdrop}
-      initial="initial"
-      animate="animate"
-      exit="exit"
     >
       {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- stop propagation on panel */}
       <div
@@ -139,12 +124,10 @@ export function Lightbox({
           ✕
         </button>
 
-        <motion.div
+        <div
           className={`customer-lightbox-stage ${slideClass}`}
           onClick={handleStageClick}
           role="presentation"
-          layoutId={useSharedLayout ? sharedLayoutId : undefined}
-          transition={useSharedLayout ? lightboxLayoutTransition : undefined}
         >
           {renderImage({ slideClass })}
 
@@ -174,7 +157,7 @@ export function Lightbox({
               ›
             </button>
           )}
-        </motion.div>
+        </div>
 
         <div className="customer-lightbox-bar">
           <span className="customer-lightbox-counter">
@@ -183,6 +166,6 @@ export function Lightbox({
           {bottomBar}
         </div>
       </div>
-    </motion.div>
+    </div>
   )
 }

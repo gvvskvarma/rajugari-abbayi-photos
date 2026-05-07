@@ -226,6 +226,59 @@ row-ID juggling, simple `WHERE` clauses, easy to reason about.
 
 ---
 
+## 8. Tried Framer Motion on the public pages. Reverted.
+
+**Picked at first:** Framer Motion for page transitions, hero stagger, hover
+lift on portfolio thumbs, and a shared-`layoutId` open/close transition for
+the lightbox.
+
+**Then rolled it all back.** The library itself is fine — the use case
+wasn't.
+
+**What broke:**
+
+- **Existing CSS already does animation.** `useReveal` for scroll fade-ins,
+  CSS `transition` rules on `.portfolio-thumb`, the lightbox's own slide
+  animation between images. Adding Framer Motion on top didn't replace those
+  systems — it ran in parallel. The browser tried to honor both and the
+  result was visible jitter on hover and during page mount.
+- **`layoutId` between thumb and fullscreen is a bad shape match.** A 400px
+  thumbnail expanding into a 1920px fullscreen image is a 4-5x scale. The
+  pattern is designed for "card grows into a focused detail view at 80vw,"
+  not "thumbnail explodes into fullscreen." It read as an aggressive zoom on
+  every open and the image's `object-fit` did its own re-cropping mid-flight.
+- **The page layout has no breathing room.** Dense sections, no whitespace
+  between them. Motion lives in the gaps; my site doesn't have gaps because
+  it's information-dense by design. To do motion well I'd need to redesign
+  the public pages with bigger sections and more whitespace first — a
+  redesign, not a motion pass.
+- **Bundle cost was real.** ~42 KB gzipped on the index chunk for animations
+  that didn't land cleanly was a bad trade.
+
+**What I learned:**
+
+- Photography sites are won by photos, not chrome. The best wedding /
+  portrait portfolio sites are visually restrained — they let the photos do
+  the work and stay out of the way. Motion-rich design is a different genre.
+- Existing animation systems and a motion library don't compose. You either
+  go all-in on the library and rip out the CSS, or you stay with CSS and skip
+  the library. A halfway state fights itself.
+- A motion library's bundle weight should be earned per moment, not
+  preemptively committed.
+
+**What I kept:**
+
+- The lightbox slide animation between images (existing CSS, no library)
+- `useReveal` scroll fade-ins (existing custom hook)
+- Hover scale and transitions on cards (existing CSS)
+
+**Skill demonstrated, honestly:** knowing when *not* to add a library.
+Reverting a library you spent half a day wiring up is harder than ignoring
+the temptation in the first place — but cheaper than shipping janky
+animations that distract from the actual content.
+
+---
+
 ## What I'd revisit
 
 In rough order of how much it'd matter:

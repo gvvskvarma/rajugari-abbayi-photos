@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { createResponsiveAsset, ResponsiveImage } from '../lib/media.tsx'
 import { fallbackPortraits, fallbackBaby, fallbackEvents, fallbackLandscapes } from '../lib/galleryFallbacks'
 import { useHomepageGallery } from '../hooks/queries/useHomepageGallery.ts'
 import { useDocumentMeta } from '../hooks/useDocumentMeta.ts'
 import { useReveal } from '../hooks/useReveal'
 import { Lightbox } from '../components/Lightbox'
-import { cardHover, cardHoverTransition } from '../lib/motion'
 import type { ResponsiveAsset } from '../types'
 
 type Category = 'all' | 'portraits' | 'baby' | 'events' | 'landscapes'
@@ -39,10 +37,12 @@ export function PortfolioPage() {
   useDocumentMeta('Portfolio', 'Curated portraits, baby shoots, events, and landscapes by Rajugari Abbayi Photography.')
   const [searchParams] = useSearchParams()
 
-  /* Read initial tab from ?tab= query param, default to portraits */
+  /* Read initial tab from ?tab= query param. Default to 'all' so the nav
+     "Work" link lands on the curated mix; deep-links from the homepage
+     gallery still use ?tab=portraits / ?tab=events / etc. */
   const initialTab = (() => {
     const param = searchParams.get('tab')?.toLowerCase() as Category | undefined
-    return param && validCategories.includes(param) ? param : 'portraits'
+    return param && validCategories.includes(param) ? param : 'all'
   })()
 
   const [activeCategory, setActiveCategory] = useState<Category>(initialTab)
@@ -84,17 +84,6 @@ export function PortfolioPage() {
   /* eslint-disable-next-line react-hooks/set-state-in-effect -- close lightbox on category change */
   useEffect(() => setLightboxIndex(null), [activeCategory])
 
-  const reduceMotion = useReducedMotion()
-  const hoverProps = reduceMotion
-    ? {}
-    : {
-        variants: cardHover,
-        initial: 'rest' as const,
-        whileHover: 'hover' as const,
-        whileTap: 'tap' as const,
-        transition: cardHoverTransition,
-      }
-
   return (
     <>
       {/* ── HERO ── */}
@@ -126,14 +115,12 @@ export function PortfolioPage() {
         {/* Image grid */}
         <div className="portfolio-grid">
           {filteredAssets.map((asset, idx) => (
-            <motion.button
+            <button
               key={asset.key}
               type="button"
               className="portfolio-thumb"
               onClick={() => setLightboxIndex(idx)}
               aria-label={`View photo ${idx + 1}`}
-              layoutId={reduceMotion ? undefined : `portfolio-thumb-${asset.key}`}
-              {...hoverProps}
             >
               <ResponsiveImage
                 asset={asset}
@@ -142,13 +129,12 @@ export function PortfolioPage() {
                 sizes="(min-width: 980px) 33vw, (min-width: 680px) 50vw, 100vw"
                 loading={idx < 6 ? 'eager' : 'lazy'}
               />
-            </motion.button>
+            </button>
           ))}
         </div>
       </section>
 
       {/* ── LIGHTBOX ── */}
-      <AnimatePresence>
       {lightboxIndex !== null && (
         <Lightbox
           imageKey={filteredAssets[lightboxIndex].key}
@@ -163,9 +149,6 @@ export function PortfolioPage() {
                 : Math.max(prev - 1, 0)
             })
           }
-          sharedLayoutId={
-            reduceMotion ? undefined : `portfolio-thumb-${filteredAssets[lightboxIndex].key}`
-          }
           renderImage={() => (
             <ResponsiveImage
               key={filteredAssets[lightboxIndex].key}
@@ -177,7 +160,6 @@ export function PortfolioPage() {
           )}
         />
       )}
-      </AnimatePresence>
     </>
   )
 }
