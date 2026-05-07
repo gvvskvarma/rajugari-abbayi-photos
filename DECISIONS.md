@@ -151,6 +151,29 @@ hostile. Took ~two evenings to get a stable signed URL.
 finalize. The signed URL is bound to a worker-issued JWT pinned to
 `(deliveryId, projectId, objectKey, expectedBytes, mimeType)`.
 
+```mermaid
+sequenceDiagram
+  participant Client as Browser (Admin)
+  participant Worker
+  participant Supabase
+  participant R2
+
+  Client->>Worker: POST /upload/request<br/>(deliveryId, fileName, size, mimeType)
+  Worker->>Supabase: Verify admin owns delivery
+  Worker->>Worker: Issue JWT pinned to<br/>(deliveryId, projectId, objectKey,<br/>expectedBytes, mimeType)
+  Worker-->>Client: Pre-signed R2 PUT URL<br/>+ upload token
+
+  Client->>R2: PUT file directly
+  R2-->>Client: 200 OK
+
+  Client->>Worker: POST /upload/complete<br/>(token, objectKey, bytes)
+  Worker->>Worker: Verify token claims<br/>match request
+  Worker->>Supabase: INSERT asset row
+  Worker->>Supabase: INSERT delivery_assets mapping
+  Note over Worker,Supabase: If mapping fails,<br/>asset row is rolled back<br/>so retry is clean
+  Worker-->>Client: 200 OK + assetId
+```
+
 **Why:**
 - Workers have a 100 MB request-body limit on the free tier. Even medium
   photos exceed it; raw event coverage is impossible

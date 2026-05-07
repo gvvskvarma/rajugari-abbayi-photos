@@ -39,7 +39,38 @@ The off-the-shelf tools work, but they didn't fit how I shoot:
 | Auth | Supabase email-OTP | Passwordless, no password reset flow to build |
 | Error tracking | Sentry (frontend + worker) | Opt-in via env, lightweight HTTP integration on the worker |
 
-Architecture diagram and trade-offs live in [`DECISIONS.md`](DECISIONS.md).
+```mermaid
+flowchart LR
+  subgraph Browser
+    UI["React 19 + Vite<br/>(public + admin + share)"]
+  end
+
+  subgraph Vercel
+    Static["Static hosting<br/>(SPA + assets)"]
+  end
+
+  subgraph Cloudflare["Cloudflare Edge"]
+    Worker["Hono Worker<br/>routes: admin, customer,<br/>delivery, live, media, upload"]
+    R2[("R2 Bucket<br/>photo storage")]
+  end
+
+  subgraph Supabase
+    Auth["Auth<br/>(email-OTP)"]
+    DB[("Postgres + RLS<br/>profiles, deliveries,<br/>assets, share_links")]
+  end
+
+  UI -->|HTML / JS| Static
+  UI -->|JWT Bearer| Worker
+  UI -->|email-OTP login| Auth
+  Worker -->|service role| DB
+  Worker -->|signed URLs| R2
+  UI -. signed URL upload/download .-> R2
+```
+
+The dotted line is the key shape: clients upload and download photos
+**directly to/from R2** using short-lived signed URLs that the worker issues —
+the worker itself never proxies the bytes. See [`DECISIONS.md`](DECISIONS.md)
+for the full trade-offs.
 
 ## Engineering highlights
 
