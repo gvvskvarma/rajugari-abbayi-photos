@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import { motion, useReducedMotion } from 'framer-motion'
 import { createResponsiveAsset, ResponsiveImage } from '../lib/media.tsx'
 import { instagramUrl, contactEmail } from '../lib/constants'
 import { fallbackLandscapes, fallbackBaby, fallbackPortraits, fallbackEvents } from '../lib/galleryFallbacks'
@@ -7,7 +6,6 @@ import { RotatingGallery } from '../components/RotatingGallery.tsx'
 import { useHomepageGallery } from '../hooks/queries/useHomepageGallery.ts'
 import { useReveal } from '../hooks/useReveal'
 import { useDocumentMeta } from '../hooks/useDocumentMeta.ts'
-import { staggerContainer, staggerItem } from '../lib/motion'
 
 /* ── Service cards data ───────────────────────────────────────────── */
 const services = [
@@ -73,13 +71,6 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
   const workRef = useReveal<HTMLElement>()
   const contactRef = useReveal<HTMLElement>()
 
-  /* Disable hero stagger animation if user prefers reduced motion */
-  const reduceMotion = useReducedMotion()
-  const motionProps = reduceMotion
-    ? {}
-    : { variants: staggerContainer, initial: 'initial' as const, animate: 'animate' as const }
-  const itemProps = reduceMotion ? {} : { variants: staggerItem }
-
   return (
     <>
       {/* ── HERO ── */}
@@ -97,23 +88,23 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
           )}
           <div className="hero-v2-overlay" />
         </div>
-        <motion.div className="hero-v2-content" {...motionProps}>
-          <motion.p className="eyebrow" {...itemProps}>Rajugari Abbayi Photography</motion.p>
-          <motion.h1 {...itemProps}>Your moments.</motion.h1>
-          <motion.p className="hero-v2-tagline" {...itemProps}>Made&nbsp;iconic.</motion.p>
-          <motion.p className="lead" {...itemProps}>
+        <div className="hero-v2-content">
+          <p className="eyebrow">Rajugari Abbayi Photography</p>
+          <h1>Your moments.</h1>
+          <p className="hero-v2-tagline">Made&nbsp;iconic.</p>
+          <p className="lead">
             Bold portraits, cinematic events, candid magic — I turn everyday
             moments into visuals you'll keep coming back to.
-          </motion.p>
-          <motion.div className="hero-actions" {...itemProps}>
+          </p>
+          <div className="hero-actions">
             <a className="button primary" href="/book">
               Start your story
             </a>
             <a className="button ghost" href="/work">
               View my work
             </a>
-          </motion.div>
-        </motion.div>
+          </div>
+        </div>
 
         {/* Stats strip */}
         <div className="hero-stats">

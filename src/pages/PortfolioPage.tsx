@@ -7,7 +7,7 @@ import { useHomepageGallery } from '../hooks/queries/useHomepageGallery.ts'
 import { useDocumentMeta } from '../hooks/useDocumentMeta.ts'
 import { useReveal } from '../hooks/useReveal'
 import { Lightbox } from '../components/Lightbox'
-import { cardHover, cardHoverTransition, lightboxLayoutTransition } from '../lib/motion'
+import { cardHover, cardHoverTransition } from '../lib/motion'
 import type { ResponsiveAsset } from '../types'
 
 type Category = 'all' | 'portraits' | 'baby' | 'events' | 'landscapes'
@@ -94,9 +94,6 @@ export function PortfolioPage() {
         whileTap: 'tap' as const,
         transition: cardHoverTransition,
       }
-  const layoutProps = reduceMotion
-    ? {}
-    : { layout: true, transition: lightboxLayoutTransition }
 
   return (
     <>
@@ -137,7 +134,6 @@ export function PortfolioPage() {
               aria-label={`View photo ${idx + 1}`}
               layoutId={reduceMotion ? undefined : `portfolio-thumb-${asset.key}`}
               {...hoverProps}
-              {...layoutProps}
             >
               <ResponsiveImage
                 asset={asset}
