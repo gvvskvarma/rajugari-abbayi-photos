@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { createResponsiveAsset, ResponsiveImage } from '../lib/media.tsx'
 import { fallbackPortraits, fallbackBaby, fallbackEvents, fallbackLandscapes } from '../lib/galleryFallbacks'
 import { useHomepageGallery } from '../hooks/queries/useHomepageGallery.ts'
 import { useDocumentMeta } from '../hooks/useDocumentMeta.ts'
 import { useReveal } from '../hooks/useReveal'
 import { Lightbox } from '../components/Lightbox'
+import { cardHover, cardHoverTransition, lightboxLayoutTransition } from '../lib/motion'
 import type { ResponsiveAsset } from '../types'
 
 type Category = 'all' | 'portraits' | 'baby' | 'events' | 'landscapes'
@@ -82,6 +84,20 @@ export function PortfolioPage() {
   /* eslint-disable-next-line react-hooks/set-state-in-effect -- close lightbox on category change */
   useEffect(() => setLightboxIndex(null), [activeCategory])
 
+  const reduceMotion = useReducedMotion()
+  const hoverProps = reduceMotion
+    ? {}
+    : {
+        variants: cardHover,
+        initial: 'rest' as const,
+        whileHover: 'hover' as const,
+        whileTap: 'tap' as const,
+        transition: cardHoverTransition,
+      }
+  const layoutProps = reduceMotion
+    ? {}
+    : { layout: true, transition: lightboxLayoutTransition }
+
   return (
     <>
       {/* ── HERO ── */}
@@ -113,12 +129,15 @@ export function PortfolioPage() {
         {/* Image grid */}
         <div className="portfolio-grid">
           {filteredAssets.map((asset, idx) => (
-            <button
+            <motion.button
               key={asset.key}
               type="button"
               className="portfolio-thumb"
               onClick={() => setLightboxIndex(idx)}
               aria-label={`View photo ${idx + 1}`}
+              layoutId={reduceMotion ? undefined : `portfolio-thumb-${asset.key}`}
+              {...hoverProps}
+              {...layoutProps}
             >
               <ResponsiveImage
                 asset={asset}
@@ -127,12 +146,13 @@ export function PortfolioPage() {
                 sizes="(min-width: 980px) 33vw, (min-width: 680px) 50vw, 100vw"
                 loading={idx < 6 ? 'eager' : 'lazy'}
               />
-            </button>
+            </motion.button>
           ))}
         </div>
       </section>
 
       {/* ── LIGHTBOX ── */}
+      <AnimatePresence>
       {lightboxIndex !== null && (
         <Lightbox
           imageKey={filteredAssets[lightboxIndex].key}
@@ -147,6 +167,9 @@ export function PortfolioPage() {
                 : Math.max(prev - 1, 0)
             })
           }
+          sharedLayoutId={
+            reduceMotion ? undefined : `portfolio-thumb-${filteredAssets[lightboxIndex].key}`
+          }
           renderImage={() => (
             <ResponsiveImage
               key={filteredAssets[lightboxIndex].key}
@@ -158,6 +181,7 @@ export function PortfolioPage() {
           )}
         />
       )}
+      </AnimatePresence>
     </>
   )
 }

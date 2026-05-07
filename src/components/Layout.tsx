@@ -1,5 +1,6 @@
-import { Outlet, useNavigate } from 'react-router-dom'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import '../App.css'
 import { isSupabaseConfigured } from '../lib/supabase'
 import { useAuthContext } from '../context/AuthContext'
@@ -8,6 +9,46 @@ import { useLiveConfig } from '../hooks/queries/useLiveConfig'
 import { personalInstagramUrl } from '../lib/constants'
 import { queryClient } from '../lib/queryClient'
 import { AuthProvider } from '../context/AuthContext'
+import { pageTransition, pageTransitionDuration } from '../lib/motion'
+
+/**
+ * Public, content-leaning routes get a subtle fade + Y-shift transition on
+ * navigation. Tool-style routes (admin / upload / my-pictures / share) opt
+ * out — motion there reads as friction.
+ */
+const ANIMATED_PATHS = new Set<string>([
+  '/',
+  '/work',
+  '/portfolio',
+  '/about',
+  '/live',
+  '/book',
+])
+
+function AnimatedOutlet() {
+  const location = useLocation()
+  const reduceMotion = useReducedMotion()
+
+  // Tool/admin pages skip the transition entirely
+  const shouldAnimate = ANIMATED_PATHS.has(location.pathname) && !reduceMotion
+
+  if (!shouldAnimate) return <Outlet />
+
+  return (
+    <AnimatePresence mode="wait">
+      <motion.div
+        key={location.pathname}
+        variants={pageTransition}
+        initial="initial"
+        animate="animate"
+        exit="exit"
+        transition={pageTransitionDuration}
+      >
+        <Outlet />
+      </motion.div>
+    </AnimatePresence>
+  )
+}
 
 function LayoutInner() {
   const navigate = useNavigate()
@@ -149,7 +190,7 @@ function LayoutInner() {
       </header>
 
       <main id="main-content">
-        <Outlet />
+        <AnimatedOutlet />
       </main>
 
       <footer className="footer">
