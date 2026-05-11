@@ -1,11 +1,19 @@
-/* Google Fonts loaded via <link> in index.html for non-blocking preconnect */
+/* Google Fonts loaded via <link> in index.html for non-blocking preconnect.
+   Twigs font lives in /public/fonts/ for a stable URL so it can be
+   preloaded from index.html — see the <link rel="preload"> there. */
 
 @font-face {
   font-family: 'Twigs';
-  src: url('./assets/fonts/Twigs.otf') format('opentype');
+  src: url('/fonts/Twigs.otf') format('opentype');
   font-weight: 400;
   font-style: normal;
-  font-display: swap;
+  /* `optional` means: use the fallback if the font hasn't loaded in time,
+     and NEVER swap once it arrives. Combined with a preload above, the font
+     reliably arrives before render — but if it ever doesn't, we accept the
+     fallback rendering forever rather than triggering a layout-shifting swap.
+     Eliminates the CLS that `swap` causes on the hero h1 (Twigs has very
+     different metrics from the system serif fallback). */
+  font-display: optional;
 }
 
 :root {
