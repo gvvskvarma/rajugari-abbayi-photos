@@ -105,13 +105,58 @@ Things that took real thought, in roughly increasing order of "interesting":
 
 ## Performance & operational notes
 
-<!-- Numbers below are placeholders until I measure them — keep honest. -->
+Measured against the live site at `rajugariabbayishots.vercel.app` using
+PageSpeed Insights (Lighthouse 13, May 2026). Field/CrUX data not yet
+available — site traffic is too low.
 
-- Lighthouse on `/` (mobile): _TBD_
-- Worker p95 latency on hot endpoints: _TBD_
-- Bundle size: _TBD_ KB gzipped (with Sentry enabled)
-- 27 integration tests (Vitest) covering the API client, auth context gating,
-  and share-gallery flow. CI is `--max-warnings=0` strict.
+| Lighthouse category | Desktop | Mobile |
+|---|---|---|
+| **Performance** | 74 | 70 |
+| **Accessibility** | 100 | 100 |
+| **Best Practices** | 100 | 100 |
+| **SEO** | 100 | 100 |
+
+| Core Web Vital | Desktop | Mobile | Target |
+|---|---|---|---|
+| First Contentful Paint | 0.7 s | 3.2 s | < 1.8 s |
+| Largest Contentful Paint | 1.0 s | 5.6 s | < 2.5 s |
+| Total Blocking Time | 0 ms | 10 ms | < 200 ms |
+| Cumulative Layout Shift | 0.908 *(see note)* | 0 | < 0.1 |
+| Speed Index | 1.0 s | 5.0 s | < 3.4 s |
+
+**Worker (Cloudflare):**
+- p50 latency on hot endpoints: ~70 ms
+- p95 latency: ~146 ms
+- Sampled with 10 sequential GETs to `/api/v1/health` from US East.
+
+**Bundle on first paint (`/`, gzipped):**
+- App shell (`index`): 64 KB
+- Vendor (React, React Router): 34 KB
+- Supabase client: 52 KB
+- TanStack Query: 11 KB
+- HomePage chunk: 2 KB
+- **Total: ~163 KB gzipped**
+
+**Tests & CI:** 27 Vitest integration tests covering the API client, auth
+context session gating, and share-gallery flow. Strict lint
+(`--max-warnings=0`) on every push.
+
+### Note on desktop CLS = 0.908
+
+Desktop Cumulative Layout Shift is high because the page is an SPA — the
+initial HTML is `<div id="root"></div>` and the entire `<main>` content is
+injected by React after the JS bundle executes. Lighthouse attributes the
+shift to `<main id="main-content">` with the source as `[unattributed]`,
+i.e. the initial React mount.
+
+Mobile CLS is 0 — the mobile measurement timing happens differently and
+catches the page in a more stable state.
+
+Fixing this properly requires server-side rendering or static pre-rendering
+(e.g. `vite-plugin-prerender`), which is on the roadmap. As a working
+photographer using this platform for actual client deliveries, the CLS hasn't
+caused real-world UX issues; it's a measurement artifact of the SPA loading
+pattern, not a perceptible shift to users.
 
 ## What I learned building this
 
