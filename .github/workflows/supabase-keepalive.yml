@@ -1,0 +1,45 @@
+# Keep the Supabase free-tier project from auto-pausing after 7 days
+# of inactivity. We hit the REST endpoint daily — any query counts as
+# DB activity, and 30 requests/month is invisible against the free
+# tier's 500k/month quota.
+#
+# Required secrets (Repo → Settings → Secrets and variables → Actions):
+#   SUPABASE_URL          e.g. https://abcdefgh.supabase.co
+#   SUPABASE_ANON_KEY     the publishable anon key from Project Settings → API
+name: Supabase Keep-Alive
+
+on:
+  schedule:
+    # 13:07 UTC daily (offset minute avoids the on-the-hour cron rush)
+    - cron: "7 13 * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping Supabase REST (rajugari-abbayi-photos)
+        env:
+          URL: ${{ secrets.SUPABASE_URL }}
+          KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$KEY" ]; then
+            echo "::error::SUPABASE_URL or SUPABASE_ANON_KEY is missing"
+            exit 1
+          fi
+          # `profiles` exists in this project's schema; a SELECT-with-limit-1
+          # is enough to register DB activity. RLS may return 0 rows for an
+          # anonymous caller — that's fine; the query still hits Postgres.
+          STATUS=$(curl -sS -o /tmp/out -w "%{http_code}" \
+            "$URL/rest/v1/profiles?select=id&limit=1" \
+            -H "apikey: $KEY" \
+            -H "Authorization: Bearer $KEY")
+          echo "HTTP $STATUS"
+          head -c 400 /tmp/out; echo
+          # 200 (ok), 206 (partial content), and 401 (RLS-blocked but DB queried)
+          # all count as the project being reached. Anything else is a real failure.
+          case "$STATUS" in
+            200|206|401) exit 0 ;;
+            *) echo "::error::Unexpected status $STATUS"; exit 1 ;;
+          esac
