@@ -710,7 +710,17 @@ admin.post('/deliveries/:deliveryId/notify', async (c) => {
       responseHeaders(c)
     )
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : 'Failed to notify client', 500)
+    /* Map known failure classes to honest status codes. Auth/authorization
+       and not-found errors are client errors (4xx); anything else (Supabase
+       down, Resend down, unexpected) is a genuine 5xx. Returning 500 for an
+       auth failure would mislead monitoring and the admin UI. */
+    const message = error instanceof Error ? error.message : 'Failed to notify client'
+    const status =
+      /bearer token|session token|not available in session/i.test(message) ? 401 :
+      /admin access/i.test(message) ? 403 :
+      /not found|not owned/i.test(message) ? 404 :
+      500
+    return jsonError(message, status)
   }
 })
 
