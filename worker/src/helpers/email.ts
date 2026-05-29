@@ -173,7 +173,7 @@ export const renderDeliveryReadyEmail = (input: DeliveryReadyEmailInput) => {
           </tr>
           <tr>
             <td style="padding-bottom:24px;">
-              <p style="margin:0 0 8px;font-size:14px;color:#5f584f;">The link signs you in for 24 hours. If it expires, just reply to this email and I'll send a fresh one.</p>
+              <p style="margin:0 0 8px;font-size:14px;color:#5f584f;">The link signs you in for 1 hour. If it expires, just reply to this email and I'll send a fresh one.</p>
               <p style="margin:0;font-size:13px;color:#8a8278;word-break:break-all;">If the button doesn't work, paste this into your browser:<br><span style="color:#5f584f;">${safeLink}</span></p>
             </td>
           </tr>
@@ -198,7 +198,7 @@ export const renderDeliveryReadyEmail = (input: DeliveryReadyEmailInput) => {
     'Click the link to sign in — no password needed:',
     input.magicLink,
     '',
-    'The link signs you in for 24 hours. If it expires, reply and I will send a fresh one.',
+    'The link signs you in for 1 hour. If it expires, reply and I will send a fresh one.',
     '',
     'Thanks for trusting me with your moments.',
     `— ${photographer}`,

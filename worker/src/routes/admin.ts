@@ -543,8 +543,9 @@ const ensureAuthUser = async (env: Env, email: string): Promise<void> => {
  * Call `ensureAuthUser` first — magiclink requires the user to exist.
  *
  * Note: the link's expiry is governed by the project's Auth → Email OTP
- * setting (default 3600s = 1h). To honor the "24h" promise in the email
- * copy, bump that setting to 86400 in the Supabase dashboard.
+ * setting. Supabase recommends ≤1h (3600s) for security; the email copy
+ * says "1 hour" to match. The "reply for a fresh link" line covers the
+ * case where a client opens the email after it expires.
  */
 const generateSignInLink = async (env: Env, email: string, redirectTo: string): Promise<string> => {
   const response = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/generate_link`, {

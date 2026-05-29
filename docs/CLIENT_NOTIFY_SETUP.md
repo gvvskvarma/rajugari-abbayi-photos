@@ -9,7 +9,7 @@ The worker code is shipped. To turn it on, you need to:
 
 1. Buy a domain (~$10/yr)
 2. Sign up at Resend (free) and verify the domain
-3. Bump Supabase's email OTP expiry to 24h (one click)
+3. (No change) OTP expiry stays at Supabase's recommended 1 hour
 4. Set two secrets on the Cloudflare Worker
 5. Redeploy the worker
 
@@ -64,18 +64,16 @@ regular zone with DNS hosting included.
 
 ---
 
-## Step 3 — Bump Supabase OTP expiry to 24h
+## Step 3 — OTP expiry stays at 1 hour
 
-The email copy promises the magic link works for 24 hours. Supabase's
-default is 1 hour, so we need to bump it.
+Supabase recommends an OTP/magic-link expiry of **≤1 hour (3600s)** for
+security — a longer window gives attackers more time to brute-force, so
+Supabase flags anything higher. We keep 1 hour, and the email copy says
+"1 hour" to match.
 
-1. https://supabase.com/dashboard → your photography project
-2. **Authentication** → **Sign In / Up** → **Email** (or **Auth** → **Email**)
-3. Find **Email OTP Expiration** (or **Magic Link Expiration**)
-4. Set to `86400` (seconds = 24 hours)
-5. Save
-
-If you skip this, the link still works — just for 1 hour instead of 24.
+No action needed. If a client opens the email after the link expires,
+the email tells them to reply, and you re-send via the **Resend** button
+on the upload success card (mints a fresh link).
 
 ---
 
@@ -129,8 +127,8 @@ If the email shows `via resend.dev` in the from line, your domain isn't
 verified yet — wait for DNS to propagate.
 
 If the click lands you on a Supabase error page like "Email link is
-invalid or has expired," your OTP expiry hasn't been bumped (step 3) or
-the magic link was already used.
+invalid or has expired," the link is more than 1 hour old or was already
+used — re-send via the Resend button for a fresh one.
 
 ---
 
