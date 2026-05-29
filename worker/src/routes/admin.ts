@@ -505,7 +505,42 @@ type GenerateLinkResponse = {
 }
 
 /**
+ * Ensure an auth user exists for this email before we mint a magic link.
+ *
+ * Why this is necessary: the admin `generate_link` endpoint with
+ * type `magiclink` only works for users that already exist. But this
+ * feature's whole purpose is emailing *new* clients who have never logged
+ * in — they have no `auth.users` row yet. The existing customer login uses
+ * `signInWithOtp({ shouldCreateUser: true })`, which auto-creates; the admin
+ * API does not. So we create the user up front (idempotently) to match.
+ *
+ * `email_confirm: true` marks the email as verified so the magic link works
+ * immediately — same shape as a passwordless user created via OTP signup.
+ * A 422 "already been registered" is the expected happy path on repeat sends
+ * and is swallowed.
+ */
+const ensureAuthUser = async (env: Env, email: string): Promise<void> => {
+  const response = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users`, {
+    method: 'POST',
+    headers: {
+      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ email, email_confirm: true }),
+  })
+  if (response.ok) return
+  const body = await response.text()
+  /* User already exists → exactly what we want. GoTrue returns 422 with an
+     "already been registered" / "already exists" message. Treat as success. */
+  if (response.status === 422 || /already.*(registered|exist)/i.test(body)) return
+  throw new Error(`Supabase create user failed (${response.status}): ${body.slice(0, 200)}`)
+}
+
+/**
  * Mint a one-click magic-link sign-in URL via Supabase admin generate_link.
+ *
+ * Call `ensureAuthUser` first — magiclink requires the user to exist.
  *
  * Note: the link's expiry is governed by the project's Auth → Email OTP
  * setting (default 3600s = 1h). To honor the "24h" promise in the email
@@ -535,10 +570,12 @@ const generateSignInLink = async (env: Env, email: string, redirectTo: string): 
   return link
 }
 
+/** First name, capitalized for a polished greeting ("aarav kumar" -> "Aarav"). */
 const firstName = (fullName: string | null | undefined): string => {
   const trimmed = (fullName ?? '').trim()
   if (!trimmed) return ''
-  return trimmed.split(/\s+/)[0]
+  const first = trimmed.split(/\s+/)[0]
+  return first.charAt(0).toUpperCase() + first.slice(1)
 }
 
 admin.post('/deliveries/:deliveryId/notify', async (c) => {
@@ -587,13 +624,26 @@ admin.post('/deliveries/:deliveryId/notify', async (c) => {
     )
     const assetCount = assetRows.length
 
+    /* Guard: don't email "your photos are ready" for an empty delivery.
+       This catches a mis-click on a draft before any files finished
+       uploading. */
+    if (assetCount === 0) {
+      return jsonError('This delivery has no photos yet. Upload files before notifying the client.', 400)
+    }
+
+    /* Ensure the client has an auth user BEFORE minting the magic link —
+       generate_link(magiclink) only works for existing users, and most
+       notified clients are brand new (never logged in). Idempotent. */
+    await ensureAuthUser(c.env, clientEmail)
+
     /* Mint the magic link. We redirect to /my-pictures so the client lands
        on their gallery rather than a generic post-login screen. */
     const redirectTo = `${c.env.APP_ORIGIN}/my-pictures`
     const magicLink = await generateSignInLink(c.env, clientEmail, redirectTo)
 
-    /* Fire the email. Errors are surfaced as 500 so the admin sees a clear
-       toast and can retry instead of silently not sending. */
+    /* Fire the email. This is the irreversible commit point: once it
+       succeeds, the client has been notified. Errors here surface as 500
+       so the admin can retry. */
     const result = await sendDeliveryReady(c.env, {
       to: clientEmail,
       clientName,
@@ -602,47 +652,50 @@ admin.post('/deliveries/:deliveryId/notify', async (c) => {
       assetCount,
     })
 
-    /* Audit: record the recipient (composite UNIQUE on (delivery_id, email)
-       means a re-send updates the existing row's created_at if you choose
-       to merge — for now we just attempt insert and ignore duplicates so
-       legit re-sends don't fail the request). */
-    await supabaseRequest(
-      c.env,
-      'delivery_recipients?on_conflict=delivery_id,email',
-      {
-        method: 'POST',
-        headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
-        body: JSON.stringify({
-          delivery_id: deliveryId,
-          email: clientEmail,
-        }),
-      },
-      true
-    )
+    /* Post-send bookkeeping is BEST-EFFORT. The email already went out, so a
+       failed audit write must NOT 500 the request — otherwise the admin
+       retries and the client gets a duplicate email. We log failures and
+       still return success. */
+    try {
+      /* Record the recipient. UNIQUE(delivery_id, email) → ignore duplicates
+         so legit re-sends don't error. */
+      await supabaseRequest(
+        c.env,
+        'delivery_recipients?on_conflict=delivery_id,email',
+        {
+          method: 'POST',
+          headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+          body: JSON.stringify({ delivery_id: deliveryId, email: clientEmail }),
+        },
+        true
+      )
 
-    /* Stamp shared_at on the delivery so the UI can show "Sent ...". We
-       only update if it's null — preserves the first-shared timestamp. */
-    await supabaseRequest(
-      c.env,
-      `deliveries?id=eq.${encodeURIComponent(deliveryId)}&shared_at=is.null`,
-      {
-        method: 'PATCH',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({ shared_at: result.sentAt }),
-      },
-      true
-    )
+      /* Stamp shared_at only if null — preserves the first-shared timestamp. */
+      await supabaseRequest(
+        c.env,
+        `deliveries?id=eq.${encodeURIComponent(deliveryId)}&shared_at=is.null`,
+        {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ shared_at: result.sentAt }),
+        },
+        true
+      )
 
-    /* Log to admin activity feed so the user can see "emailed client X". */
-    await insertAdminActivity(c.env, {
-      ownerUserId: user.id,
-      kind: 'edit',
-      title: 'Notified client',
-      detail: `Sent "${deliveryTitle}" link to ${clientEmail}`,
-      clientId: delivery.client_id,
-      projectId: delivery.project_id,
-      metadata: { messageId: result.messageId, assetCount },
-    })
+      /* Log to the admin activity feed. */
+      await insertAdminActivity(c.env, {
+        ownerUserId: user.id,
+        kind: 'edit',
+        title: 'Notified client',
+        detail: `Sent "${deliveryTitle}" link to ${clientEmail}`,
+        clientId: delivery.client_id,
+        projectId: delivery.project_id,
+        metadata: { messageId: result.messageId, assetCount },
+      })
+    } catch (auditError) {
+      /* Visible in `wrangler tail` / Sentry but never fails the send. */
+      console.error('[notify] post-send bookkeeping failed (email already sent):', auditError)
+    }
 
     return c.json(
       {

@@ -19,11 +19,10 @@ SUPABASE_URL = "https://ogcafgdhchzheennyzva.supabase.co"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9nY2FmZ2RoY2h6aGVlbm55enZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5MjM2MjUsImV4cCI6MjA4ODQ5OTYyNX0.KIzrmyFJcFIf5UlLs-1CZmADULdh3bKEamdrEdglYaw"
 R2_ACCOUNT_ID = "3bb24180dda29410cb330891f7c62322"
 R2_BUCKET = "photography-private"
-# From-address for client-notification emails. Domain must be verified in
-# Resend. Override locally with .dev.vars; in production set in this file or
-# via `wrangler secret put EMAIL_FROM` if you'd rather keep it out of git.
-# Placeholder until the production domain is bought + verified.
-EMAIL_FROM = "Rajugari Abbayi Photography <onboarding@resend.dev>"
+# From-address for client-notification emails. Domain (rga-photography.com)
+# is verified in Resend. The local-part (hello@) is arbitrary — Resend
+# accepts any address on a verified domain. Override locally via .dev.vars.
+EMAIL_FROM = "Rajugari Abbayi Photography <hello@rga-photography.com>"
 
 # Set secrets with:
 # wrangler secret put SUPABASE_SERVICE_ROLE_KEY
