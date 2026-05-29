@@ -3725,3 +3725,45 @@ img.rotator-image {
     animation: none;
   }
 }
+
+/* ===== Notify-client success card =====
+   Appears below the upload form after a delivery uploads successfully.
+   Gives the admin a moment to review before sending the client email,
+   and a one-click "Send notification email" CTA. */
+.notify-success-card {
+  margin-top: 1.5rem;
+  border: 1px solid var(--card-hover-border, #d4cbbf);
+  background: linear-gradient(180deg, rgba(212, 75, 36, 0.04), transparent 60%);
+}
+
+.notify-success-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.notify-success-head h3 {
+  margin: 0.2rem 0 0.3rem;
+  line-height: 1.25;
+  font-size: 1.1rem;
+}
+
+.notify-success-email {
+  font-family: var(--mono, monospace);
+  font-size: 0.95em;
+  word-break: break-all;
+}
+
+.notify-success-sent {
+  color: var(--primary, #d44b24);
+  font-weight: 600;
+}
+
+.notify-success-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+}

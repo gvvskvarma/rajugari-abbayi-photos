@@ -3,11 +3,11 @@ import type { Env, AdminActivityKind, AdminActivityRow } from '../types'
 import {
   adminActivityKinds, MAX_LONG_TEXT,
   responseHeaders, jsonError,
-  supabaseRequest, getUserFromBearer, ensureAdmin, ensureAdminOwnedAsset,
+  supabaseRequest, getUserFromBearer, ensureAdmin, ensureAdminAndOwnedDelivery, ensureAdminOwnedAsset,
   insertAdminActivity, serializeAdminActivity,
   deleteStoredAssets, streamZipResponse,
   parseNullableText, parseProjectStatus, sanitizeArchiveEntryName,
-  filterUuids,
+  filterUuids, sendDeliveryReady,
 } from '../lib'
 
 const admin = new Hono<{ Bindings: Env }>()
@@ -473,6 +473,243 @@ admin.delete('/assets/:assetId', async (c) => {
     return c.json({ ok: true, assetId }, 200, responseHeaders(c))
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Asset delete failed', 400)
+  }
+})
+
+/* ── Client notification (email + magic-link) ───────────────────────
+   POST /api/v1/admin/deliveries/:deliveryId/notify
+
+   Sends a branded "your photos are ready" email to the delivery's client.
+   The email contains a Supabase-minted magic link that signs the client
+   in on click and lands them on /my-pictures.
+
+   Flow:
+     1. Auth — admin + delivery ownership.
+     2. Resolve client email + name + delivery title + asset count.
+     3. Mint magic link via Supabase admin generate_link API.
+     4. Send email via Resend.
+     5. Audit: insert delivery_recipients (idempotent on conflict),
+        stamp deliveries.shared_at, log admin_activity_events.
+
+   503 if email isn't configured yet (RESEND_API_KEY / EMAIL_FROM unset) —
+   this lets the route ship before the domain is verified without crashing
+   admin flows. 400 if the client has no email on file. 404 if the delivery
+   doesn't belong to this admin.
+─────────────────────────────────────────────────────────────────── */
+
+type GenerateLinkResponse = {
+  properties?: {
+    action_link?: string
+  }
+  action_link?: string
+}
+
+/**
+ * Ensure an auth user exists for this email before we mint a magic link.
+ *
+ * Why this is necessary: the admin `generate_link` endpoint with
+ * type `magiclink` only works for users that already exist. But this
+ * feature's whole purpose is emailing *new* clients who have never logged
+ * in — they have no `auth.users` row yet. The existing customer login uses
+ * `signInWithOtp({ shouldCreateUser: true })`, which auto-creates; the admin
+ * API does not. So we create the user up front (idempotently) to match.
+ *
+ * `email_confirm: true` marks the email as verified so the magic link works
+ * immediately — same shape as a passwordless user created via OTP signup.
+ * A 422 "already been registered" is the expected happy path on repeat sends
+ * and is swallowed.
+ */
+const ensureAuthUser = async (env: Env, email: string): Promise<void> => {
+  const response = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users`, {
+    method: 'POST',
+    headers: {
+      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ email, email_confirm: true }),
+  })
+  if (response.ok) return
+  const body = await response.text()
+  /* User already exists → exactly what we want. GoTrue returns 422 with an
+     "already been registered" / "already exists" message. Treat as success. */
+  if (response.status === 422 || /already.*(registered|exist)/i.test(body)) return
+  throw new Error(`Supabase create user failed (${response.status}): ${body.slice(0, 200)}`)
+}
+
+/**
+ * Mint a one-click magic-link sign-in URL via Supabase admin generate_link.
+ *
+ * Call `ensureAuthUser` first — magiclink requires the user to exist.
+ *
+ * Note: the link's expiry is governed by the project's Auth → Email OTP
+ * setting (default 3600s = 1h). To honor the "24h" promise in the email
+ * copy, bump that setting to 86400 in the Supabase dashboard.
+ */
+const generateSignInLink = async (env: Env, email: string, redirectTo: string): Promise<string> => {
+  const response = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/generate_link`, {
+    method: 'POST',
+    headers: {
+      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      type: 'magiclink',
+      email,
+      options: { redirect_to: redirectTo },
+    }),
+  })
+  if (!response.ok) {
+    const body = await response.text()
+    throw new Error(`Supabase generate_link failed (${response.status}): ${body.slice(0, 200)}`)
+  }
+  const payload = (await response.json()) as GenerateLinkResponse
+  const link = payload.properties?.action_link ?? payload.action_link
+  if (!link) throw new Error('Supabase generate_link returned no action_link')
+  return link
+}
+
+/** First name, capitalized for a polished greeting ("aarav kumar" -> "Aarav"). */
+const firstName = (fullName: string | null | undefined): string => {
+  const trimmed = (fullName ?? '').trim()
+  if (!trimmed) return ''
+  const first = trimmed.split(/\s+/)[0]
+  return first.charAt(0).toUpperCase() + first.slice(1)
+}
+
+admin.post('/deliveries/:deliveryId/notify', async (c) => {
+  try {
+    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
+    ensureAdmin(user)
+
+    if (!c.env.RESEND_API_KEY || !c.env.EMAIL_FROM) {
+      return jsonError('Email is not configured yet. Add RESEND_API_KEY and EMAIL_FROM, then redeploy.', 503)
+    }
+
+    const deliveryId = c.req.param('deliveryId')
+    if (!deliveryId) return jsonError('deliveryId is required', 400)
+
+    /* Verifies the delivery exists and is owned by this admin. Throws otherwise. */
+    await ensureAdminAndOwnedDelivery(c.env, user, deliveryId)
+
+    /* Pull all the metadata we need for the email in a single round-trip
+       per row. PostgREST embedded resources keep the joins server-side. */
+    const rows = await supabaseRequest<Array<{
+      id: string
+      client_id: string
+      project_id: string
+      clients: { id: string; email: string; full_name: string } | null
+      projects: { id: string; name: string } | null
+    }>>(
+      c.env,
+      `deliveries?id=eq.${encodeURIComponent(deliveryId)}&select=id,client_id,project_id,clients(id,email,full_name),projects(id,name)&limit=1`
+    )
+    const delivery = rows[0]
+    if (!delivery) return jsonError('Delivery not found', 404)
+    if (!delivery.clients?.email) {
+      return jsonError('Client has no email on file. Add one and try again.', 400)
+    }
+
+    const clientEmail = delivery.clients.email.trim().toLowerCase()
+    const clientName = firstName(delivery.clients.full_name)
+    const deliveryTitle = delivery.projects?.name?.trim() || 'your shoot'
+
+    /* Count files in this delivery so the email can show "37 photos".
+       Freelance shoots are O(100s) of photos — a SELECT-and-count is
+       fine. We pull only asset_id to keep the payload minimal. */
+    const assetRows = await supabaseRequest<Array<{ asset_id: string }>>(
+      c.env,
+      `delivery_assets?delivery_id=eq.${encodeURIComponent(deliveryId)}&select=asset_id`
+    )
+    const assetCount = assetRows.length
+
+    /* Guard: don't email "your photos are ready" for an empty delivery.
+       This catches a mis-click on a draft before any files finished
+       uploading. */
+    if (assetCount === 0) {
+      return jsonError('This delivery has no photos yet. Upload files before notifying the client.', 400)
+    }
+
+    /* Ensure the client has an auth user BEFORE minting the magic link —
+       generate_link(magiclink) only works for existing users, and most
+       notified clients are brand new (never logged in). Idempotent. */
+    await ensureAuthUser(c.env, clientEmail)
+
+    /* Mint the magic link. We redirect to /my-pictures so the client lands
+       on their gallery rather than a generic post-login screen. */
+    const redirectTo = `${c.env.APP_ORIGIN}/my-pictures`
+    const magicLink = await generateSignInLink(c.env, clientEmail, redirectTo)
+
+    /* Fire the email. This is the irreversible commit point: once it
+       succeeds, the client has been notified. Errors here surface as 500
+       so the admin can retry. */
+    const result = await sendDeliveryReady(c.env, {
+      to: clientEmail,
+      clientName,
+      deliveryTitle,
+      magicLink,
+      assetCount,
+    })
+
+    /* Post-send bookkeeping is BEST-EFFORT. The email already went out, so a
+       failed audit write must NOT 500 the request — otherwise the admin
+       retries and the client gets a duplicate email. We log failures and
+       still return success. */
+    try {
+      /* Record the recipient. UNIQUE(delivery_id, email) → ignore duplicates
+         so legit re-sends don't error. */
+      await supabaseRequest(
+        c.env,
+        'delivery_recipients?on_conflict=delivery_id,email',
+        {
+          method: 'POST',
+          headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+          body: JSON.stringify({ delivery_id: deliveryId, email: clientEmail }),
+        },
+        true
+      )
+
+      /* Stamp shared_at only if null — preserves the first-shared timestamp. */
+      await supabaseRequest(
+        c.env,
+        `deliveries?id=eq.${encodeURIComponent(deliveryId)}&shared_at=is.null`,
+        {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ shared_at: result.sentAt }),
+        },
+        true
+      )
+
+      /* Log to the admin activity feed. */
+      await insertAdminActivity(c.env, {
+        ownerUserId: user.id,
+        kind: 'edit',
+        title: 'Notified client',
+        detail: `Sent "${deliveryTitle}" link to ${clientEmail}`,
+        clientId: delivery.client_id,
+        projectId: delivery.project_id,
+        metadata: { messageId: result.messageId, assetCount },
+      })
+    } catch (auditError) {
+      /* Visible in `wrangler tail` / Sentry but never fails the send. */
+      console.error('[notify] post-send bookkeeping failed (email already sent):', auditError)
+    }
+
+    return c.json(
+      {
+        ok: true,
+        deliveryId,
+        recipientEmail: clientEmail,
+        messageId: result.messageId,
+        sentAt: result.sentAt,
+      },
+      200,
+      responseHeaders(c)
+    )
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Failed to notify client', 500)
   }
 })
 

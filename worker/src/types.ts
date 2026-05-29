@@ -61,6 +61,17 @@ export type Env = {
    * reported to Sentry via HTTP. Leave unset to disable.
    */
   SENTRY_DSN?: string
+  /**
+   * Resend API key — sends client-notification emails (e.g. "your photos are
+   * ready"). Set via `wrangler secret put RESEND_API_KEY`. When unset, the
+   * notify endpoint short-circuits with a 503 so deploys don't crash.
+   */
+  RESEND_API_KEY?: string
+  /**
+   * From-address for outbound client emails. e.g. "Rajugari Abbayi Shots
+   * <hello@yourdomain.com>". The address's domain must be verified in Resend.
+   */
+  EMAIL_FROM?: string
 }
 
 export type User = {
