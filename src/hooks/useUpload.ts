@@ -291,10 +291,57 @@ export function useUpload() {
         },
       },
     )
-    dispatch({ type: 'RESET' })
-    dispatch({ type: 'SET_MESSAGE', message: `Upload complete for ${targetEmail}. Opening the client folder now.` })
-    navigate('/admin/clients/' + clientId)
+    /* Stash the delivery so the page can render the success card + the
+       "Send notification email" button. We don't auto-navigate anymore —
+       the admin reviews the result first, sends the email, then clicks
+       through to the client folder when they're ready. */
+    dispatch({
+      type: 'SET_LAST_DELIVERY',
+      delivery: {
+        deliveryId: insertedDelivery.data.id,
+        clientId,
+        clientEmail: targetEmail,
+        title: uploadTitle || `Delivery ${new Date().toISOString().slice(0, 10)}`,
+        fileCount: uploadItems.length,
+        notifiedAt: null,
+        notifying: false,
+        notifyError: null,
+      },
+    })
     void queryClient.invalidateQueries({ queryKey: queryKeys.adminClients(session.user.id) })
+  }
+
+  /**
+   * Send the "your photos are ready" email for the just-uploaded delivery.
+   * Surfaces 503 (email not configured) and other errors inline so the
+   * admin can fix-and-retry without losing the success card.
+   */
+  const notifyClient = async () => {
+    const target = state.lastDelivery
+    if (!target || target.notifying) return
+    const token = await getAccessToken()
+    if (!token) {
+      dispatch({ type: 'NOTIFY_ERROR', error: 'Session expired. Sign in again.' })
+      return
+    }
+    dispatch({ type: 'NOTIFY_START' })
+    try {
+      const result = await workerRequest<{ sentAt: string; messageId: string }>(
+        `/api/v1/admin/deliveries/${target.deliveryId}/notify`,
+        token,
+        { method: 'POST', body: {} }
+      )
+      dispatch({ type: 'NOTIFY_SUCCESS', sentAt: result.sentAt })
+    } catch (error) {
+      dispatch({ type: 'NOTIFY_ERROR', error: error instanceof Error ? error.message : 'Unable to send email' })
+    }
+  }
+
+  const dismissLastDelivery = () => dispatch({ type: 'CLEAR_LAST_DELIVERY' })
+
+  const openClientFolder = (clientId: string) => {
+    dismissLastDelivery()
+    navigate('/admin/clients/' + clientId)
   }
 
   return {
@@ -315,6 +362,7 @@ export function useUpload() {
     filteredReuseClientEmailOptions,
     reuseClientEmailOptions,
     uploadQueueGroups,
+    lastDelivery: state.lastDelivery,
     dispatch,
     handleFilesChange,
     handleBrowseClick,
@@ -323,5 +371,8 @@ export function useUpload() {
     handleDragOver,
     handleDragLeave,
     handleDelivery,
+    notifyClient,
+    dismissLastDelivery,
+    openClientFolder,
   }
 }

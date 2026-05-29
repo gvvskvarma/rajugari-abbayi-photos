@@ -1,6 +1,25 @@
 import type { UploadItem } from '../types'
 import { dedupeUploadItems, normalizeUploadItemPath } from '../lib/upload'
 
+/**
+ * Surface shown after a delivery uploads successfully — the admin reviews
+ * this before clicking "Send notification email." Cleared on RESET or when
+ * a new upload starts.
+ */
+export type LastDelivery = {
+  deliveryId: string
+  clientId: string
+  clientEmail: string
+  title: string
+  fileCount: number
+  /** ISO timestamp once the notification email is actually sent. */
+  notifiedAt: string | null
+  /** Set when send is in flight so the button can show a spinner. */
+  notifying: boolean
+  /** Error from the notify mutation, surfaced inline so the admin can retry. */
+  notifyError: string | null
+}
+
 export type UploadFormState = {
   clientMode: 'create' | 'reuse'
   email: string
@@ -10,6 +29,7 @@ export type UploadFormState = {
   dropActive: boolean
   busy: boolean
   message: string
+  lastDelivery: LastDelivery | null
 }
 
 export type UploadFormAction =
@@ -25,6 +45,11 @@ export type UploadFormAction =
   | { type: 'SET_MESSAGE'; message: string }
   | { type: 'RESET' }
   | { type: 'PREPARE_FOR_CLIENT'; email: string; title: string }
+  | { type: 'SET_LAST_DELIVERY'; delivery: LastDelivery }
+  | { type: 'CLEAR_LAST_DELIVERY' }
+  | { type: 'NOTIFY_START' }
+  | { type: 'NOTIFY_SUCCESS'; sentAt: string }
+  | { type: 'NOTIFY_ERROR'; error: string }
 
 export const uploadFormInitialState: UploadFormState = {
   clientMode: 'create',
@@ -35,6 +60,7 @@ export const uploadFormInitialState: UploadFormState = {
   dropActive: false,
   busy: false,
   message: '',
+  lastDelivery: null,
 }
 
 export function uploadFormReducer(state: UploadFormState, action: UploadFormAction): UploadFormState {
@@ -72,5 +98,33 @@ export function uploadFormReducer(state: UploadFormState, action: UploadFormActi
       return uploadFormInitialState
     case 'PREPARE_FOR_CLIENT':
       return { ...state, clientMode: 'reuse', email: action.email, title: action.title, reuseSearch: action.email }
+    case 'SET_LAST_DELIVERY':
+      /* After a successful upload we clear the form fields but stash the
+         delivery summary so the page can render a success card with the
+         "Send notification email" button. */
+      return {
+        ...state,
+        items: [],
+        title: 'Client Delivery',
+        email: '',
+        reuseSearch: '',
+        busy: false,
+        message: '',
+        lastDelivery: action.delivery,
+      }
+    case 'CLEAR_LAST_DELIVERY':
+      return { ...state, lastDelivery: null }
+    case 'NOTIFY_START':
+      if (!state.lastDelivery) return state
+      return { ...state, lastDelivery: { ...state.lastDelivery, notifying: true, notifyError: null } }
+    case 'NOTIFY_SUCCESS':
+      if (!state.lastDelivery) return state
+      return {
+        ...state,
+        lastDelivery: { ...state.lastDelivery, notifying: false, notifyError: null, notifiedAt: action.sentAt },
+      }
+    case 'NOTIFY_ERROR':
+      if (!state.lastDelivery) return state
+      return { ...state, lastDelivery: { ...state.lastDelivery, notifying: false, notifyError: action.error } }
   }
 }

@@ -3,11 +3,11 @@ import type { Env, AdminActivityKind, AdminActivityRow } from '../types'
 import {
   adminActivityKinds, MAX_LONG_TEXT,
   responseHeaders, jsonError,
-  supabaseRequest, getUserFromBearer, ensureAdmin, ensureAdminOwnedAsset,
+  supabaseRequest, getUserFromBearer, ensureAdmin, ensureAdminAndOwnedDelivery, ensureAdminOwnedAsset,
   insertAdminActivity, serializeAdminActivity,
   deleteStoredAssets, streamZipResponse,
   parseNullableText, parseProjectStatus, sanitizeArchiveEntryName,
-  filterUuids,
+  filterUuids, sendDeliveryReady,
 } from '../lib'
 
 const admin = new Hono<{ Bindings: Env }>()
@@ -473,6 +473,190 @@ admin.delete('/assets/:assetId', async (c) => {
     return c.json({ ok: true, assetId }, 200, responseHeaders(c))
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Asset delete failed', 400)
+  }
+})
+
+/* ── Client notification (email + magic-link) ───────────────────────
+   POST /api/v1/admin/deliveries/:deliveryId/notify
+
+   Sends a branded "your photos are ready" email to the delivery's client.
+   The email contains a Supabase-minted magic link that signs the client
+   in on click and lands them on /my-pictures.
+
+   Flow:
+     1. Auth — admin + delivery ownership.
+     2. Resolve client email + name + delivery title + asset count.
+     3. Mint magic link via Supabase admin generate_link API.
+     4. Send email via Resend.
+     5. Audit: insert delivery_recipients (idempotent on conflict),
+        stamp deliveries.shared_at, log admin_activity_events.
+
+   503 if email isn't configured yet (RESEND_API_KEY / EMAIL_FROM unset) —
+   this lets the route ship before the domain is verified without crashing
+   admin flows. 400 if the client has no email on file. 404 if the delivery
+   doesn't belong to this admin.
+─────────────────────────────────────────────────────────────────── */
+
+type GenerateLinkResponse = {
+  properties?: {
+    action_link?: string
+  }
+  action_link?: string
+}
+
+/**
+ * Mint a one-click magic-link sign-in URL via Supabase admin generate_link.
+ *
+ * Note: the link's expiry is governed by the project's Auth → Email OTP
+ * setting (default 3600s = 1h). To honor the "24h" promise in the email
+ * copy, bump that setting to 86400 in the Supabase dashboard.
+ */
+const generateSignInLink = async (env: Env, email: string, redirectTo: string): Promise<string> => {
+  const response = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/generate_link`, {
+    method: 'POST',
+    headers: {
+      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      type: 'magiclink',
+      email,
+      options: { redirect_to: redirectTo },
+    }),
+  })
+  if (!response.ok) {
+    const body = await response.text()
+    throw new Error(`Supabase generate_link failed (${response.status}): ${body.slice(0, 200)}`)
+  }
+  const payload = (await response.json()) as GenerateLinkResponse
+  const link = payload.properties?.action_link ?? payload.action_link
+  if (!link) throw new Error('Supabase generate_link returned no action_link')
+  return link
+}
+
+const firstName = (fullName: string | null | undefined): string => {
+  const trimmed = (fullName ?? '').trim()
+  if (!trimmed) return ''
+  return trimmed.split(/\s+/)[0]
+}
+
+admin.post('/deliveries/:deliveryId/notify', async (c) => {
+  try {
+    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
+    ensureAdmin(user)
+
+    if (!c.env.RESEND_API_KEY || !c.env.EMAIL_FROM) {
+      return jsonError('Email is not configured yet. Add RESEND_API_KEY and EMAIL_FROM, then redeploy.', 503)
+    }
+
+    const deliveryId = c.req.param('deliveryId')
+    if (!deliveryId) return jsonError('deliveryId is required', 400)
+
+    /* Verifies the delivery exists and is owned by this admin. Throws otherwise. */
+    await ensureAdminAndOwnedDelivery(c.env, user, deliveryId)
+
+    /* Pull all the metadata we need for the email in a single round-trip
+       per row. PostgREST embedded resources keep the joins server-side. */
+    const rows = await supabaseRequest<Array<{
+      id: string
+      client_id: string
+      project_id: string
+      clients: { id: string; email: string; full_name: string } | null
+      projects: { id: string; name: string } | null
+    }>>(
+      c.env,
+      `deliveries?id=eq.${encodeURIComponent(deliveryId)}&select=id,client_id,project_id,clients(id,email,full_name),projects(id,name)&limit=1`
+    )
+    const delivery = rows[0]
+    if (!delivery) return jsonError('Delivery not found', 404)
+    if (!delivery.clients?.email) {
+      return jsonError('Client has no email on file. Add one and try again.', 400)
+    }
+
+    const clientEmail = delivery.clients.email.trim().toLowerCase()
+    const clientName = firstName(delivery.clients.full_name)
+    const deliveryTitle = delivery.projects?.name?.trim() || 'your shoot'
+
+    /* Count files in this delivery so the email can show "37 photos".
+       Freelance shoots are O(100s) of photos — a SELECT-and-count is
+       fine. We pull only asset_id to keep the payload minimal. */
+    const assetRows = await supabaseRequest<Array<{ asset_id: string }>>(
+      c.env,
+      `delivery_assets?delivery_id=eq.${encodeURIComponent(deliveryId)}&select=asset_id`
+    )
+    const assetCount = assetRows.length
+
+    /* Mint the magic link. We redirect to /my-pictures so the client lands
+       on their gallery rather than a generic post-login screen. */
+    const redirectTo = `${c.env.APP_ORIGIN}/my-pictures`
+    const magicLink = await generateSignInLink(c.env, clientEmail, redirectTo)
+
+    /* Fire the email. Errors are surfaced as 500 so the admin sees a clear
+       toast and can retry instead of silently not sending. */
+    const result = await sendDeliveryReady(c.env, {
+      to: clientEmail,
+      clientName,
+      deliveryTitle,
+      magicLink,
+      assetCount,
+    })
+
+    /* Audit: record the recipient (composite UNIQUE on (delivery_id, email)
+       means a re-send updates the existing row's created_at if you choose
+       to merge — for now we just attempt insert and ignore duplicates so
+       legit re-sends don't fail the request). */
+    await supabaseRequest(
+      c.env,
+      'delivery_recipients?on_conflict=delivery_id,email',
+      {
+        method: 'POST',
+        headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+        body: JSON.stringify({
+          delivery_id: deliveryId,
+          email: clientEmail,
+        }),
+      },
+      true
+    )
+
+    /* Stamp shared_at on the delivery so the UI can show "Sent ...". We
+       only update if it's null — preserves the first-shared timestamp. */
+    await supabaseRequest(
+      c.env,
+      `deliveries?id=eq.${encodeURIComponent(deliveryId)}&shared_at=is.null`,
+      {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ shared_at: result.sentAt }),
+      },
+      true
+    )
+
+    /* Log to admin activity feed so the user can see "emailed client X". */
+    await insertAdminActivity(c.env, {
+      ownerUserId: user.id,
+      kind: 'edit',
+      title: 'Notified client',
+      detail: `Sent "${deliveryTitle}" link to ${clientEmail}`,
+      clientId: delivery.client_id,
+      projectId: delivery.project_id,
+      metadata: { messageId: result.messageId, assetCount },
+    })
+
+    return c.json(
+      {
+        ok: true,
+        deliveryId,
+        recipientEmail: clientEmail,
+        messageId: result.messageId,
+        sentAt: result.sentAt,
+      },
+      200,
+      responseHeaders(c)
+    )
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Failed to notify client', 500)
   }
 })
 

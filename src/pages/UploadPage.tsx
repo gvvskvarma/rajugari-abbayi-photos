@@ -19,6 +19,7 @@ export function UploadPage() {
     filteredReuseClientEmailOptions,
     reuseClientEmailOptions,
     uploadQueueGroups,
+    lastDelivery,
     dispatch,
     handleFilesChange,
     handleBrowseClick,
@@ -27,6 +28,9 @@ export function UploadPage() {
     handleDragOver,
     handleDragLeave,
     handleDelivery,
+    notifyClient,
+    dismissLastDelivery,
+    openClientFolder,
   } = useUpload()
 
   if (!session?.user.id) {
@@ -248,6 +252,77 @@ export function UploadPage() {
       </form>
 
       {uploadMessage && <p className="portal-hint">{uploadMessage}</p>}
+
+      {lastDelivery && (
+        <div className="admin-panel notify-success-card" role="status" aria-live="polite">
+          <div className="notify-success-head">
+            <div>
+              <p className="eyebrow">Upload complete</p>
+              <h3>
+                {lastDelivery.fileCount} file{lastDelivery.fileCount === 1 ? '' : 's'} delivered to{' '}
+                <span className="notify-success-email">{lastDelivery.clientEmail}</span>
+              </h3>
+              <p className="portal-hint">
+                Folder: <strong>{lastDelivery.title}</strong>
+              </p>
+            </div>
+            <button
+              className="button ghost"
+              type="button"
+              onClick={dismissLastDelivery}
+              aria-label="Dismiss"
+            >
+              Dismiss
+            </button>
+          </div>
+
+          {lastDelivery.notifiedAt ? (
+            <p className="portal-hint notify-success-sent">
+              ✓ Email sent {new Date(lastDelivery.notifiedAt).toLocaleString()}
+            </p>
+          ) : (
+            <p className="portal-hint">
+              Send your client a sign-in link to view these photos. They click it and land directly on their gallery.
+            </p>
+          )}
+
+          {lastDelivery.notifyError && (
+            <p className="portal-error">{lastDelivery.notifyError}</p>
+          )}
+
+          <div className="notify-success-actions">
+            <button
+              className="button primary"
+              type="button"
+              onClick={() => void notifyClient()}
+              disabled={lastDelivery.notifying || Boolean(lastDelivery.notifiedAt)}
+            >
+              {lastDelivery.notifying
+                ? 'Sending...'
+                : lastDelivery.notifiedAt
+                  ? 'Email sent'
+                  : 'Send notification email'}
+            </button>
+            {lastDelivery.notifiedAt && (
+              <button
+                className="button ghost"
+                type="button"
+                onClick={() => void notifyClient()}
+                disabled={lastDelivery.notifying}
+              >
+                {lastDelivery.notifying ? 'Sending...' : 'Resend'}
+              </button>
+            )}
+            <button
+              className="button ghost"
+              type="button"
+              onClick={() => openClientFolder(lastDelivery.clientId)}
+            >
+              Open client folder →
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   )
 }

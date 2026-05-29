@@ -45,6 +45,11 @@ export {
   getUserFromBearer,
   isUuid,
 } from './helpers/access'
+export {
+  renderDeliveryReadyEmail,
+  sendDeliveryReady,
+} from './helpers/email'
+export type { DeliveryReadyEmailInput, EmailSendResult } from './helpers/email'
 
 /* ── Constants ───────────────────────────────────────────────────── */
 
