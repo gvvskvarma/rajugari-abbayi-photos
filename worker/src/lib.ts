@@ -61,10 +61,17 @@ export const rateWindowMs = 60_000
 export const maxUploadBytes = 5 * 1024 * 1024 * 1024
 export const uploadUrlExpirySeconds = 900
 export const routeRateLimits = new Map<string, { count: number; windowStart: number }>()
+/* Per-IP per-minute caps. The upload endpoints need high ceilings: a single
+   photo delivery is routinely 100s of files, and each file makes one
+   request-upload-url + one upload/complete call. The previous 30/60 caps
+   tripped a 429 mid-upload on any delivery larger than ~30 photos. These
+   routes are admin-auth-gated, so a generous limit is safe — it bounds
+   accidental runaway loops, not legitimate bulk uploads. media/signed-url
+   is bumped too since a large gallery preview-loads many thumbnails. */
 export const routeLimits: Record<string, number> = {
-  '/api/v1/media/signed-url': 90,
-  '/api/v1/request-upload-url': 30,
-  '/api/v1/upload/complete': 60,
+  '/api/v1/media/signed-url': 600,
+  '/api/v1/request-upload-url': 600,
+  '/api/v1/upload/complete': 600,
 }
 
 export const MAX_SHORT_TEXT = 255
