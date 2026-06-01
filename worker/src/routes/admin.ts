@@ -500,8 +500,10 @@ admin.delete('/assets/:assetId', async (c) => {
 type GenerateLinkResponse = {
   properties?: {
     action_link?: string
+    hashed_token?: string
   }
   action_link?: string
+  hashed_token?: string
 }
 
 /**
@@ -538,16 +540,26 @@ const ensureAuthUser = async (env: Env, email: string): Promise<void> => {
 }
 
 /**
- * Mint a one-click magic-link sign-in URL via Supabase admin generate_link.
+ * Mint a sign-in `token_hash` via Supabase admin generate_link, then build a
+ * link to our own `/auth/callback` route.
+ *
+ * Why token_hash and not the default `action_link`: the action_link drives
+ * the PKCE `?code=` flow, which requires a code verifier stored in the
+ * client's browser when the login was *initiated there*. But this link is
+ * minted server-side and clicked by a client who never started a login in
+ * their browser — so there's no verifier, and the auto-exchange fails
+ * silently (the client appears signed in to Supabase but the SPA session
+ * never hydrates, forcing a second manual login). The `token_hash` is
+ * verified client-side via `verifyOtp`, which needs no verifier. Our
+ * `/auth/callback` page does that verification and forwards to the gallery.
  *
  * Call `ensureAuthUser` first — magiclink requires the user to exist.
  *
- * Note: the link's expiry is governed by the project's Auth → Email OTP
- * setting. Supabase recommends ≤1h (3600s) for security; the email copy
- * says "1 hour" to match. The "reply for a fresh link" line covers the
- * case where a client opens the email after it expires.
+ * Expiry is governed by the project's Auth → Email OTP setting. Supabase
+ * recommends ≤1h (3600s); the email copy says "1 hour" to match, and the
+ * "reply for a fresh link" line covers an expired click.
  */
-const generateSignInLink = async (env: Env, email: string, redirectTo: string): Promise<string> => {
+const generateSignInLink = async (env: Env, email: string): Promise<string> => {
   const response = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/generate_link`, {
     method: 'POST',
     headers: {
@@ -555,20 +567,22 @@ const generateSignInLink = async (env: Env, email: string, redirectTo: string): 
       Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({
-      type: 'magiclink',
-      email,
-      options: { redirect_to: redirectTo },
-    }),
+    body: JSON.stringify({ type: 'magiclink', email }),
   })
   if (!response.ok) {
     const body = await response.text()
     throw new Error(`Supabase generate_link failed (${response.status}): ${body.slice(0, 200)}`)
   }
   const payload = (await response.json()) as GenerateLinkResponse
-  const link = payload.properties?.action_link ?? payload.action_link
-  if (!link) throw new Error('Supabase generate_link returned no action_link')
-  return link
+  const tokenHash = payload.properties?.hashed_token ?? payload.hashed_token
+  if (!tokenHash) throw new Error('Supabase generate_link returned no hashed_token')
+
+  /* Build a link to our own callback. `next` is the gallery; the callback
+     verifies token_hash, sets the session, then forwards there.
+     type=email is the canonical value for verifyOtp on a magic-link
+     token_hash (per Supabase docs) — NOT "magiclink", which fails. */
+  const next = encodeURIComponent('/my-pictures')
+  return `${env.APP_ORIGIN}/auth/callback?token_hash=${encodeURIComponent(tokenHash)}&type=email&next=${next}`
 }
 
 /** First name, capitalized for a polished greeting ("aarav kumar" -> "Aarav"). */
@@ -637,10 +651,9 @@ admin.post('/deliveries/:deliveryId/notify', async (c) => {
        notified clients are brand new (never logged in). Idempotent. */
     await ensureAuthUser(c.env, clientEmail)
 
-    /* Mint the magic link. We redirect to /my-pictures so the client lands
-       on their gallery rather than a generic post-login screen. */
-    const redirectTo = `${c.env.APP_ORIGIN}/my-pictures`
-    const magicLink = await generateSignInLink(c.env, clientEmail, redirectTo)
+    /* Mint the magic link (points at our /auth/callback, which verifies the
+       token and forwards to /my-pictures). */
+    const magicLink = await generateSignInLink(c.env, clientEmail)
 
     /* Fire the email. This is the irreversible commit point: once it
        succeeds, the client has been notified. Errors here surface as 500
