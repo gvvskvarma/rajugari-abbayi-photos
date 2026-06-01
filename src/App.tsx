@@ -31,6 +31,7 @@ function lazyRetry(factory: () => Promise<Record<string, unknown>>, name: string
 const HomePage = lazyRetry(() => import('./pages/HomePage.tsx'), 'HomePage')
 const BookPage = lazyRetry(() => import('./pages/BookPage.tsx'), 'BookPage')
 const MyPicturesPage = lazyRetry(() => import('./pages/MyPicturesPage.tsx'), 'MyPicturesPage')
+const AuthCallbackPage = lazyRetry(() => import('./pages/AuthCallbackPage.tsx'), 'AuthCallbackPage')
 const UploadPage = lazyRetry(() => import('./pages/UploadPage.tsx'), 'UploadPage')
 const AdminClientsPage = lazyRetry(() => import('./pages/AdminClientsPage.tsx'), 'AdminClientsPage')
 const AdminClientDetailPage = lazyRetry(() => import('./pages/AdminClientDetailPage.tsx'), 'AdminClientDetailPage')
@@ -54,6 +55,7 @@ const router = createBrowserRouter([
       { path: '/live', element: <LazyPage><LivePage /></LazyPage> },
       { path: '/book', element: <LazyPage><BookPage /></LazyPage> },
       { path: '/my-pictures', element: <LazyPage><MyPicturesPage /></LazyPage> },
+      { path: '/auth/callback', element: <LazyPage><AuthCallbackPage /></LazyPage> },
       {
         element: <AdminLayout />,
         children: [
