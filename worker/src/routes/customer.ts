@@ -109,10 +109,10 @@ customer.get('/my-pictures', async (c) => {
     const allAssetIds = [...new Set(allDeliveryAssets.map((da) => da.asset_id))]
     const allAssets = allAssetIds.length
       ? await supabaseRequest<
-          Array<{ id: string; filename: string; mime_type: string; bytes: number; r2_object_key: string }>
+          Array<{ id: string; filename: string; mime_type: string; bytes: number; r2_object_key: string; folder: string | null }>
         >(
           c.env,
-          `assets?or=(${allAssetIds.map((id) => `id.eq.${encodeURIComponent(id)}`).join(',')})&select=id,filename,mime_type,bytes,r2_object_key&order=created_at.desc`
+          `assets?or=(${allAssetIds.map((id) => `id.eq.${encodeURIComponent(id)}`).join(',')})&select=id,filename,mime_type,bytes,r2_object_key,folder&order=created_at.desc`
         )
       : []
 

@@ -10,6 +10,7 @@ export type DeliveryAsset = {
   delivery_id?: string
   r2_object_key?: string
   created_at?: string
+  folder?: string | null
   canView?: boolean
   canDownload?: boolean
 }
@@ -61,6 +62,7 @@ export type AdminAsset = {
   bytes: number
   r2_object_key: string
   created_at: string
+  folder?: string | null
 }
 
 export type AdminClientSummary = AdminClient & {

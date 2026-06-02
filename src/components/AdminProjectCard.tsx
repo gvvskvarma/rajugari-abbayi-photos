@@ -100,6 +100,7 @@ export function AdminProjectCard({
                 )}
                 <div className="admin-asset-main">
                   <p className="admin-asset-name">{displayName}</p>
+                  {asset.folder && <span className="admin-asset-folder">📁 {asset.folder}</span>}
                 </div>
                 <div className="delivery-asset-actions">
                   <button

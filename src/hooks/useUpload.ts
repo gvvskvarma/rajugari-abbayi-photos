@@ -5,7 +5,7 @@ import { useAuthContext } from '../context/AuthContext'
 import { workerRequest } from './useApi'
 import { useAdminData } from '../context/AdminDataContext.tsx'
 import { supabase } from '../lib/supabase'
-import { buildUploadQueueGroups, collectDroppedUploadItems } from '../lib/upload'
+import { buildUploadQueueGroups, collectDroppedUploadItems, uploadItemFolder } from '../lib/upload'
 import { randomToken } from '../lib/helpers'
 import { uploadFormReducer, uploadFormInitialState } from '../reducers/uploadFormReducer'
 import { queryClient } from '../lib/queryClient'
@@ -243,6 +243,7 @@ export function useUpload() {
     try {
       for (const item of uploadItems) {
         const uploadDisplayName = item.path.trim() || item.file.name
+        const folder = uploadItemFolder(item.path)
         const requestResult = await workerRequest<{
           objectKey: string
           uploadToken: string
@@ -268,6 +269,7 @@ export function useUpload() {
             fileName: uploadDisplayName,
             mimeType: item.file.type || 'application/octet-stream',
             bytes: Math.max(1, item.file.size),
+            folder,
           },
         })
       }
