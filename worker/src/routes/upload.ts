@@ -93,6 +93,7 @@ upload.post('/complete', async (c) => {
       fileName: string
       mimeType: string
       bytes: number
+      folder?: string | null
     }>()
 
     if (
@@ -131,6 +132,10 @@ upload.post('/complete', async (c) => {
     if (projectId !== session.projectId) return jsonError('Upload token does not match this project', 403)
 
     const kind = body.mimeType.startsWith('video/') ? 'video' : 'photo'
+    /* Folder label for in-gallery grouping. User-controlled, so trim + cap. */
+    const folder = typeof body.folder === 'string' && body.folder.trim()
+      ? body.folder.trim().slice(0, 120)
+      : null
 
     /* Idempotency: if asset already exists for this object key, ensure
        delivery_assets mapping exists too (heals partial-failure state). */
@@ -164,6 +169,7 @@ upload.post('/complete', async (c) => {
           delivery_id: body.deliveryId,
           kind,
           filename: body.fileName,
+          folder,
           mime_type: body.mimeType,
           bytes: Math.max(1, body.bytes),
           r2_object_key: body.objectKey,

@@ -26,6 +26,17 @@ export const dedupeUploadItems = (items: UploadItem[]) => {
 
 export const normalizeUploadItemPath = (path: string) => path.trim().replace(/^\/+/, '')
 
+/**
+ * Top-level folder an upload item belongs to, or null for a loose file.
+ * "Ceremony/IMG_001.jpg" -> "Ceremony"; "Reception/sub/x.jpg" -> "Reception";
+ * "IMG_001.jpg" -> null. Capped to a sane label length.
+ */
+export const uploadItemFolder = (path: string): string | null => {
+  const segments = normalizeUploadItemPath(path).split('/').filter(Boolean)
+  if (segments.length < 2) return null
+  return segments[0].slice(0, 120)
+}
+
 export const buildUploadQueueGroups = (items: UploadItem[]) => {
   const groups = new Map<string, UploadItem[]>()
   const order: string[] = []

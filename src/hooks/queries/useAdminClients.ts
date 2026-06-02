@@ -22,7 +22,7 @@ export function useAdminClients(userId: string | undefined, role: string) {
           .order('updated_at', { ascending: false }),
         supabase
           .from('assets')
-          .select('id, project_id, delivery_id, filename, mime_type, bytes, r2_object_key, created_at')
+          .select('id, project_id, delivery_id, filename, mime_type, bytes, r2_object_key, created_at, folder')
           .eq('owner_user_id', userId)
           .order('created_at', { ascending: false }),
       ])

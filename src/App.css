@@ -3782,6 +3782,93 @@ img.rotator-image {
   gap: 0.6rem;
 }
 
+.admin-asset-folder {
+  display: inline-block;
+  font-size: 0.72rem;
+  color: var(--muted);
+  background: var(--surface-strong);
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+  margin-top: 0.15rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ===== Client gallery: folders ===== */
+.folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.8rem;
+  margin-top: 0.8rem;
+}
+
+.folder-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  cursor: pointer;
+  overflow: hidden;
+  text-align: left;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.folder-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(18, 16, 12, 0.1);
+  border-color: var(--primary);
+}
+
+.folder-card-cover {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 4 / 3;
+  background: var(--surface-strong);
+  overflow: hidden;
+}
+
+.folder-card-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.folder-card-icon {
+  font-size: 2rem;
+}
+
+.folder-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0 0.7rem 0.7rem;
+}
+
+.folder-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  margin: 0.8rem 0;
+}
+
+.folder-detail-head > strong {
+  font-size: 1.05rem;
+}
+
+.folder-detail-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
 .retention-row {
   display: flex;
   flex-direction: column;

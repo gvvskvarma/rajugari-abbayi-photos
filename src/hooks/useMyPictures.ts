@@ -191,6 +191,17 @@ export function useMyPictures() {
 
   const handleShareAll = (deliveryId: string) => shareAllMutation.mutate(deliveryId)
 
+  /* Folder-scoped bulk actions: download/share a specific set of assets (one
+     folder within a delivery) by reusing the selected-asset mutations. */
+  const handleDownloadAssets = (deliveryId: string, assetIds: string[]) => {
+    if (assetIds.length === 0) return
+    downloadSelectedMutation.mutate({ deliveryId, assetIds })
+  }
+  const handleShareAssets = (deliveryId: string, assetIds: string[]) => {
+    if (assetIds.length === 0) return
+    shareSelectedMutation.mutate({ deliveryId, assetIds })
+  }
+
   const handleShareSelected = () => {
     if (selectedAssetIds.length === 0 || !selectDeliveryId) return
     shareSelectedMutation.mutate({ deliveryId: selectDeliveryId, assetIds: selectedAssetIds })
@@ -282,6 +293,8 @@ export function useMyPictures() {
     handleDownloadSelected,
     handleShareAll,
     handleShareSelected,
+    handleDownloadAssets,
+    handleShareAssets,
     handleCopyShareLink,
     handleOpenAsset,
   }

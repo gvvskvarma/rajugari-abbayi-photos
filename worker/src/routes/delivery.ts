@@ -159,10 +159,11 @@ shareLinks.get('/:token/gallery', async (c) => {
             bytes: number
             r2_object_key: string
             created_at: string
+            folder: string | null
           }>
         >(
           c.env,
-          `assets?or=(${visibleAssetIds.map((id) => `id.eq.${encodeURIComponent(id)}`).join(',')})&select=id,delivery_id,filename,mime_type,bytes,r2_object_key,created_at&order=created_at.desc`
+          `assets?or=(${visibleAssetIds.map((id) => `id.eq.${encodeURIComponent(id)}`).join(',')})&select=id,delivery_id,filename,mime_type,bytes,r2_object_key,created_at,folder&order=created_at.desc`
         )
       : []
 
