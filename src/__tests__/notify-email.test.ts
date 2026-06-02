@@ -12,7 +12,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   renderDeliveryReadyEmail,
   sendDeliveryReady,
+  renderExpiryWarningEmail,
   type DeliveryReadyEmailInput,
+  type ExpiryWarningEmailInput,
 } from '../../worker/src/helpers/email'
 
 const baseInput: DeliveryReadyEmailInput = {
@@ -86,6 +88,55 @@ describe('renderDeliveryReadyEmail', () => {
     const { html, text } = renderDeliveryReadyEmail({ ...baseInput, photographerName: 'Karthik' })
     expect(html).toContain('Karthik')
     expect(text).toContain('Karthik')
+  })
+
+  it('states the retention window (defaults to 45 days)', () => {
+    const { html, text } = renderDeliveryReadyEmail(baseInput)
+    expect(html).toContain('45 days')
+    expect(text).toContain('45 days')
+  })
+
+  it('honours a custom retentionDays', () => {
+    const { html } = renderDeliveryReadyEmail({ ...baseInput, retentionDays: 60 })
+    expect(html).toContain('60 days')
+  })
+})
+
+describe('renderExpiryWarningEmail', () => {
+  const warnInput: ExpiryWarningEmailInput = {
+    to: 'client@example.com',
+    clientName: 'Aarav',
+    deliveryTitle: 'Diwali 2026',
+    magicLink: 'https://app.example.com/auth/callback?token_hash=abc&type=email&next=%2Fmy-pictures',
+    removalDate: 'June 15, 2026',
+    daysLeft: 3,
+  }
+
+  it('states the exact removal date and days left', () => {
+    const { html, text } = renderExpiryWarningEmail(warnInput)
+    expect(html).toContain('June 15, 2026')
+    expect(html).toContain('3 days')
+    expect(text).toContain('June 15, 2026')
+  })
+
+  it('singularises "1 day"', () => {
+    const { html } = renderExpiryWarningEmail({ ...warnInput, daysLeft: 1 })
+    expect(html).toContain('1 day')
+    expect(html).not.toContain('1 days')
+  })
+
+  it('embeds the magic link in CTA and fallback', () => {
+    const escaped = warnInput.magicLink.replace(/&/g, '&amp;')
+    const { html, text } = renderExpiryWarningEmail(warnInput)
+    expect(html).toContain(`href="${escaped}"`)
+    expect(html.indexOf(escaped)).not.toBe(html.lastIndexOf(escaped))
+    expect(text).toContain(warnInput.magicLink)
+  })
+
+  it('html-escapes the delivery title', () => {
+    const { html } = renderExpiryWarningEmail({ ...warnInput, deliveryTitle: '<script>x</script>' })
+    expect(html).not.toContain('<script>')
+    expect(html).toContain('&lt;script&gt;')
   })
 })
 

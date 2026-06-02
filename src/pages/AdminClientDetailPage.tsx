@@ -6,6 +6,7 @@ import { AdminProjectCard } from '../components/AdminProjectCard'
 import { AdminBulkActions } from '../components/AdminBulkActions'
 import { AdminDetailToolbar } from '../components/AdminDetailToolbar'
 import { AdminLightbox } from '../components/AdminLightbox'
+import { RetentionPanel } from '../components/RetentionPanel'
 
 export function AdminClientDetailPage() {
   const detail = useAdminClientDetail()
@@ -161,6 +162,8 @@ export function AdminClientDetailPage() {
           />
         )}
       </section>
+
+      <RetentionPanel clientId={client.id} />
 
       {detail.deleteConfirmation && (
         <DeleteConfirmationModal

@@ -3767,3 +3767,59 @@ img.rotator-image {
   gap: 0.6rem;
   margin-top: 0.9rem;
 }
+
+/* ===== Retention panel (admin) ===== */
+.retention-panel {
+  margin-top: 1.5rem;
+}
+
+.retention-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.retention-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.retention-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.retention-meta {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.retention-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-shrink: 0;
+}
+
+.retention-badge {
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  white-space: nowrap;
+}

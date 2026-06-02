@@ -39,6 +39,8 @@ export type DeliveryReadyEmailInput = {
   assetCount: number
   /** Photographer's display name — signs the email. */
   photographerName?: string
+  /** Retention window in days (how long the gallery stays available). Default 45. */
+  retentionDays?: number
 }
 
 export type EmailSendResult = {
@@ -125,6 +127,7 @@ export const sendDeliveryReady = async (
 export const renderDeliveryReadyEmail = (input: DeliveryReadyEmailInput) => {
   const greetingName = input.clientName.trim() || 'there'
   const photographer = (input.photographerName ?? 'Vishnu').trim() || 'Vishnu'
+  const retentionDays = Math.max(1, Math.floor(input.retentionDays ?? 45))
   const safeTitle = escapeHtml(input.deliveryTitle)
   const safeName = escapeHtml(greetingName)
   const safeLink = escapeAttr(input.magicLink)
@@ -173,7 +176,7 @@ export const renderDeliveryReadyEmail = (input: DeliveryReadyEmailInput) => {
           </tr>
           <tr>
             <td style="padding-bottom:24px;">
-              <p style="margin:0 0 8px;font-size:14px;color:#5f584f;">The link signs you in for 1 hour. If it expires, just reply to this email and I'll send a fresh one.</p>
+              <p style="margin:0 0 8px;font-size:14px;color:#5f584f;">Your gallery stays available for <strong>${retentionDays} days</strong> — please download your favourites within that window. The sign-in link itself lasts 1 hour; if it expires, just reply and I'll send a fresh one.</p>
               <p style="margin:0;font-size:13px;color:#8a8278;word-break:break-all;">If the button doesn't work, paste this into your browser:<br><span style="color:#5f584f;">${safeLink}</span></p>
             </td>
           </tr>
@@ -198,9 +201,158 @@ export const renderDeliveryReadyEmail = (input: DeliveryReadyEmailInput) => {
     'Click the link to sign in — no password needed:',
     input.magicLink,
     '',
-    'The link signs you in for 1 hour. If it expires, reply and I will send a fresh one.',
+    `Your gallery stays available for ${retentionDays} days — please download your favourites within that window.`,
+    'The sign-in link itself lasts 1 hour. If it expires, reply and I will send a fresh one.',
     '',
     'Thanks for trusting me with your moments.',
+    `— ${photographer}`,
+  ].join('\n')
+
+  return { html, text }
+}
+
+/* ── Expiry warning email ─────────────────────────────────────────── */
+
+export type ExpiryWarningEmailInput = {
+  /** Client's email. */
+  to: string
+  /** Client's first name (or "there" fallback). */
+  clientName: string
+  /** Delivery title. */
+  deliveryTitle: string
+  /** Sign-in link to the gallery (token_hash magic link). */
+  magicLink: string
+  /** Human-readable date the files are removed, e.g. "June 15, 2026". */
+  removalDate: string
+  /** Whole days remaining until removal (for the subject/urgency). */
+  daysLeft: number
+  /** Photographer's display name. */
+  photographerName?: string
+}
+
+/**
+ * Send the "your photos are expiring" warning. Same Resend transport and
+ * config guards as `sendDeliveryReady`. Throws on missing config / invalid
+ * recipient / Resend non-2xx so the caller (lifecycle cron) can log + retry.
+ */
+export const sendExpiryWarning = async (
+  env: EmailEnv,
+  input: ExpiryWarningEmailInput
+): Promise<EmailSendResult> => {
+  if (!env.RESEND_API_KEY || !env.EMAIL_FROM) {
+    throw new Error(MISSING_CONFIG_ERROR)
+  }
+  const to = input.to.trim()
+  if (!to || !to.includes('@')) {
+    throw new Error('Invalid recipient email')
+  }
+
+  const subject = `Your ${input.deliveryTitle} photos expire in ${input.daysLeft} day${input.daysLeft === 1 ? '' : 's'}`
+  const { html, text } = renderExpiryWarningEmail(input)
+
+  const response = await fetch(RESEND_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: env.EMAIL_FROM,
+      to: [to],
+      subject,
+      html,
+      text,
+      tags: [{ name: 'kind', value: 'expiry_warning' }],
+    }),
+  })
+  if (!response.ok) {
+    const body = await response.text()
+    throw new Error(`Resend API error (${response.status}): ${body.slice(0, 300)}`)
+  }
+  const payload = (await response.json()) as { id?: string }
+  if (!payload.id) throw new Error('Resend returned a response without an id')
+  return { messageId: payload.id, sentAt: new Date().toISOString() }
+}
+
+/** Render the HTML + text for the expiry-warning email (separately testable). */
+export const renderExpiryWarningEmail = (input: ExpiryWarningEmailInput) => {
+  const greetingName = input.clientName.trim() || 'there'
+  const photographer = (input.photographerName ?? 'Vishnu').trim() || 'Vishnu'
+  const safeTitle = escapeHtml(input.deliveryTitle)
+  const safeName = escapeHtml(greetingName)
+  const safeLink = escapeAttr(input.magicLink)
+  const safeDate = escapeHtml(input.removalDate)
+  const days = Math.max(0, Math.floor(input.daysLeft))
+  const daysLabel = `${days} day${days === 1 ? '' : 's'}`
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Your photos are expiring soon</title>
+</head>
+<body style="margin:0;padding:0;background:#f7f4ee;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#171411;line-height:1.6;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f7f4ee;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;background:#fffdf8;border-radius:18px;padding:40px 32px;box-shadow:0 12px 40px rgba(18,16,12,0.06);">
+          <tr>
+            <td style="padding-bottom:24px;">
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;color:#0f4d5c;">Rajugari Abbayi Photography</div>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <h1 style="margin:0 0 16px;font-size:30px;line-height:1.15;letter-spacing:-0.02em;color:#171411;">Don't lose your photos, ${safeName}</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding-bottom:24px;">
+              <p style="margin:0;font-size:16px;color:#5f584f;">Your gallery <strong>${safeTitle}</strong> will be removed on <strong>${safeDate}</strong> — that's about <strong>${daysLabel}</strong> away. After that the files are permanently deleted. If you haven't downloaded your favourites yet, now's the time.</p>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:8px 0 32px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="border-radius:999px;background:#d44b24;">
+                    <a href="${safeLink}" style="display:inline-block;padding:14px 28px;font-size:16px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:999px;">Download my photos →</a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding-bottom:24px;">
+              <p style="margin:0 0 8px;font-size:14px;color:#5f584f;">The sign-in link lasts 1 hour. If it expires, just reply to this email and I'll send a fresh one — or let me know if you need more time and I can extend your gallery.</p>
+              <p style="margin:0;font-size:13px;color:#8a8278;word-break:break-all;">If the button doesn't work, paste this into your browser:<br><span style="color:#5f584f;">${safeLink}</span></p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding-top:16px;border-top:1px solid #e8e1d4;">
+              <p style="margin:0;font-size:15px;color:#171411;">Thanks again for trusting me with your moments.</p>
+              <p style="margin:4px 0 0;font-size:15px;color:#171411;">— ${escapeHtml(photographer)}</p>
+            </td>
+          </tr>
+        </table>
+        <p style="margin:16px 0 0;font-size:12px;color:#8a8278;">Sent because your photo gallery is expiring. Reply if you need anything.</p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`
+
+  const text = [
+    `Don't lose your photos, ${greetingName}.`,
+    '',
+    `Your gallery "${input.deliveryTitle}" will be removed on ${input.removalDate} — about ${daysLabel} away. After that the files are permanently deleted.`,
+    'Download your favourites here (sign-in link, lasts 1 hour):',
+    input.magicLink,
+    '',
+    "If the link expires, reply and I will send a fresh one — or let me know if you need more time and I can extend your gallery.",
+    '',
+    'Thanks again for trusting me with your moments.',
     `— ${photographer}`,
   ].join('\n')
 

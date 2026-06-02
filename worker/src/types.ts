@@ -72,6 +72,13 @@ export type Env = {
    * <hello@yourdomain.com>". The address's domain must be verified in Resend.
    */
   EMAIL_FROM?: string
+  /**
+   * Retention lifecycle dry-run switch. When "true" (the default if unset),
+   * the daily lifecycle cron LOGS what it would warn/soft-delete/purge but
+   * performs no writes, sends, or deletions. Set to "false" (wrangler var)
+   * only after verifying the dry-run logs look correct.
+   */
+  LIFECYCLE_DRY_RUN?: string
 }
 
 export type User = {

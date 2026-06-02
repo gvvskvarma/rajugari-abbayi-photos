@@ -50,13 +50,25 @@ customer.get('/my-pictures', async (c) => {
       return c.json({ deliveries: [] }, 200, responseHeaders(c))
     }
 
-    const deliveryIds = [...new Set(activeRecipients.map((row) => row.delivery_id))]
-    const deliveryRows = await supabaseRequest<
-      Array<{ id: string; project_id: string | null }>
+    const recipientDeliveryIds = [...new Set(activeRecipients.map((row) => row.delivery_id))]
+    const allDeliveryRows = await supabaseRequest<
+      Array<{ id: string; project_id: string | null; expired_at: string | null; purged_at: string | null }>
     >(
       c.env,
-      `deliveries?id=in.(${deliveryIds.map((id) => encodeURIComponent(id)).join(',')})&select=id,project_id`
+      `deliveries?id=in.(${recipientDeliveryIds.map((id) => encodeURIComponent(id)).join(',')})&select=id,project_id,expired_at,purged_at`
     )
+
+    /* Retention gate: hide deliveries the lifecycle cron has soft-deleted
+       (expired_at) or purged (purged_at). The client no longer sees expired
+       galleries even though their recipient row may still be active. */
+    const deliveryRows = allDeliveryRows.filter(
+      (row) => !row.expired_at && !row.purged_at
+    )
+    const deliveryIds = deliveryRows.map((row) => row.id)
+    if (deliveryIds.length === 0) {
+      return c.json({ deliveries: [] }, 200, responseHeaders(c))
+    }
+    const visibleDeliveryIdSet = new Set(deliveryIds)
     const projectIds = [...new Set(deliveryRows.map((row) => row.project_id).filter((value): value is string => Boolean(value)))]
     const projects = projectIds.length
       ? await supabaseRequest<Array<{ id: string; client_id: string | null; name: string; status: string }>>(
@@ -106,7 +118,9 @@ customer.get('/my-pictures', async (c) => {
 
     const assetById = new Map(allAssets.map((a) => [a.id, a]))
 
-    const deliveryPayloads = activeRecipients.map((recipient) => {
+    const deliveryPayloads = activeRecipients
+      .filter((recipient) => visibleDeliveryIdSet.has(recipient.delivery_id))
+      .map((recipient) => {
       const deliveryId = recipient.delivery_id
       const projectId = deliveryToProject.get(deliveryId) ?? null
       const project = projectId ? projectById.get(projectId) ?? null : null

@@ -23,6 +23,16 @@ R2_BUCKET = "photography-private"
 # is verified in Resend. The local-part (hello@) is arbitrary — Resend
 # accepts any address on a verified domain. Override locally via .dev.vars.
 EMAIL_FROM = "Rajugari Abbayi Photography <hello@rga-photography.com>"
+# Retention lifecycle dry-run. "true" = the daily cron LOGS what it would
+# warn/soft-delete/purge but performs nothing. Flip to "false" only after
+# verifying a week of dry-run logs look correct.
+LIFECYCLE_DRY_RUN = "true"
+
+# Daily retention lifecycle cron (09:12 UTC — offset to avoid the on-the-hour
+# rush). Warns 3 days before expiry, soft-deletes at the 45-day cutoff, purges
+# R2 + rows 3 days after that.
+[triggers]
+crons = ["12 9 * * *"]
 
 # Set secrets with:
 # wrangler secret put SUPABASE_SERVICE_ROLE_KEY
