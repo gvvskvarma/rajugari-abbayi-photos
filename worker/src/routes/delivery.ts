@@ -133,6 +133,15 @@ shareLinks.get('/:token/gallery', async (c) => {
     if (!context) return jsonError('Invalid share token', 403)
     if (new Date(context.link.expires_at).getTime() <= Date.now()) return jsonError('Share link expired', 403)
 
+    /* Retention gate: even a still-valid share link must stop working once
+       the underlying delivery is soft-deleted or its files are purged. */
+    const deliveryState = await supabaseRequest<Array<{ expired_at: string | null; purged_at: string | null }>>(
+      c.env,
+      `deliveries?id=eq.${encodeURIComponent(context.link.delivery_id)}&select=expired_at,purged_at&limit=1`
+    )
+    if (deliveryState[0]?.purged_at) return jsonError('These files have been removed', 410)
+    if (deliveryState[0]?.expired_at) return jsonError('This delivery has expired', 410)
+
     const visibleAssetIds =
       context.link.scope_type === 'selected'
         ? [...context.selectedAssetIds]
@@ -224,8 +233,20 @@ shareLinks.post('/', async (c) => {
       }
     }
 
-    const days = Math.min(30, Math.max(1, body.expiresInDays ?? 7))
-    const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
+    /* Default 7-day share window (was 30). Cap it at the delivery's own
+       retention cutoff — a share link must never outlive the files it
+       points at, or clients hit a dead link after the lifecycle purge. */
+    const days = Math.min(7, Math.max(1, body.expiresInDays ?? 7))
+    let expiresMs = Date.now() + days * 24 * 60 * 60 * 1000
+    const deliveryRetention = await supabaseRequest<Array<{ expires_at: string | null }>>(
+      c.env,
+      `deliveries?id=eq.${encodeURIComponent(body.deliveryId)}&select=expires_at&limit=1`
+    )
+    const retentionMs = deliveryRetention[0]?.expires_at
+      ? new Date(deliveryRetention[0].expires_at).getTime()
+      : null
+    if (retentionMs && retentionMs < expiresMs) expiresMs = retentionMs
+    const expiresAt = new Date(expiresMs).toISOString()
     const token = crypto.randomUUID().replace(/-/g, '')
 
     const inserted = await supabaseRequest<Array<{ id: string; token: string; scope_type: ShareLinkScope }>>(

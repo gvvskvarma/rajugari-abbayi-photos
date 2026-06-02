@@ -48,8 +48,15 @@ export {
 export {
   renderDeliveryReadyEmail,
   sendDeliveryReady,
+  renderExpiryWarningEmail,
+  sendExpiryWarning,
 } from './helpers/email'
-export type { DeliveryReadyEmailInput, EmailSendResult } from './helpers/email'
+export type {
+  DeliveryReadyEmailInput,
+  ExpiryWarningEmailInput,
+  EmailSendResult,
+} from './helpers/email'
+export { ensureAuthUser, generateSignInLink } from './helpers/magic-link'
 
 /* ── Constants ───────────────────────────────────────────────────── */
 

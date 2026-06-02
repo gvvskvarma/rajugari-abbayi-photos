@@ -5,6 +5,7 @@ import {
   resolveAllowedOrigin, buildBaseHeaders, responseHeaders, jsonError, SAFE_ERROR_PATTERNS,
 } from './lib'
 import { reportWorkerError } from './sentry'
+import { runLifecycle } from './helpers/lifecycle'
 
 /* ── Route modules ─────────────────────────────────────────────── */
 import { live } from './routes/live'
@@ -160,4 +161,21 @@ app.route('/api/v1/deliveries', delivery)
 app.route('/api/v1/share-links', shareLinks)
 app.route('/api/v1', customer)
 
-export default app
+/* ── Scheduled (cron) entrypoint ───────────────────────────────────
+   Runs the delivery retention lifecycle daily (see wrangler.toml [triggers]).
+   Wrapped so we keep Hono's fetch handler while adding scheduled(). */
+export default {
+  fetch: app.fetch,
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(
+      runLifecycle(env).catch((error) => {
+        console.error('[lifecycle] run failed:', error)
+        void reportWorkerError(env, error instanceof Error ? error : new Error(String(error)), {
+          requestUrl: 'cron:lifecycle',
+          requestMethod: 'SCHEDULED',
+          status: 500,
+        })
+      }),
+    )
+  },
+}

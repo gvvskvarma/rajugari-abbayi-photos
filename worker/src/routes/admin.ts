@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import type { Env, AdminActivityKind, AdminActivityRow } from '../types'
+import { runLifecycle } from '../helpers/lifecycle'
 import {
   adminActivityKinds, MAX_LONG_TEXT,
   responseHeaders, jsonError,
@@ -7,7 +8,7 @@ import {
   insertAdminActivity, serializeAdminActivity,
   deleteStoredAssets, streamZipResponse,
   parseNullableText, parseProjectStatus, sanitizeArchiveEntryName,
-  filterUuids, sendDeliveryReady,
+  filterUuids, sendDeliveryReady, ensureAuthUser, generateSignInLink,
 } from '../lib'
 
 const admin = new Hono<{ Bindings: Env }>()
@@ -497,94 +498,6 @@ admin.delete('/assets/:assetId', async (c) => {
    doesn't belong to this admin.
 ─────────────────────────────────────────────────────────────────── */
 
-type GenerateLinkResponse = {
-  properties?: {
-    action_link?: string
-    hashed_token?: string
-  }
-  action_link?: string
-  hashed_token?: string
-}
-
-/**
- * Ensure an auth user exists for this email before we mint a magic link.
- *
- * Why this is necessary: the admin `generate_link` endpoint with
- * type `magiclink` only works for users that already exist. But this
- * feature's whole purpose is emailing *new* clients who have never logged
- * in — they have no `auth.users` row yet. The existing customer login uses
- * `signInWithOtp({ shouldCreateUser: true })`, which auto-creates; the admin
- * API does not. So we create the user up front (idempotently) to match.
- *
- * `email_confirm: true` marks the email as verified so the magic link works
- * immediately — same shape as a passwordless user created via OTP signup.
- * A 422 "already been registered" is the expected happy path on repeat sends
- * and is swallowed.
- */
-const ensureAuthUser = async (env: Env, email: string): Promise<void> => {
-  const response = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users`, {
-    method: 'POST',
-    headers: {
-      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({ email, email_confirm: true }),
-  })
-  if (response.ok) return
-  const body = await response.text()
-  /* User already exists → exactly what we want. GoTrue returns 422 with an
-     "already been registered" / "already exists" message. Treat as success. */
-  if (response.status === 422 || /already.*(registered|exist)/i.test(body)) return
-  throw new Error(`Supabase create user failed (${response.status}): ${body.slice(0, 200)}`)
-}
-
-/**
- * Mint a sign-in `token_hash` via Supabase admin generate_link, then build a
- * link to our own `/auth/callback` route.
- *
- * Why token_hash and not the default `action_link`: the action_link drives
- * the PKCE `?code=` flow, which requires a code verifier stored in the
- * client's browser when the login was *initiated there*. But this link is
- * minted server-side and clicked by a client who never started a login in
- * their browser — so there's no verifier, and the auto-exchange fails
- * silently (the client appears signed in to Supabase but the SPA session
- * never hydrates, forcing a second manual login). The `token_hash` is
- * verified client-side via `verifyOtp`, which needs no verifier. Our
- * `/auth/callback` page does that verification and forwards to the gallery.
- *
- * Call `ensureAuthUser` first — magiclink requires the user to exist.
- *
- * Expiry is governed by the project's Auth → Email OTP setting. Supabase
- * recommends ≤1h (3600s); the email copy says "1 hour" to match, and the
- * "reply for a fresh link" line covers an expired click.
- */
-const generateSignInLink = async (env: Env, email: string): Promise<string> => {
-  const response = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/generate_link`, {
-    method: 'POST',
-    headers: {
-      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({ type: 'magiclink', email }),
-  })
-  if (!response.ok) {
-    const body = await response.text()
-    throw new Error(`Supabase generate_link failed (${response.status}): ${body.slice(0, 200)}`)
-  }
-  const payload = (await response.json()) as GenerateLinkResponse
-  const tokenHash = payload.properties?.hashed_token ?? payload.hashed_token
-  if (!tokenHash) throw new Error('Supabase generate_link returned no hashed_token')
-
-  /* Build a link to our own callback. `next` is the gallery; the callback
-     verifies token_hash, sets the session, then forwards there.
-     type=email is the canonical value for verifyOtp on a magic-link
-     token_hash (per Supabase docs) — NOT "magiclink", which fails. */
-  const next = encodeURIComponent('/my-pictures')
-  return `${env.APP_ORIGIN}/auth/callback?token_hash=${encodeURIComponent(tokenHash)}&type=email&next=${next}`
-}
-
 /** First name, capitalized for a polished greeting ("aarav kumar" -> "Aarav"). */
 const firstName = (fullName: string | null | undefined): string => {
   const trimmed = (fullName ?? '').trim()
@@ -732,6 +645,90 @@ admin.post('/deliveries/:deliveryId/notify', async (c) => {
       /bearer token|session token|not available in session/i.test(message) ? 401 :
       /admin access/i.test(message) ? 403 :
       /not found|not owned/i.test(message) ? 404 :
+      500
+    return jsonError(message, status)
+  }
+})
+
+/* ── Extend retention ───────────────────────────────────────────────
+   POST /api/v1/admin/deliveries/:deliveryId/extend
+
+   Pushes a delivery's expiry RETENTION_DAYS into the future and clears the
+   warning flag. If the delivery was soft-deleted but not yet purged, this
+   also restores client access (clears expired_at + status). No-op once a
+   delivery has been purged (files are already gone). */
+admin.post('/deliveries/:deliveryId/extend', async (c) => {
+  try {
+    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
+    ensureAdmin(user)
+    const deliveryId = c.req.param('deliveryId')
+    if (!deliveryId) return jsonError('deliveryId is required', 400)
+    await ensureAdminAndOwnedDelivery(c.env, user, deliveryId)
+
+    const rows = await supabaseRequest<Array<{ id: string; purged_at: string | null; client_id: string; project_id: string }>>(
+      c.env,
+      `deliveries?id=eq.${encodeURIComponent(deliveryId)}&select=id,purged_at,client_id,project_id&limit=1`
+    )
+    const delivery = rows[0]
+    if (!delivery) return jsonError('Delivery not found', 404)
+    if (delivery.purged_at) {
+      return jsonError('These files have already been permanently removed and cannot be restored.', 409)
+    }
+
+    const RETENTION_DAYS = 45
+    const newExpiry = new Date(Date.now() + RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString()
+    await supabaseRequest(
+      c.env,
+      `deliveries?id=eq.${encodeURIComponent(deliveryId)}`,
+      {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        /* Clear expired_at + warning so a soft-deleted delivery comes back and
+           re-arms a fresh warning before the new cutoff. */
+        body: JSON.stringify({ expires_at: newExpiry, expired_at: null, expiry_warning_sent_at: null, status: 'shared' }),
+      },
+      true
+    )
+
+    await insertAdminActivity(c.env, {
+      ownerUserId: user.id,
+      kind: 'edit',
+      title: 'Extended retention',
+      detail: `Extended delivery to ${new Date(newExpiry).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`,
+      clientId: delivery.client_id,
+      projectId: delivery.project_id,
+      metadata: { expiresAt: newExpiry },
+    })
+
+    return c.json({ ok: true, deliveryId, expiresAt: newExpiry }, 200, responseHeaders(c))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to extend retention'
+    const status =
+      /bearer token|session token|not available in session/i.test(message) ? 401 :
+      /admin access/i.test(message) ? 403 :
+      /not found|not owned/i.test(message) ? 404 :
+      500
+    return jsonError(message, status)
+  }
+})
+
+/* ── Manual lifecycle trigger (admin) ───────────────────────────────
+   POST /api/v1/admin/lifecycle/run
+
+   Runs the retention lifecycle on demand and returns the report. Respects
+   LIFECYCLE_DRY_RUN exactly like the cron, so it's safe to call for
+   verification — in dry-run it only logs/reports, changing nothing. */
+admin.post('/lifecycle/run', async (c) => {
+  try {
+    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
+    ensureAdmin(user)
+    const report = await runLifecycle(c.env)
+    return c.json(report, 200, responseHeaders(c))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Lifecycle run failed'
+    const status =
+      /bearer token|session token|not available in session/i.test(message) ? 401 :
+      /admin access/i.test(message) ? 403 :
       500
     return jsonError(message, status)
   }
