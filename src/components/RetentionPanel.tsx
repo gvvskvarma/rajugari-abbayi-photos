@@ -19,6 +19,11 @@ function retentionState(d: ClientDelivery): Retention {
     return { label: 'No expiry', tone: 'ok', canExtend: true, sub: 'No retention set' }
   }
   const daysLeft = Math.ceil((new Date(d.expiresAt).getTime() - Date.now()) / DAY_MS)
+  if (daysLeft <= 0) {
+    /* Past the cutoff but the cron hasn't soft-deleted yet (e.g. dry-run, or
+       before the next daily run). Surface it as due, not negative days. */
+    return { label: 'Expiring now', tone: 'warn', canExtend: true, sub: `Past cutoff (${formatDate(d.expiresAt)}) · removed on next run` }
+  }
   if (daysLeft <= 3) {
     return { label: 'Expiring soon', tone: 'warn', canExtend: true, sub: `${daysLeft}d left · removed ${formatDate(d.expiresAt)}` }
   }
