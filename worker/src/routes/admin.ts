@@ -135,15 +135,26 @@ admin.get('/clients/:clientId/deliveries', async (c) => {
         `&order=created_at.desc`
     )
 
-    /* Asset count per delivery in one query via the mapping table. */
+    /* Asset count + recipient emails per delivery, each in one batched query. */
     const ids = rows.map((r) => r.id)
     const counts = new Map<string, number>()
+    const recipientsByDelivery = new Map<string, string[]>()
     if (ids.length) {
       const links = await supabaseRequest<Array<{ delivery_id: string }>>(
         c.env,
         `delivery_assets?or=(${ids.map((id) => `delivery_id.eq.${encodeURIComponent(id)}`).join(',')})&select=delivery_id`
       )
       for (const l of links) counts.set(l.delivery_id, (counts.get(l.delivery_id) ?? 0) + 1)
+
+      const recips = await supabaseRequest<Array<{ delivery_id: string; email: string }>>(
+        c.env,
+        `delivery_recipients?or=(${ids.map((id) => `delivery_id.eq.${encodeURIComponent(id)}`).join(',')})&select=delivery_id,email`
+      )
+      for (const r of recips) {
+        const list = recipientsByDelivery.get(r.delivery_id) ?? []
+        list.push(r.email)
+        recipientsByDelivery.set(r.delivery_id, list)
+      }
     }
 
     const deliveries = rows.map((r) => ({
@@ -156,6 +167,7 @@ admin.get('/clients/:clientId/deliveries', async (c) => {
       sharedAt: r.shared_at,
       createdAt: r.created_at,
       assetCount: counts.get(r.id) ?? 0,
+      recipients: recipientsByDelivery.get(r.id) ?? [],
     }))
 
     return c.json({ deliveries }, 200, responseHeaders(c))
@@ -696,6 +708,123 @@ admin.post('/deliveries/:deliveryId/notify', async (c) => {
        down, Resend down, unexpected) is a genuine 5xx. Returning 500 for an
        auth failure would mislead monitoring and the admin UI. */
     const message = error instanceof Error ? error.message : 'Failed to notify client'
+    const status =
+      /bearer token|session token|not available in session/i.test(message) ? 401 :
+      /admin access/i.test(message) ? 403 :
+      /not found|not owned/i.test(message) ? 404 :
+      500
+    return jsonError(message, status)
+  }
+})
+
+/* ── Share with an additional recipient (e.g. family member) ─────────
+   POST /api/v1/admin/deliveries/:deliveryId/recipients   { email, name? }
+
+   Grants another email full ("owner") access to an already-uploaded
+   delivery and sends them the same "your photos are ready" magic-link
+   email the primary client received. They sign in via the link and see the
+   gallery at /my-pictures exactly like the client. Retention/expiry applies
+   automatically (gated at the delivery level).
+
+   Unlike notify, we insert the recipient row BEFORE sending the email: the
+   recipient row is what grants access, so it must exist when they click. The
+   insert is idempotent (UNIQUE delivery_id,email), so a retry after an email
+   failure is clean. */
+admin.post('/deliveries/:deliveryId/recipients', async (c) => {
+  try {
+    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
+    ensureAdmin(user)
+
+    if (!c.env.RESEND_API_KEY || !c.env.EMAIL_FROM) {
+      return jsonError('Email is not configured yet. Add RESEND_API_KEY and EMAIL_FROM, then redeploy.', 503)
+    }
+
+    const deliveryId = c.req.param('deliveryId')
+    if (!deliveryId) return jsonError('deliveryId is required', 400)
+    await ensureAdminAndOwnedDelivery(c.env, user, deliveryId)
+
+    const body = await c.req.json<{ email?: string; name?: string }>()
+    const email = (body.email ?? '').trim().toLowerCase()
+    if (!email || !email.includes('@') || email.length > 254) {
+      return jsonError('A valid email is required', 400)
+    }
+    const recipientName = firstName(body.name ?? '')
+
+    /* Delivery metadata for the email + a guard against sharing an empty or
+       already-expired/purged delivery. */
+    const rows = await supabaseRequest<Array<{
+      id: string
+      client_id: string
+      project_id: string
+      expired_at: string | null
+      purged_at: string | null
+      projects: { name: string } | null
+    }>>(
+      c.env,
+      `deliveries?id=eq.${encodeURIComponent(deliveryId)}&select=id,client_id,project_id,expired_at,purged_at,projects(name)&limit=1`
+    )
+    const delivery = rows[0]
+    if (!delivery) return jsonError('Delivery not found', 404)
+    if (delivery.purged_at) return jsonError('These files have been removed and can no longer be shared.', 409)
+    if (delivery.expired_at) return jsonError('This delivery has expired. Extend it first, then share.', 409)
+
+    const deliveryTitle = delivery.projects?.name?.trim() || 'your shoot'
+    const assetRows = await supabaseRequest<Array<{ asset_id: string }>>(
+      c.env,
+      `delivery_assets?delivery_id=eq.${encodeURIComponent(deliveryId)}&select=asset_id`
+    )
+    const assetCount = assetRows.length
+    if (assetCount === 0) {
+      return jsonError('This delivery has no photos yet.', 400)
+    }
+
+    /* 1. Grant access FIRST (idempotent) so the link works the moment they
+       click. access_mode 'owner' = full view + download + reshare, same as
+       the primary client. */
+    await ensureAuthUser(c.env, email)
+    await supabaseRequest(
+      c.env,
+      'delivery_recipients?on_conflict=delivery_id,email',
+      {
+        method: 'POST',
+        headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
+        body: JSON.stringify({ delivery_id: deliveryId, email, access_mode: 'owner' }),
+      },
+      true
+    )
+
+    /* 2. Send the same delivery-ready email with a magic link. */
+    const magicLink = await generateSignInLink(c.env, email)
+    const result = await sendDeliveryReady(c.env, {
+      to: email,
+      clientName: recipientName,
+      deliveryTitle,
+      magicLink,
+      assetCount,
+    })
+
+    /* 3. Audit (best-effort). */
+    try {
+      await insertAdminActivity(c.env, {
+        ownerUserId: user.id,
+        kind: 'edit',
+        title: 'Shared with family',
+        detail: `Shared "${deliveryTitle}" with ${email}`,
+        clientId: delivery.client_id,
+        projectId: delivery.project_id,
+        metadata: { messageId: result.messageId, email },
+      })
+    } catch (auditError) {
+      console.error('[recipients] audit failed (email already sent):', auditError)
+    }
+
+    return c.json(
+      { ok: true, deliveryId, recipientEmail: email, messageId: result.messageId, sentAt: result.sentAt },
+      200,
+      responseHeaders(c)
+    )
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to share delivery'
     const status =
       /bearer token|session token|not available in session/i.test(message) ? 401 :
       /admin access/i.test(message) ? 403 :

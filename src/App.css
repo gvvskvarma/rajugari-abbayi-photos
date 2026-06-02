@@ -3784,14 +3784,38 @@ img.rotator-image {
 
 .retention-row {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 0.7rem;
   padding: 0.9rem 1rem;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface);
+}
+
+.retention-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.retention-share {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line);
+}
+
+.retention-share .share-link-input {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.retention-share-error {
+  margin: 0.2rem 0 0;
 }
 
 .retention-main {
