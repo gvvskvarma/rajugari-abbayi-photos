@@ -6,6 +6,7 @@ export const queryKeys = {
   shareThumbnailBatch: (token: string, ids: string[]) => ['share-thumbnail-batch', token, ...ids] as const,
   sharePreviewUrl: (token: string, assetId: string) => ['share-preview-url', token, assetId] as const,
   adminClients: (userId: string) => ['admin-clients', userId] as const,
+  adminClientDeliveries: (clientId: string) => ['admin-client-deliveries', clientId] as const,
   adminActivity: (clientId?: string) => ['admin-activity', clientId ?? 'global'] as const,
   adminPreviewBatch: (ids: string[]) => ['admin-preview-batch', ...ids] as const,
   homepageGallery: () => ['homepage-gallery'] as const,

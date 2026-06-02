@@ -109,6 +109,61 @@ admin.get('/clients', async (c) => {
   }
 })
 
+/* ── Client deliveries with retention info (for the admin Retention panel) ──
+   GET /api/v1/admin/clients/:clientId/deliveries */
+admin.get('/clients/:clientId/deliveries', async (c) => {
+  try {
+    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
+    ensureAdmin(user)
+    const clientId = c.req.param('clientId')
+    if (!clientId) return jsonError('clientId is required', 400)
+
+    const rows = await supabaseRequest<Array<{
+      id: string
+      status: string
+      expires_at: string | null
+      expired_at: string | null
+      purged_at: string | null
+      shared_at: string | null
+      created_at: string
+      projects: { name: string | null } | null
+    }>>(
+      c.env,
+      `deliveries?owner_user_id=eq.${encodeURIComponent(user.id)}` +
+        `&client_id=eq.${encodeURIComponent(clientId)}` +
+        `&select=id,status,expires_at,expired_at,purged_at,shared_at,created_at,projects(name)` +
+        `&order=created_at.desc`
+    )
+
+    /* Asset count per delivery in one query via the mapping table. */
+    const ids = rows.map((r) => r.id)
+    const counts = new Map<string, number>()
+    if (ids.length) {
+      const links = await supabaseRequest<Array<{ delivery_id: string }>>(
+        c.env,
+        `delivery_assets?or=(${ids.map((id) => `delivery_id.eq.${encodeURIComponent(id)}`).join(',')})&select=delivery_id`
+      )
+      for (const l of links) counts.set(l.delivery_id, (counts.get(l.delivery_id) ?? 0) + 1)
+    }
+
+    const deliveries = rows.map((r) => ({
+      deliveryId: r.id,
+      title: r.projects?.name?.trim() || 'Untitled delivery',
+      status: r.status,
+      expiresAt: r.expires_at,
+      expiredAt: r.expired_at,
+      purgedAt: r.purged_at,
+      sharedAt: r.shared_at,
+      createdAt: r.created_at,
+      assetCount: counts.get(r.id) ?? 0,
+    }))
+
+    return c.json({ deliveries }, 200, responseHeaders(c))
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Failed to load deliveries', 403)
+  }
+})
+
 admin.post('/clients', async (c) => {
   try {
     const user = await getUserFromBearer(c.env, c.req.header('authorization'))
