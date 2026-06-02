@@ -13,6 +13,7 @@ export type ClientDelivery = {
   sharedAt: string | null
   createdAt: string
   assetCount: number
+  recipients: string[]
 }
 
 /**
@@ -55,5 +56,22 @@ export function useClientDeliveries(clientId: string | undefined) {
     },
   })
 
-  return { ...query, extend }
+  const addRecipient = useMutation({
+    mutationFn: async (vars: { deliveryId: string; email: string; name?: string }) => {
+      const token = await getAccessToken()
+      if (!token) throw new Error('Not authenticated')
+      return workerRequest<{ ok: boolean; recipientEmail: string }>(
+        `/api/v1/admin/deliveries/${vars.deliveryId}/recipients`,
+        token,
+        { method: 'POST', body: { email: vars.email, name: vars.name } },
+      )
+    },
+    onSuccess: () => {
+      if (clientId) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.adminClientDeliveries(clientId) })
+      }
+    },
+  })
+
+  return { ...query, extend, addRecipient }
 }
