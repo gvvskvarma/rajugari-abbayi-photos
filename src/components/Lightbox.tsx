@@ -108,12 +108,11 @@ export function Lightbox({
         handleMove(delta < 0 ? 'next' : 'prev')
       }}
     >
-      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- stop propagation on panel */}
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events -- click only stops backdrop-close; keyboard nav is handled globally on window (a panel onKeyDown would swallow arrow keys) */}
       <div
         className="customer-lightbox-panel"
         role="document"
         onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
       >
         <button
           className="customer-lightbox-close"

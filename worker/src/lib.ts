@@ -281,54 +281,84 @@ const uniquifyArchiveEntryName = (filename: string, seen: Set<string>) => {
 
 export const streamZipResponse = async (c: Context<{ Bindings: Env }>, entries: Array<{ filename: string; r2_object_key: string }>, archiveName: string) => {
   const { Zip: ZipCtor, ZipPassThrough: ZipPassThroughCtor } = await import('fflate')
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      const zip = new ZipCtor((error, chunk, final) => {
-        if (error) { controller.error(error); return }
-        if (chunk) controller.enqueue(chunk)
-        if (final) controller.close()
-      })
-      void (async () => {
-        try {
-          const seenNames = new Set<string>()
-          /* Prefetch next object while streaming the current one.
-             We kick off GET N+1 as soon as we start streaming N. */
-          const PREFETCH_AHEAD = 2
-          const pending: Array<Promise<R2ObjectBody | null>> = []
-          const getObject = (key: string) =>
-            c.env.R2_MEDIA_BUCKET.get(key) as Promise<R2ObjectBody | null>
 
-          // seed the prefetch window
-          for (let i = 0; i < Math.min(PREFETCH_AHEAD, entries.length); i++) {
-            pending.push(getObject(entries[i].r2_object_key))
+  /* Backpressure plumbing. R2 → Worker is fast; Worker → client is internet
+     speed. Without pacing, the producer reads the whole delivery from R2 far
+     faster than the client drains it, buffering hundreds of MB in the
+     Worker's ~128MB memory until it is killed mid-stream — which truncates
+     the zip, so the client gets a corrupt file (macOS "Error 79"). We pause
+     the producer whenever the stream buffer is full and resume on `pull`. */
+  let drainResolve: (() => void) | null = null
+  const releaseDrain = () => {
+    if (drainResolve) { const r = drainResolve; drainResolve = null; r() }
+  }
+
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      start(controller) {
+        const zip = new ZipCtor((error, chunk, final) => {
+          if (error) { controller.error(error); return }
+          if (chunk) controller.enqueue(chunk)
+          if (final) controller.close()
+        })
+
+        /* Block until the consumer signals it can take more (desiredSize > 0). */
+        const waitForDrain = async () => {
+          while (controller.desiredSize !== null && controller.desiredSize <= 0) {
+            await new Promise<void>((res) => { drainResolve = res })
           }
+        }
 
-          for (let i = 0; i < entries.length; i++) {
-            const entry = entries[i]
-            const object = await pending.shift()
-            if (!object?.body) throw new Error(`File missing in storage for ${entry.filename}. Re-upload required.`)
+        void (async () => {
+          try {
+            const seenNames = new Set<string>()
+            /* Prefetch next object while streaming the current one. */
+            const PREFETCH_AHEAD = 2
+            const pending: Array<Promise<R2ObjectBody | null>> = []
+            const getObject = (key: string) =>
+              c.env.R2_MEDIA_BUCKET.get(key) as Promise<R2ObjectBody | null>
 
-            // kick off the next prefetch as soon as we start streaming current
-            const nextIdx = i + PREFETCH_AHEAD
-            if (nextIdx < entries.length) {
-              pending.push(getObject(entries[nextIdx].r2_object_key))
+            for (let i = 0; i < Math.min(PREFETCH_AHEAD, entries.length); i++) {
+              pending.push(getObject(entries[i].r2_object_key))
             }
 
-            const archiveEntry = new ZipPassThroughCtor(uniquifyArchiveEntryName(entry.filename, seenNames))
-            zip.add(archiveEntry)
-            const reader = object.body.getReader()
-            while (true) {
-              const { done, value } = await reader.read()
-              if (done) break
-              if (value) archiveEntry.push(value, false)
+            for (let i = 0; i < entries.length; i++) {
+              const entry = entries[i]
+              const object = await pending.shift()
+              if (!object?.body) throw new Error(`File missing in storage for ${entry.filename}. Re-upload required.`)
+
+              const nextIdx = i + PREFETCH_AHEAD
+              if (nextIdx < entries.length) {
+                pending.push(getObject(entries[nextIdx].r2_object_key))
+              }
+
+              const archiveEntry = new ZipPassThroughCtor(uniquifyArchiveEntryName(entry.filename, seenNames))
+              zip.add(archiveEntry)
+              const reader = object.body.getReader()
+              while (true) {
+                const { done, value } = await reader.read()
+                if (done) break
+                if (value) {
+                  archiveEntry.push(value, false)
+                  await waitForDrain()
+                }
+              }
+              archiveEntry.push(new Uint8Array(0), true)
+              await waitForDrain()
             }
-            archiveEntry.push(new Uint8Array(0), true)
-          }
-          zip.end()
-        } catch (error) { controller.error(error instanceof Error ? error : new Error('Failed to build archive')) }
-      })()
+            zip.end()
+          } catch (error) { controller.error(error instanceof Error ? error : new Error('Failed to build archive')) }
+        })()
+      },
+      /* Consumer drained some — release the paused producer. */
+      pull() { releaseDrain() },
+      /* Client aborted the download — unblock the producer so it unwinds. */
+      cancel() { releaseDrain() },
     },
-  })
+    /* Buffer ~8MB before applying backpressure. Keeps Worker memory bounded
+       well under the limit regardless of how large the delivery is. */
+    new ByteLengthQueuingStrategy({ highWaterMark: 8 * 1024 * 1024 }),
+  )
   return new Response(stream, {
     status: 200,
     headers: { ...responseHeaders(c), 'content-type': 'application/zip', 'content-disposition': `attachment; filename="${sanitizeArchiveEntryName(archiveName)}"`, 'cache-control': 'no-store' },
