@@ -2,10 +2,68 @@ import { useMemo, useState } from 'react'
 import type { useMyPictures } from '../hooks/useMyPictures'
 import type { DeliveryAsset, DeliveryCard as DeliveryCardType } from '../types'
 import { groupAssetsByFolder, UNGROUPED_KEY } from '../lib/folders'
-import { getDisplayFileName } from '../lib/upload'
+import { getDisplayFileName, sanitizeDownloadName } from '../lib/upload'
+import { splitIntoDownloadParts, formatBytes } from '../lib/downloadParts'
 import { getAssetKind } from '../lib/helpers'
 
 type Pics = ReturnType<typeof useMyPictures>
+
+/**
+ * Download control that auto-splits large sets into size-capped parts. Each
+ * part is a separate request (fresh memory + CPU budget), so big galleries
+ * download reliably even on Cloudflare's Free plan. Under the cap it's a
+ * single button, exactly as before.
+ */
+function DownloadButtons({
+  assets,
+  deliveryId,
+  baseName,
+  label,
+  pics,
+}: {
+  assets: DeliveryAsset[]
+  deliveryId: string
+  baseName: string
+  label: string
+  pics: Pics
+}) {
+  const parts = useMemo(() => splitIntoDownloadParts(assets), [assets])
+  const safeBase = sanitizeDownloadName(baseName || 'photos')
+
+  if (assets.length === 0) return null
+
+  if (parts.length <= 1) {
+    return (
+      <button
+        className="button ghost"
+        type="button"
+        disabled={pics.actionBusy}
+        onClick={() => pics.handleDownloadPart(deliveryId, parts[0]?.assetIds ?? assets.map((a) => a.id), `${safeBase}.zip`)}
+      >
+        {pics.actionBusy ? 'Working…' : label}
+      </button>
+    )
+  }
+
+  return (
+    <span className="download-parts">
+      <span className="download-parts-note">
+        {label} — large gallery, split into {parts.length} parts:
+      </span>
+      {parts.map((p) => (
+        <button
+          key={p.index}
+          className="button ghost"
+          type="button"
+          disabled={pics.actionBusy}
+          onClick={() => pics.handleDownloadPart(deliveryId, p.assetIds, `${safeBase}-part-${p.index}-of-${p.total}.zip`)}
+        >
+          Part {p.index} of {p.total} ({formatBytes(p.bytes)})
+        </button>
+      ))}
+    </span>
+  )
+}
 
 /**
  * One delivery in the client gallery. When the delivery's files span multiple
@@ -22,6 +80,7 @@ export function CustomerDeliveryCard({ delivery, pics }: { delivery: DeliveryCar
   const { groups, hasFolders } = useMemo(() => groupAssetsByFolder(delivery.assets), [delivery.assets])
   const activeGroup = activeFolderKey ? groups.find((g) => g.key === activeFolderKey) ?? null : null
 
+  const deliveryName = delivery.projectName || delivery.clientName || 'photos'
   const folderLabel = (key: string, name: string | null) => (key === UNGROUPED_KEY || !name ? 'Unsorted' : name)
 
   /* Per-asset tile — shared between flat and folder-detail grids. `selectable`
@@ -115,7 +174,7 @@ export function CustomerDeliveryCard({ delivery, pics }: { delivery: DeliveryCar
         <>
           {canAct && (
             <div className="delivery-action-bar">
-              <button className="button ghost" type="button" disabled={pics.actionBusy} onClick={() => pics.handleDownloadAll(delivery.deliveryId)}>Download everything</button>
+              <DownloadButtons assets={delivery.assets} deliveryId={delivery.deliveryId} baseName={deliveryName} label="Download everything" pics={pics} />
               <button className="button ghost" type="button" disabled={pics.actionBusy} onClick={() => pics.handleShareAll(delivery.deliveryId)}>Share everything</button>
             </div>
           )}
@@ -148,10 +207,13 @@ export function CustomerDeliveryCard({ delivery, pics }: { delivery: DeliveryCar
             <strong>{folderLabel(activeGroup.key, activeGroup.name)}</strong>
             {canAct && (
               <span className="folder-detail-actions">
-                <button className="button ghost" type="button" disabled={pics.actionBusy}
-                  onClick={() => pics.handleDownloadAssets(delivery.deliveryId, activeGroup.assets.map((a) => a.id))}>
-                  {pics.actionBusy ? 'Working…' : 'Download this folder'}
-                </button>
+                <DownloadButtons
+                  assets={activeGroup.assets}
+                  deliveryId={delivery.deliveryId}
+                  baseName={`${deliveryName} - ${folderLabel(activeGroup.key, activeGroup.name)}`}
+                  label="Download this folder"
+                  pics={pics}
+                />
                 <button className="button ghost" type="button" disabled={pics.actionBusy}
                   onClick={() => pics.handleShareAssets(delivery.deliveryId, activeGroup.assets.map((a) => a.id))}>
                   Share this folder
@@ -186,7 +248,7 @@ export function CustomerDeliveryCard({ delivery, pics }: { delivery: DeliveryCar
                 </>
               ) : (
                 <>
-                  <button className="button ghost" type="button" disabled={pics.actionBusy} onClick={() => pics.handleDownloadAll(delivery.deliveryId)}>Download all</button>
+                  <DownloadButtons assets={delivery.assets} deliveryId={delivery.deliveryId} baseName={deliveryName} label="Download all" pics={pics} />
                   <button className="button ghost" type="button" disabled={pics.actionBusy} onClick={() => pics.startSelectMode(delivery.deliveryId)}>Select files</button>
                   <button className="button ghost" type="button" disabled={pics.actionBusy} onClick={() => pics.handleShareAll(delivery.deliveryId)}>Share all</button>
                 </>

@@ -137,6 +137,20 @@ export function useMyPictures() {
     onError: (error: Error) => { setActionMessage(error.message) },
   })
 
+  /* Download an explicit asset set with a caller-chosen filename — used for
+     split "Part N of M" downloads. Reuses the same /download endpoint. */
+  const downloadNamedMutation = useMutation({
+    mutationFn: async ({ deliveryId, assetIds, filename }: { deliveryId: string; assetIds: string[]; filename: string }) => {
+      const token = await getAccessToken()
+      if (!token) throw new Error('Login session expired. Please log in again.')
+      const blob = await loadWorkerBlob(`/api/v1/deliveries/${deliveryId}/download`, token, {
+        method: 'POST', body: { assetIds },
+      })
+      triggerBrowserDownload(blob, filename)
+    },
+    onError: (error: Error) => { setActionMessage(error.message) },
+  })
+
   const shareAllMutation = useMutation({
     mutationFn: async (deliveryId: string) => {
       const token = await getAccessToken()
@@ -177,6 +191,7 @@ export function useMyPictures() {
   const actionBusy =
     downloadAllMutation.isPending ||
     downloadSelectedMutation.isPending ||
+    downloadNamedMutation.isPending ||
     shareAllMutation.isPending ||
     shareSelectedMutation.isPending
 
@@ -200,6 +215,12 @@ export function useMyPictures() {
   const handleShareAssets = (deliveryId: string, assetIds: string[]) => {
     if (assetIds.length === 0) return
     shareSelectedMutation.mutate({ deliveryId, assetIds })
+  }
+
+  /* Download one split part with an explicit filename (e.g. "Haldi-part-1-of-3.zip"). */
+  const handleDownloadPart = (deliveryId: string, assetIds: string[], filename: string) => {
+    if (assetIds.length === 0) return
+    downloadNamedMutation.mutate({ deliveryId, assetIds, filename })
   }
 
   const handleShareSelected = () => {
@@ -295,6 +316,7 @@ export function useMyPictures() {
     handleShareSelected,
     handleDownloadAssets,
     handleShareAssets,
+    handleDownloadPart,
     handleCopyShareLink,
     handleOpenAsset,
   }

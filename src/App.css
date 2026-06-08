@@ -3796,6 +3796,20 @@ img.rotator-image {
   white-space: nowrap;
 }
 
+/* ===== Client gallery: split downloads ===== */
+.download-parts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.download-parts-note {
+  font-size: 0.8rem;
+  color: var(--muted);
+  width: 100%;
+}
+
 /* ===== Client gallery: folders ===== */
 .folder-grid {
   display: grid;
