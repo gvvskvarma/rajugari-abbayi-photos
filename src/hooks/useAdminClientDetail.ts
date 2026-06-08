@@ -17,6 +17,7 @@ import { useAdminActivity } from './queries/useAdminActivity'
 import { supabase } from '../lib/supabase'
 import { ADMIN_PROJECT_CHUNK_SIZE, getAssetKind } from '../lib/helpers'
 import { getDisplayFileName, sanitizeDownloadName } from '../lib/upload'
+import { splitIntoDownloadParts } from '../lib/downloadParts'
 import { queryClient } from '../lib/queryClient'
 import { queryKeys } from '../lib/queryKeys'
 
@@ -308,27 +309,55 @@ export function useAdminClientDetail() {
     }
   }
 
+  /* Download an asset set, auto-split into ~1.5GB parts so large folders stay
+     under the Free-plan per-request limits. Parts download sequentially (the
+     browser may ask to allow multiple files — that's expected). */
+  const downloadAdminInParts = async (
+    assets: Array<{ id: string; bytes: number }>,
+    baseName: string,
+    activity: { kind: AdminActivityKind; title: string; detail: string; context?: Record<string, unknown> },
+  ) => {
+    const parts = splitIntoDownloadParts(assets)
+    const safeBase = sanitizeDownloadName(baseName)
+    for (const part of parts) {
+      const filename = parts.length > 1
+        ? `${safeBase}-part-${part.index}-of-${part.total}.zip`
+        : `${safeBase}.zip`
+      await downloadAdminArchive(
+        '/api/v1/admin/downloads',
+        { assetIds: part.assetIds, filename: baseName },
+        filename,
+        part.index === 1
+          ? { kind: activity.kind, title: activity.title, detail: parts.length > 1 ? `${activity.detail} (${parts.length} parts)` : activity.detail, context: activity.context }
+          : undefined,
+      )
+    }
+  }
+
   const handleDownloadAdminProject = async (project: AdminProject) => {
     if (!supabase || !session?.user.id || role !== 'admin') return
-    const projectAssetIds = selectedAdminClient?.assets
-      .filter((asset) => asset.project_id === project.id).map((asset) => asset.id) ?? []
-    if (projectAssetIds.length === 0) { setAdminError('No files found for this folder.'); return }
-    await downloadAdminArchive('/api/v1/admin/downloads', { assetIds: projectAssetIds, filename: project.name },
-      `${sanitizeDownloadName(project.name)}.zip`, {
-        kind: 'download', title: 'Downloaded folder', detail: project.name,
-        context: { clientId: selectedAdminClient?.id ?? null, projectId: project.id, metadata: { count: projectAssetIds.length } },
-      })
+    const projectAssets = selectedAdminClient?.assets
+      .filter((asset) => asset.project_id === project.id)
+      .map((asset) => ({ id: asset.id, bytes: asset.bytes })) ?? []
+    if (projectAssets.length === 0) { setAdminError('No files found for this folder.'); return }
+    await downloadAdminInParts(projectAssets, project.name, {
+      kind: 'download', title: 'Downloaded folder', detail: project.name,
+      context: { clientId: selectedAdminClient?.id ?? null, projectId: project.id, metadata: { count: projectAssets.length } },
+    })
   }
 
   const handleDownloadSelectedAdminAssets = async () => {
     if (!supabase || !session?.user.id || role !== 'admin' || selectedAdminAssetIds.length === 0) return
     const clientName = selectedAdminClient?.full_name ?? 'selected-files'
-    await downloadAdminArchive('/api/v1/admin/downloads', { assetIds: selectedAdminAssetIds, filename: clientName },
-      `${sanitizeDownloadName(clientName)}-selected.zip`, {
-        kind: 'download', title: 'Downloaded selection',
-        detail: `${selectedAdminAssetIds.length} selected files from ${clientName}`,
-        context: { clientId: selectedAdminClient?.id ?? null, metadata: { count: selectedAdminAssetIds.length, assetIds: selectedAdminAssetIds } },
-      })
+    const selectedSet = new Set(selectedAdminAssetIds)
+    const selectedAssets = selectedAdminClient?.assets
+      .filter((asset) => selectedSet.has(asset.id))
+      .map((asset) => ({ id: asset.id, bytes: asset.bytes })) ?? []
+    await downloadAdminInParts(selectedAssets, `${clientName}-selected`, {
+      kind: 'download', title: 'Downloaded selection',
+      detail: `${selectedAdminAssetIds.length} selected files from ${clientName}`,
+      context: { clientId: selectedAdminClient?.id ?? null, metadata: { count: selectedAdminAssetIds.length, assetIds: selectedAdminAssetIds } },
+    })
   }
 
   const performDeleteAdminAsset = async (

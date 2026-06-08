@@ -1,5 +1,3 @@
-import type { DeliveryAsset } from '../types'
-
 /**
  * Max bytes per zip part. Each part is a SEPARATE download request, so it gets
  * its own fresh memory + CPU budget — keeping every download comfortably under
@@ -18,13 +16,16 @@ export type DownloadPart = {
   bytes: number
 }
 
+/** Minimal shape needed to split — works for both client and admin assets. */
+type SizedAsset = { id: string; bytes: number }
+
 /**
  * Pack assets into size-capped parts. Whole files only — a single file is
  * never split across parts (so a part may slightly exceed the cap if one file
  * alone is larger, which is fine: it just gets its own part). Returns a single
  * part when the total is under the cap.
  */
-export function splitIntoDownloadParts(assets: DeliveryAsset[], cap = MAX_PART_BYTES): DownloadPart[] {
+export function splitIntoDownloadParts(assets: SizedAsset[], cap = MAX_PART_BYTES): DownloadPart[] {
   const buckets: Array<{ ids: string[]; bytes: number }> = []
   let current: { ids: string[]; bytes: number } | null = null
 
