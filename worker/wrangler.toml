@@ -7,12 +7,11 @@ preview_urls = false
 [observability]
 enabled = true
 
-# Large delivery zips (multi-GB) do CRC32 + copy over every byte, which can
-# exceed the default 30s CPU budget. Raise to the 5-minute max so big
-# downloads aren't killed mid-stream. (Only active CPU counts — I/O wait while
-# streaming to the client does not.)
-[limits]
-cpu_ms = 300000
+# NOTE: [limits] cpu_ms is NOT settable on the Workers Free plan. Large
+# multi-GB zip downloads do heavy CRC32+copy; if they start hitting the Free
+# CPU ceiling, the options are upgrading to Workers Paid ($5/mo, much higher
+# CPU) or switching large downloads to direct presigned-R2 URLs. The
+# pull-based zip stream below keeps MEMORY bounded regardless of plan.
 
 [[r2_buckets]]
 binding = "R2_MEDIA_BUCKET"
