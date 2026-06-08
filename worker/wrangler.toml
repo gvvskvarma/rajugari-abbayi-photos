@@ -7,6 +7,13 @@ preview_urls = false
 [observability]
 enabled = true
 
+# Large delivery zips (multi-GB) do CRC32 + copy over every byte, which can
+# exceed the default 30s CPU budget. Raise to the 5-minute max so big
+# downloads aren't killed mid-stream. (Only active CPU counts — I/O wait while
+# streaming to the client does not.)
+[limits]
+cpu_ms = 300000
+
 [[r2_buckets]]
 binding = "R2_MEDIA_BUCKET"
 bucket_name = "photography-private"
