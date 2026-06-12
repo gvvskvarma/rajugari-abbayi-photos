@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query'
 import type { CustomerLightboxState, ShareLinkScope } from '../types'
 import { useAuthContext } from '../context/AuthContext'
 import { loadWorkerBlob, triggerBrowserDownload, workerRequest } from './useApi'
+import { apiBaseUrl } from '../lib/constants'
 import { sanitizeDownloadName } from '../lib/upload'
 import { useMyDeliveries } from './queries/useMyDeliveries'
 import { useThumbnailBatch } from './queries/useThumbnailBatch'
@@ -188,10 +189,31 @@ export function useMyPictures() {
     onError: (error: Error) => { setActionMessage(error.message) },
   })
 
+  /* Native zip download (whole delivery or one named folder). Mints a signed
+     token, then navigates the browser to a GET URL that streams the zip with
+     a Content-Disposition header. The browser saves it straight to disk — no
+     in-memory buffering — so multi-GB downloads work on iPhone. */
+  const nativeDownloadMutation = useMutation({
+    mutationFn: async ({ deliveryId, folder, baseName }: { deliveryId: string; folder: string | null; baseName: string }) => {
+      const token = await getAccessToken()
+      if (!token) throw new Error('Login session expired. Please log in again.')
+      const { path } = await workerRequest<{ token: string; path: string }>(
+        `/api/v1/deliveries/${deliveryId}/download-token`, token,
+        { method: 'POST', body: { folder, filename: sanitizeDownloadName(baseName) } },
+      )
+      /* Same-tab navigation to an attachment response triggers a native
+         download without leaving the page. */
+      window.location.href = `${apiBaseUrl}${path}`
+    },
+    onError: (error: Error) => { setActionMessage(error.message) },
+  })
+  const nativeDownloadBusy = nativeDownloadMutation.isPending
+
   const actionBusy =
     downloadAllMutation.isPending ||
     downloadSelectedMutation.isPending ||
     downloadNamedMutation.isPending ||
+    nativeDownloadMutation.isPending ||
     shareAllMutation.isPending ||
     shareSelectedMutation.isPending
 
@@ -221,6 +243,10 @@ export function useMyPictures() {
   const handleDownloadPart = (deliveryId: string, assetIds: string[], filename: string) => {
     if (assetIds.length === 0) return
     downloadNamedMutation.mutate({ deliveryId, assetIds, filename })
+  }
+
+  const startNativeDownload = (deliveryId: string, folder: string | null, baseName: string) => {
+    nativeDownloadMutation.mutate({ deliveryId, folder, baseName })
   }
 
   const handleShareSelected = () => {
@@ -317,6 +343,8 @@ export function useMyPictures() {
     handleDownloadAssets,
     handleShareAssets,
     handleDownloadPart,
+    startNativeDownload,
+    nativeDownloadBusy,
     handleCopyShareLink,
     handleOpenAsset,
   }

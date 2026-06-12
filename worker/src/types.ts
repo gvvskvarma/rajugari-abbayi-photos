@@ -35,6 +35,21 @@ export type DownloadTokenPayload = {
   expiresAt: string
 }
 
+/**
+ * Authorizes a streamed ZIP download of a whole delivery (or one folder) via a
+ * GET URL, so the browser downloads natively — straight to disk, no in-memory
+ * buffering (works for multi-GB on iPhone). `folder` null = all downloadable
+ * files; a string = only that folder.
+ */
+export type ZipDownloadTokenPayload = {
+  v: 1
+  deliveryId: string
+  folder: string | null
+  filename: string
+  issuedAt: string
+  expiresAt: string
+}
+
 export type PreviewAccessContext =
   | { kind: 'share'; context: ShareLinkContext }
   | { kind: 'user'; user: User }

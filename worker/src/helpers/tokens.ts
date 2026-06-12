@@ -1,10 +1,11 @@
-import type { DownloadTokenPayload, PreviewTokenPayload, UploadTokenPayload, Env } from '../types'
+import type { DownloadTokenPayload, ZipDownloadTokenPayload, PreviewTokenPayload, UploadTokenPayload, Env } from '../types'
 
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
 const uploadTokenVersion = 'v1'
 const previewTokenVersion = 'v1'
 const downloadTokenVersion = 'dt1'
+const zipDownloadTokenVersion = 'zt1'
 
 const bytesToBase64Url = (bytes: Uint8Array) => {
   let binary = ''
@@ -95,6 +96,23 @@ export const verifyDownloadToken = async (secret: string, token: string): Promis
   if (!timingSafeEqual(expectedSignature, signature)) throw new Error('Invalid download token')
   const payload = JSON.parse(base64UrlDecode(payloadB64)) as DownloadTokenPayload
   if (!payload.v || !payload.assetId || !payload.deliveryId || !payload.r2ObjectKey || !payload.issuedAt || !payload.expiresAt) throw new Error('Invalid download token')
+  if (new Date(payload.expiresAt).getTime() <= Date.now()) throw new Error('Download token expired')
+  return payload
+}
+
+export const createZipDownloadToken = async (secret: string, payload: ZipDownloadTokenPayload) => {
+  const payloadB64 = base64UrlEncode(JSON.stringify(payload))
+  const signature = await signToken(zipDownloadTokenVersion, secret, payloadB64)
+  return `${zipDownloadTokenVersion}.${payloadB64}.${signature}`
+}
+
+export const verifyZipDownloadToken = async (secret: string, token: string): Promise<ZipDownloadTokenPayload> => {
+  const [version, payloadB64, signature] = token.split('.')
+  if (version !== zipDownloadTokenVersion || !payloadB64 || !signature) throw new Error('Invalid download token')
+  const expectedSignature = await signToken(zipDownloadTokenVersion, secret, payloadB64)
+  if (!timingSafeEqual(expectedSignature, signature)) throw new Error('Invalid download token')
+  const payload = JSON.parse(base64UrlDecode(payloadB64)) as ZipDownloadTokenPayload
+  if (!payload.v || !payload.deliveryId || !payload.issuedAt || !payload.expiresAt) throw new Error('Invalid download token')
   if (new Date(payload.expiresAt).getTime() <= Date.now()) throw new Error('Download token expired')
   return payload
 }

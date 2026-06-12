@@ -5,7 +5,8 @@ import {
   supabaseRequest, getUserFromBearer, ensureDeliveryAccess,
   getDeliveryAssetRules, getShareLinkContext,
   logDownloadEvent, streamZipResponse, sha256Hex,
-  filterUuids,
+  filterUuids, sanitizeArchiveEntryName,
+  getTokenSigningSecret, createZipDownloadToken, verifyZipDownloadToken,
 } from '../lib'
 
 const delivery = new Hono<{ Bindings: Env }>()
@@ -113,6 +114,82 @@ delivery.post('/:deliveryId/download', async (c) => {
 
     const archiveName = `photos-${deliveryId.slice(0, 8)}.zip`
     return streamZipResponse(c, uploadedAssets, archiveName)
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Download failed', 400)
+  }
+})
+
+/* ── Native ZIP download (token-authed GET) ──────────────────────────
+   The client POSTs here (with its bearer token) to mint a short-lived
+   signed download token, then navigates the browser to the GET endpoint
+   below. Native navigation can't carry an auth header, so the signed token
+   IS the auth. This lets the browser stream the zip straight to disk — no
+   in-memory buffering — which is the only way multi-GB downloads work on
+   iPhone Safari. */
+delivery.post('/:deliveryId/download-token', async (c) => {
+  try {
+    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
+    const deliveryId = c.req.param('deliveryId')
+    if (!deliveryId) return jsonError('deliveryId is required', 400)
+    await ensureDeliveryAccess(c.env, user, deliveryId, 'download')
+
+    const body = await c.req.json<{ folder?: string | null; filename?: string }>().catch(() => ({} as { folder?: string | null; filename?: string }))
+    const folder = typeof body.folder === 'string' && body.folder.trim() ? body.folder.trim().slice(0, 120) : null
+    const rawName = typeof body.filename === 'string' && body.filename.trim() ? body.filename.trim() : `photos-${deliveryId.slice(0, 8)}`
+    const filename = `${sanitizeArchiveEntryName(rawName).replace(/\.zip$/i, '')}.zip`
+
+    const now = Date.now()
+    const token = await createZipDownloadToken(getTokenSigningSecret(c.env), {
+      v: 1,
+      deliveryId,
+      folder,
+      filename,
+      issuedAt: new Date(now).toISOString(),
+      /* 15 min is plenty to start the download; the stream itself can run
+         much longer once it's begun. */
+      expiresAt: new Date(now + 15 * 60 * 1000).toISOString(),
+    })
+
+    return c.json({ token, path: `/api/v1/deliveries/${deliveryId}/download?token=${encodeURIComponent(token)}` }, 200, responseHeaders(c))
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Could not prepare download', 400)
+  }
+})
+
+delivery.get('/:deliveryId/download', async (c) => {
+  try {
+    const deliveryId = c.req.param('deliveryId')
+    const token = c.req.query('token')
+    if (!deliveryId || !token) return jsonError('token is required', 400)
+
+    const payload = await verifyZipDownloadToken(getTokenSigningSecret(c.env), token)
+    if (payload.deliveryId !== deliveryId) return jsonError('Token does not match this delivery', 403)
+
+    /* Re-check the delivery hasn't expired/been purged since the token was
+       minted (retention lifecycle). */
+    const deliveryState = await supabaseRequest<Array<{ expired_at: string | null; purged_at: string | null }>>(
+      c.env,
+      `deliveries?id=eq.${encodeURIComponent(deliveryId)}&select=expired_at,purged_at&limit=1`
+    )
+    if (deliveryState[0]?.purged_at) return jsonError('These files have been removed', 410)
+    if (deliveryState[0]?.expired_at) return jsonError('This delivery has expired', 410)
+
+    const assetRules = await getDeliveryAssetRules(c.env, deliveryId)
+    const downloadableIds = [...assetRules.values()].filter((r) => r.canDownload).map((r) => r.assetId)
+    if (downloadableIds.length === 0) return jsonError('No downloadable assets', 404)
+
+    const assetFilter = downloadableIds.map((id) => `id.eq.${id}`).join(',')
+    let assets = await supabaseRequest<
+      Array<{ id: string; filename: string; r2_object_key: string; folder: string | null }>
+    >(
+      c.env,
+      `assets?or=(${assetFilter})&select=id,filename,r2_object_key,folder&order=created_at.asc`
+    )
+    assets = assets.filter((a) => !a.r2_object_key.startsWith('pending/'))
+    if (payload.folder) assets = assets.filter((a) => (a.folder ?? '') === payload.folder)
+    if (assets.length === 0) return jsonError('No files available for download', 404)
+
+    return streamZipResponse(c, assets, payload.filename)
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Download failed', 400)
   }

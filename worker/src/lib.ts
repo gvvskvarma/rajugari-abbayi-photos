@@ -26,6 +26,8 @@ export {
 } from './helpers/http'
 export {
   createDownloadToken,
+  createZipDownloadToken,
+  verifyZipDownloadToken,
   createPreviewToken,
   createUploadToken,
   getTokenSigningSecret,
