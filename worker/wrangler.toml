@@ -7,12 +7,17 @@ preview_urls = false
 [observability]
 enabled = true
 
-# Workers Paid plan: raise CPU to 30s so large multi-GB zip downloads
-# (CRC32 + copy over every byte ≈ 10-15s for 5.67GB) aren't killed
-# mid-stream. Only active CPU counts — I/O wait while streaming to the
-# client does not. The pull-based zip stream also keeps memory bounded.
+# Workers Paid (Standard usage model): max CPU per request.
+# Empirically, fflate's mandatory per-entry CRC32 runs at only ~50 MB/s of
+# CPU-time in the isolate (NOT the ~400 MB/s first assumed), so 30s of CPU
+# was exhausted at ~1.2-1.6 GB — the runtime then killed the isolate
+# mid-stream, truncating the zip into a "complete but corrupt" file
+# (macOS "Error 79"). 5.67 GB needs ~115s CPU; raise to 300s (the Standard
+# max) for headroom up to ~15 GB. Only active CPU counts — I/O wait while
+# the client downloads does not — and it's a ceiling, not a reservation,
+# so this costs nothing extra unless the CPU is actually used.
 [limits]
-cpu_ms = 30000
+cpu_ms = 300000
 
 [[r2_buckets]]
 binding = "R2_MEDIA_BUCKET"
