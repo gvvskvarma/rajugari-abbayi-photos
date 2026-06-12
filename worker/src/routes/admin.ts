@@ -9,6 +9,7 @@ import {
   deleteStoredAssets, streamZipResponse,
   parseNullableText, parseProjectStatus, sanitizeArchiveEntryName,
   filterUuids, sendDeliveryReady, ensureAuthUser, generateSignInLink,
+  getTokenSigningSecret, createProjectZipDownloadToken, verifyProjectZipDownloadToken,
 } from '../lib'
 
 const admin = new Hono<{ Bindings: Env }>()
@@ -502,6 +503,62 @@ admin.post('/downloads', async (c) => {
 
     const archiveName = `${sanitizeArchiveEntryName(body.filename ?? 'selected-files')}.zip`
     return streamZipResponse(c, selectedAssets, archiveName)
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Download failed', 400)
+  }
+})
+
+/* ── Native project ZIP download (admin, token-authed GET) ───────────
+   The admin POSTs (bearer) to mint a signed token for a whole project,
+   then navigates to the GET endpoint so the browser streams the zip to
+   disk natively — no in-memory blob, any size. */
+admin.post('/downloads/token', async (c) => {
+  try {
+    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
+    ensureAdmin(user)
+    const body = await c.req.json<{ projectId?: string; filename?: string }>().catch(() => ({} as { projectId?: string; filename?: string }))
+    const projectId = (body.projectId ?? '').trim()
+    if (!projectId) return jsonError('projectId is required', 400)
+
+    /* Confirm the project belongs to this admin before minting a token. */
+    const rows = await supabaseRequest<Array<{ id: string }>>(
+      c.env,
+      `projects?id=eq.${encodeURIComponent(projectId)}&owner_user_id=eq.${encodeURIComponent(user.id)}&select=id&limit=1`
+    )
+    if (!rows[0]) return jsonError('Project not found', 404)
+
+    const rawName = typeof body.filename === 'string' && body.filename.trim() ? body.filename.trim() : 'photos'
+    const filename = `${sanitizeArchiveEntryName(rawName).replace(/\.zip$/i, '')}.zip`
+    const now = Date.now()
+    const token = await createProjectZipDownloadToken(getTokenSigningSecret(c.env), {
+      v: 1,
+      projectId,
+      ownerUserId: user.id,
+      filename,
+      issuedAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + 15 * 60 * 1000).toISOString(),
+    })
+    return c.json({ token, path: `/api/v1/admin/downloads/file?token=${encodeURIComponent(token)}` }, 200, responseHeaders(c))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not prepare download'
+    const status = /bearer token|session token/i.test(message) ? 401 : /admin access/i.test(message) ? 403 : 400
+    return jsonError(message, status)
+  }
+})
+
+admin.get('/downloads/file', async (c) => {
+  try {
+    const token = c.req.query('token')
+    if (!token) return jsonError('token is required', 400)
+    const payload = await verifyProjectZipDownloadToken(getTokenSigningSecret(c.env), token)
+
+    const assets = await supabaseRequest<Array<{ id: string; filename: string; r2_object_key: string }>>(
+      c.env,
+      `assets?owner_user_id=eq.${encodeURIComponent(payload.ownerUserId)}&project_id=eq.${encodeURIComponent(payload.projectId)}&select=id,filename,r2_object_key,created_at&order=created_at.asc`
+    )
+    const uploaded = assets.filter((a) => !a.r2_object_key.startsWith('pending/'))
+    if (uploaded.length === 0) return jsonError('No files available for download', 404)
+    return streamZipResponse(c, uploaded, payload.filename)
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'Download failed', 400)
   }

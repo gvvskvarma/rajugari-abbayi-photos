@@ -28,6 +28,8 @@ export {
   createDownloadToken,
   createZipDownloadToken,
   verifyZipDownloadToken,
+  createProjectZipDownloadToken,
+  verifyProjectZipDownloadToken,
   createPreviewToken,
   createUploadToken,
   getTokenSigningSecret,

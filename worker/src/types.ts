@@ -50,6 +50,20 @@ export type ZipDownloadTokenPayload = {
   expiresAt: string
 }
 
+/**
+ * Admin-side native ZIP download of a whole project (folder). Token encodes
+ * the owning admin + project so the GET endpoint can resolve and stream
+ * without a bearer header (native navigation).
+ */
+export type ProjectZipDownloadTokenPayload = {
+  v: 1
+  projectId: string
+  ownerUserId: string
+  filename: string
+  issuedAt: string
+  expiresAt: string
+}
+
 export type PreviewAccessContext =
   | { kind: 'share'; context: ShareLinkContext }
   | { kind: 'user'; user: User }

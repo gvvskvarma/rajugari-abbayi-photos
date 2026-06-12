@@ -1,4 +1,4 @@
-import type { DownloadTokenPayload, ZipDownloadTokenPayload, PreviewTokenPayload, UploadTokenPayload, Env } from '../types'
+import type { DownloadTokenPayload, ZipDownloadTokenPayload, ProjectZipDownloadTokenPayload, PreviewTokenPayload, UploadTokenPayload, Env } from '../types'
 
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
@@ -6,6 +6,7 @@ const uploadTokenVersion = 'v1'
 const previewTokenVersion = 'v1'
 const downloadTokenVersion = 'dt1'
 const zipDownloadTokenVersion = 'zt1'
+const projectZipDownloadTokenVersion = 'pzt1'
 
 const bytesToBase64Url = (bytes: Uint8Array) => {
   let binary = ''
@@ -113,6 +114,23 @@ export const verifyZipDownloadToken = async (secret: string, token: string): Pro
   if (!timingSafeEqual(expectedSignature, signature)) throw new Error('Invalid download token')
   const payload = JSON.parse(base64UrlDecode(payloadB64)) as ZipDownloadTokenPayload
   if (!payload.v || !payload.deliveryId || !payload.issuedAt || !payload.expiresAt) throw new Error('Invalid download token')
+  if (new Date(payload.expiresAt).getTime() <= Date.now()) throw new Error('Download token expired')
+  return payload
+}
+
+export const createProjectZipDownloadToken = async (secret: string, payload: ProjectZipDownloadTokenPayload) => {
+  const payloadB64 = base64UrlEncode(JSON.stringify(payload))
+  const signature = await signToken(projectZipDownloadTokenVersion, secret, payloadB64)
+  return `${projectZipDownloadTokenVersion}.${payloadB64}.${signature}`
+}
+
+export const verifyProjectZipDownloadToken = async (secret: string, token: string): Promise<ProjectZipDownloadTokenPayload> => {
+  const [version, payloadB64, signature] = token.split('.')
+  if (version !== projectZipDownloadTokenVersion || !payloadB64 || !signature) throw new Error('Invalid download token')
+  const expectedSignature = await signToken(projectZipDownloadTokenVersion, secret, payloadB64)
+  if (!timingSafeEqual(expectedSignature, signature)) throw new Error('Invalid download token')
+  const payload = JSON.parse(base64UrlDecode(payloadB64)) as ProjectZipDownloadTokenPayload
+  if (!payload.v || !payload.projectId || !payload.ownerUserId || !payload.issuedAt || !payload.expiresAt) throw new Error('Invalid download token')
   if (new Date(payload.expiresAt).getTime() <= Date.now()) throw new Error('Download token expired')
   return payload
 }

@@ -12,6 +12,7 @@ import type {
 } from '../types'
 import { useAuthContext } from '../context/AuthContext'
 import { workerRequest, loadWorkerBlob, triggerBrowserDownload } from './useApi'
+import { apiBaseUrl } from '../lib/constants'
 import { useAdminData } from '../context/AdminDataContext.tsx'
 import { useAdminActivity } from './queries/useAdminActivity'
 import { supabase } from '../lib/supabase'
@@ -334,16 +335,32 @@ export function useAdminClientDetail() {
     }
   }
 
+  /* Native download of a whole project (folder): mint a signed token, then
+     navigate the browser to the GET URL so it streams the zip straight to
+     disk — single zip, any size, no in-memory buffering. */
   const handleDownloadAdminProject = async (project: AdminProject) => {
     if (!supabase || !session?.user.id || role !== 'admin') return
-    const projectAssets = selectedAdminClient?.assets
-      .filter((asset) => asset.project_id === project.id)
-      .map((asset) => ({ id: asset.id, bytes: asset.bytes })) ?? []
-    if (projectAssets.length === 0) { setAdminError('No files found for this folder.'); return }
-    await downloadAdminInParts(projectAssets, project.name, {
-      kind: 'download', title: 'Downloaded folder', detail: project.name,
-      context: { clientId: selectedAdminClient?.id ?? null, projectId: project.id, metadata: { count: projectAssets.length } },
-    })
+    const count = selectedAdminClient?.assets.filter((a) => a.project_id === project.id).length ?? 0
+    if (count === 0) { setAdminError('No files found for this folder.'); return }
+    try {
+      setAdminBusy(true)
+      setAdminActionMessage(`Preparing ${project.name}...`)
+      const token = await getAccessToken()
+      if (!token) { setAdminError('Login session expired. Please log in again.'); return }
+      const { path } = await workerRequest<{ token: string; path: string }>(
+        '/api/v1/admin/downloads/token', token,
+        { method: 'POST', body: { projectId: project.id, filename: project.name } },
+      )
+      recordAdminActivity('download', 'Downloaded folder', project.name, {
+        clientId: selectedAdminClient?.id ?? null, projectId: project.id, metadata: { count },
+      })
+      window.location.href = `${apiBaseUrl}${path}`
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : 'Unable to download files')
+    } finally {
+      setAdminBusy(false)
+      setAdminActionMessage('')
+    }
   }
 
   const handleDownloadSelectedAdminAssets = async () => {
