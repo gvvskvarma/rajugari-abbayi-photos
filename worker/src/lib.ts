@@ -270,73 +270,181 @@ export const sanitizeArchiveEntryName = (value: string) => {
 }
 
 const uniquifyArchiveEntryName = (filename: string, seen: Set<string>) => {
+  /* Dedupe case-INSENSITIVELY. Clients extract on macOS/Windows, whose default
+     filesystems are case-insensitive, so "RGA1.JPG" and "RGA1.jpg" would land
+     on the same path and one would silently overwrite the other (the archive
+     looks complete in `unzip -t` but loses files on extract). Renaming the
+     collision keeps every file. */
   const initialName = sanitizeArchiveEntryName(filename)
-  if (!seen.has(initialName)) { seen.add(initialName); return initialName }
+  if (!seen.has(initialName.toLowerCase())) { seen.add(initialName.toLowerCase()); return initialName }
   const dotIndex = initialName.lastIndexOf('.')
   const baseName = dotIndex > 0 ? initialName.slice(0, dotIndex) : initialName
   const extension = dotIndex > 0 ? initialName.slice(dotIndex) : ''
   let suffix = 2
   while (true) {
     const candidate = `${baseName} (${suffix})${extension}`
-    if (!seen.has(candidate)) { seen.add(candidate); return candidate }
+    if (!seen.has(candidate.toLowerCase())) { seen.add(candidate.toLowerCase()); return candidate }
     suffix += 1
   }
 }
 
+/* CRC32 (IEEE) lookup table — every ZIP entry needs a checksum. */
+const ZIP_CRC_TABLE = (() => {
+  const table = new Uint32Array(256)
+  for (let n = 0; n < 256; n++) {
+    let c = n
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+    table[n] = c >>> 0
+  }
+  return table
+})()
+const crc32 = (buf: Uint8Array): number => {
+  let c = 0xffffffff
+  for (let i = 0; i < buf.length; i++) c = ZIP_CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8)
+  return (c ^ 0xffffffff) >>> 0
+}
+const dosDateTime = (d: Date) => {
+  const time = ((d.getUTCHours() & 0x1f) << 11) | ((d.getUTCMinutes() & 0x3f) << 5) | ((d.getUTCSeconds() >> 1) & 0x1f)
+  const year = d.getUTCFullYear()
+  const date = year < 1980 ? (1 << 5) | 1 : (((year - 1980) & 0x7f) << 9) | (((d.getUTCMonth() + 1) & 0x0f) << 5) | (d.getUTCDate() & 0x1f)
+  return { time: time & 0xffff, date: date & 0xffff }
+}
+const U32_MAX = 0xffffffff
+
+/**
+ * Streams a STORED (uncompressed) ZIP of the given R2 objects, hand-written to
+ * be maximally compatible with STRICT unzippers — macOS Archive Utility /
+ * `ditto` and the iPhone Files app — at any total size.
+ *
+ * Two earlier approaches both produced files those strict tools rejected:
+ *  - fflate only triggered ZIP64 on per-FILE size, so a many-small-photos
+ *    delivery whose TOTAL crossed 4 GB got malformed central-directory offsets
+ *    (Archive Utility "Error 79"; `unzip` reported bad offsets past 4 GB).
+ *  - client-zip emits correct ZIP64 but ALWAYS uses data descriptors (CRC
+ *    written AFTER each file), and macOS's engine rejects the ZIP64 +
+ *    data-descriptor combination (it extracted only part of the archive).
+ *
+ * So we buffer ONE file at a time (photos are tens of MB), which lets us put
+ * the CRC and sizes in the local header — NO data descriptor — and we emit
+ * ZIP64 extra fields / ZIP64 EOCD strictly per APPNOTE, only where an offset
+ * or entry count actually overflows 32 bits. This is the same byte layout
+ * Windows Explorer / macOS Finder / Info-ZIP produce, which every native
+ * unzipper accepts. Verified end-to-end against `ditto` and `unzip` at >4 GB.
+ *
+ * Output is pull-based, so worker memory stays at ~one file plus a small queue
+ * no matter how large the archive is; the per-byte CRC32 CPU cost is covered
+ * by the raised cpu_ms limit (see wrangler.toml).
+ *
+ * NOTE: assumes each INDIVIDUAL file is < 4 GB (always true for photos). A
+ * single file >= 4 GB would additionally need ZIP64 fields in its local header.
+ */
 export const streamZipResponse = async (c: Context<{ Bindings: Env }>, entries: Array<{ filename: string; r2_object_key: string }>, archiveName: string) => {
-  const { Zip: ZipCtor, ZipPassThrough: ZipPassThroughCtor } = await import('fflate')
+  const encoder = new TextEncoder()
+  const seenNames = new Set<string>()
+  const named = entries.map((entry) => ({ ...entry, nameBytes: encoder.encode(uniquifyArchiveEntryName(entry.filename, seenNames)) }))
 
-  /* PULL-BASED zip stream — the correct way to respect client backpressure on
-     Cloudflare. A previous `start()`-based producer that enqueued eagerly and
-     relied on `desiredSize` did NOT pause: the runtime drained the queue into
-     its own buffer faster than the client downloaded, so memory grew until the
-     Worker hit its ~128MB limit and was killed mid-stream — truncating the zip
-     (the client got a complete-looking but corrupt file, macOS "Error 79").
-
-     Here, an async generator yields zip bytes, and the stream pulls ONE chunk
-     per `pull()`. The runtime only calls `pull` when the client can take more,
-     so the generator (and the R2 reads behind it) advance exactly as fast as
-     the download drains. Worker memory stays at a few MB regardless of how
-     large the delivery is. */
   const zipBytes = async function* (): AsyncGenerator<Uint8Array> {
-    const out: Uint8Array[] = []
-    let zipError: Error | null = null
-    let ended = false
-    const zip = new ZipCtor((error, chunk, final) => {
-      if (error) { zipError = error instanceof Error ? error : new Error('Zip error') }
-      else if (chunk) out.push(chunk)
-      if (final) ended = true
-    })
-    const seenNames = new Set<string>()
+    let offset = 0
+    const central: Array<{ nameBytes: Uint8Array; crc: number; size: number; localOffset: number; time: number; date: number }> = []
 
-    for (const entry of entries) {
+    for (const entry of named) {
       const object = (await c.env.R2_MEDIA_BUCKET.get(entry.r2_object_key)) as R2ObjectBody | null
       if (!object?.body) throw new Error(`File missing in storage for ${entry.filename}. Re-upload required.`)
+      const data = new Uint8Array(await object.arrayBuffer()) // one file at a time (photos are tens of MB)
+      const crc = crc32(data)
+      const size = data.length
+      const localOffset = offset
+      const { time, date } = dosDateTime(object.uploaded ?? new Date(0))
 
-      const archiveEntry = new ZipPassThroughCtor(uniquifyArchiveEntryName(entry.filename, seenNames))
-      zip.add(archiveEntry)
-      const reader = object.body.getReader()
-      while (true) {
-        const { done, value } = await reader.read()
-        if (zipError) throw zipError
-        if (done) break
-        if (value) {
-          archiveEntry.push(value, false)
-          /* Yield everything fflate emitted for this chunk before reading the
-             next one — caps in-flight memory to ~one R2 chunk of zip output. */
-          while (out.length) yield out.shift() as Uint8Array
-        }
+      const lh = new DataView(new ArrayBuffer(30))
+      lh.setUint32(0, 0x04034b50, true) // local file header signature
+      lh.setUint16(4, 45, true) // version needed (4.5)
+      lh.setUint16(6, 0x0800, true) // flags: UTF-8 names, NO data descriptor
+      lh.setUint16(8, 0, true) // method: stored
+      lh.setUint16(10, time, true)
+      lh.setUint16(12, date, true)
+      lh.setUint32(14, crc, true)
+      lh.setUint32(18, size, true) // compressed size (file < 4 GB)
+      lh.setUint32(22, size, true) // uncompressed size
+      lh.setUint16(26, entry.nameBytes.length, true)
+      lh.setUint16(28, 0, true) // extra length (local) = 0
+      yield new Uint8Array(lh.buffer); offset += 30
+      yield entry.nameBytes; offset += entry.nameBytes.length
+      yield data; offset += size
+
+      central.push({ nameBytes: entry.nameBytes, crc, size, localOffset, time, date })
+    }
+
+    const cdStart = offset
+    for (const e of central) {
+      const offNeedsZip64 = e.localOffset >= U32_MAX
+      let extra: Uint8Array | null = null
+      if (offNeedsZip64) {
+        const z = new DataView(new ArrayBuffer(12))
+        z.setUint16(0, 0x0001, true) // ZIP64 extra tag
+        z.setUint16(2, 8, true) // 8 bytes follow (just the 64-bit local-header offset)
+        z.setBigUint64(4, BigInt(e.localOffset), true)
+        extra = new Uint8Array(z.buffer)
       }
-      archiveEntry.push(new Uint8Array(0), true)
-      while (out.length) yield out.shift() as Uint8Array
+
+      const ch = new DataView(new ArrayBuffer(46))
+      ch.setUint32(0, 0x02014b50, true) // central directory header signature
+      ch.setUint16(4, 45, true) // version made by
+      ch.setUint16(6, 45, true) // version needed
+      ch.setUint16(8, 0x0800, true) // flags
+      ch.setUint16(10, 0, true) // method: stored
+      ch.setUint16(12, e.time, true)
+      ch.setUint16(14, e.date, true)
+      ch.setUint32(16, e.crc, true)
+      ch.setUint32(20, e.size, true) // compressed size
+      ch.setUint32(24, e.size, true) // uncompressed size
+      ch.setUint16(28, e.nameBytes.length, true)
+      ch.setUint16(30, extra ? extra.length : 0, true)
+      ch.setUint16(32, 0, true) // comment length
+      ch.setUint16(34, 0, true) // disk number start
+      ch.setUint16(36, 0, true) // internal attrs
+      ch.setUint32(38, 0, true) // external attrs
+      ch.setUint32(42, offNeedsZip64 ? U32_MAX : e.localOffset, true)
+      yield new Uint8Array(ch.buffer); offset += 46
+      yield e.nameBytes; offset += e.nameBytes.length
+      if (extra) { yield extra; offset += extra.length }
+    }
+    const cdSize = offset - cdStart
+    const count = central.length
+
+    if (count > 0xffff || cdStart >= U32_MAX || cdSize >= U32_MAX) {
+      const z64 = new DataView(new ArrayBuffer(56))
+      z64.setUint32(0, 0x06064b50, true) // ZIP64 EOCD record signature
+      z64.setBigUint64(4, BigInt(44), true) // size of remaining record
+      z64.setUint16(12, 45, true)
+      z64.setUint16(14, 45, true)
+      z64.setUint32(16, 0, true) // disk number
+      z64.setUint32(20, 0, true) // disk with CD start
+      z64.setBigUint64(24, BigInt(count), true)
+      z64.setBigUint64(32, BigInt(count), true)
+      z64.setBigUint64(40, BigInt(cdSize), true)
+      z64.setBigUint64(48, BigInt(cdStart), true)
+      const z64Offset = offset
+      yield new Uint8Array(z64.buffer); offset += 56
+
+      const loc = new DataView(new ArrayBuffer(20))
+      loc.setUint32(0, 0x07064b50, true) // ZIP64 EOCD locator signature
+      loc.setUint32(4, 0, true) // disk with ZIP64 EOCD
+      loc.setBigUint64(8, BigInt(z64Offset), true)
+      loc.setUint32(16, 1, true) // total disks
+      yield new Uint8Array(loc.buffer); offset += 20
     }
 
-    zip.end() // writes the central directory
-    while (!ended || out.length) {
-      if (zipError) throw zipError
-      if (out.length) yield out.shift() as Uint8Array
-      else await new Promise((resolve) => setTimeout(resolve, 0))
-    }
+    const eocd = new DataView(new ArrayBuffer(22))
+    eocd.setUint32(0, 0x06054b50, true) // EOCD signature
+    eocd.setUint16(4, 0, true)
+    eocd.setUint16(6, 0, true)
+    eocd.setUint16(8, count > 0xffff ? 0xffff : count, true)
+    eocd.setUint16(10, count > 0xffff ? 0xffff : count, true)
+    eocd.setUint32(12, cdSize >= U32_MAX ? U32_MAX : cdSize, true)
+    eocd.setUint32(16, cdStart >= U32_MAX ? U32_MAX : cdStart, true)
+    eocd.setUint16(20, 0, true) // comment length
+    yield new Uint8Array(eocd.buffer)
   }
 
   const gen = zipBytes()
