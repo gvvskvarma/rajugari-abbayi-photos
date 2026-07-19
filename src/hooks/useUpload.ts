@@ -3,6 +3,7 @@ import type { ChangeEvent, DragEvent, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthContext } from '../context/AuthContext'
 import { workerRequest } from './useApi'
+import { apiBaseUrl } from '../lib/constants'
 import { useAdminData } from '../context/AdminDataContext.tsx'
 import { supabase } from '../lib/supabase'
 import { buildUploadQueueGroups, collectDroppedUploadItems, uploadItemFolder } from '../lib/upload'
@@ -120,25 +121,58 @@ export function useUpload() {
     }
   }
 
-  const uploadFileToSignedUrl = async (uploadUrl: string, file: File, fallbackUploadUrl?: string) => {
-    const putTo = async (url: string) => {
+  /* Cloudflare's edge caps a single request body, so files under the cap go
+     as ONE proxied PUT and larger files go as ~90MB multipart parts through
+     the same API domain — every request stays small enough for the edge and
+     stays off the ad-block-listed R2 host, so any file size uploads reliably. */
+  const PROXY_PART_BYTES = 90 * 1024 * 1024
+
+  const uploadFileViaWorker = async (
+    target: { uploadUrl: string; fallbackUploadUrl?: string; uploadToken: string },
+    file: File,
+  ) => {
+    const putTo = async (url: string, body: Blob) => {
       const response = await fetch(url, {
         method: 'PUT',
         headers: { 'content-type': file.type || 'application/octet-stream' },
-        body: file,
+        body,
       })
       if (!response.ok) throw new Error(`Upload failed for ${file.name} (${response.status})`)
     }
+
+    if (file.size > PROXY_PART_BYTES) {
+      const mpBase = `${apiBaseUrl}/api/v1/upload/mp`
+      const t = encodeURIComponent(target.uploadToken)
+      const createRes = await fetch(`${mpBase}/create?token=${t}`, { method: 'POST' })
+      if (!createRes.ok) throw new Error(`Upload failed for ${file.name} (start: ${createRes.status})`)
+      const { uploadId } = (await createRes.json()) as { uploadId: string }
+      const parts: Array<{ partNumber: number; etag: string }> = []
+      for (let offset = 0, partNumber = 1; offset < file.size; offset += PROXY_PART_BYTES, partNumber++) {
+        const chunk = file.slice(offset, Math.min(offset + PROXY_PART_BYTES, file.size))
+        const partRes = await fetch(
+          `${mpBase}/part?token=${t}&uploadId=${encodeURIComponent(uploadId)}&part=${partNumber}`,
+          { method: 'PUT', body: chunk },
+        )
+        if (!partRes.ok) throw new Error(`Upload failed for ${file.name} (part ${partNumber}: ${partRes.status})`)
+        parts.push((await partRes.json()) as { partNumber: number; etag: string })
+      }
+      const completeRes = await fetch(`${mpBase}/complete?token=${t}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ uploadId, parts }),
+      })
+      if (!completeRes.ok) throw new Error(`Upload failed for ${file.name} (finalize: ${completeRes.status})`)
+      return
+    }
+
     try {
-      await putTo(uploadUrl)
+      await putTo(target.uploadUrl, file)
     } catch (primaryError) {
-      /* Primary URL is the worker proxy (immune to ad-block filter lists that
-         kill the raw R2 host with "Failed to fetch"). It can reject very large
-         files past Cloudflare's request-body cap — those retry on the direct
-         presigned R2 URL below. If both fail, surface the original error. */
-      if (!fallbackUploadUrl) throw primaryError
+      /* Proxy failed — retry once on the direct presigned R2 URL (works when
+         no ad-blocker is present). Surface the original error if both fail. */
+      if (!target.fallbackUploadUrl) throw primaryError
       try {
-        await putTo(fallbackUploadUrl)
+        await putTo(target.fallbackUploadUrl, file)
       } catch {
         throw primaryError
       }
@@ -284,7 +318,7 @@ export function useUpload() {
           },
         })
 
-        await uploadFileToSignedUrl(requestResult.uploadUrl, item.file, requestResult.fallbackUploadUrl)
+        await uploadFileViaWorker(requestResult, item.file)
 
         await workerRequest('/api/v1/upload/complete', token, {
           method: 'POST',

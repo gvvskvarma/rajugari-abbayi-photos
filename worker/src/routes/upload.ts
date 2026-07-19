@@ -143,6 +143,64 @@ upload.put('/direct', async (c) => {
   }
 })
 
+/* ── Multipart proxy upload ──────────────────────────────────────────
+   For files past Cloudflare's per-request body cap, the client slices the
+   file into ~90MB parts and PUTs each part here; R2 reassembles them
+   server-side. Every request stays on our API domain (never blocked by
+   ad-block lists) and under the edge cap — so any file size works.
+   Auth on every call is the same HMAC-signed upload token from /request;
+   the object key + content type come from the token, never the client. */
+
+upload.post('/mp/create', async (c) => {
+  try {
+    const token = c.req.query('token')
+    if (!token) return jsonError('token is required', 400)
+    const session = await verifyUploadToken(getTokenSigningSecret(c.env), token)
+    const mp = await c.env.R2_MEDIA_BUCKET.createMultipartUpload(session.objectKey, {
+      httpMetadata: { contentType: session.mimeType },
+    })
+    return c.json({ uploadId: mp.uploadId }, 200, responseHeaders(c))
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Could not start upload', 400)
+  }
+})
+
+upload.put('/mp/part', async (c) => {
+  try {
+    const token = c.req.query('token')
+    const uploadId = c.req.query('uploadId')
+    const partNumber = Number(c.req.query('part'))
+    if (!token || !uploadId || !Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10000) {
+      return jsonError('token, uploadId, and part (1-10000) are required', 400)
+    }
+    const session = await verifyUploadToken(getTokenSigningSecret(c.env), token)
+    if (!c.req.raw.body) return jsonError('Part body is required', 400)
+    const mp = c.env.R2_MEDIA_BUCKET.resumeMultipartUpload(session.objectKey, uploadId)
+    /* Streams with the request's known content-length — no buffering. */
+    const part = await mp.uploadPart(partNumber, c.req.raw.body)
+    return c.json({ partNumber: part.partNumber, etag: part.etag }, 200, responseHeaders(c))
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Part upload failed', 400)
+  }
+})
+
+upload.post('/mp/complete', async (c) => {
+  try {
+    const token = c.req.query('token')
+    if (!token) return jsonError('token is required', 400)
+    const session = await verifyUploadToken(getTokenSigningSecret(c.env), token)
+    const body = await c.req.json<{ uploadId?: string; parts?: Array<{ partNumber: number; etag: string }> }>().catch(() => ({} as { uploadId?: string; parts?: Array<{ partNumber: number; etag: string }> }))
+    if (!body.uploadId || !Array.isArray(body.parts) || body.parts.length === 0) {
+      return jsonError('uploadId and parts are required', 400)
+    }
+    const mp = c.env.R2_MEDIA_BUCKET.resumeMultipartUpload(session.objectKey, body.uploadId)
+    await mp.complete(body.parts)
+    return c.json({ ok: true, objectKey: session.objectKey }, 200, responseHeaders(c))
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Upload finalize failed', 400)
+  }
+})
+
 upload.post('/complete', async (c) => {
   try {
     const user = await getUserFromBearer(c.env, c.req.header('authorization'))
