@@ -284,6 +284,10 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+  /* Without this, grid stretches both columns to the tallest one — a long
+     file queue on the right forced the client panel (and its toggle rows)
+     to balloon vertically. */
+  align-items: start;
 }
 
 .admin-upload-summary {
@@ -397,6 +401,12 @@
 .admin-file-queue {
   display: grid;
   gap: 10px;
+  /* Hundreds of individually-picked files shouldn't grow the page — cap the
+     queue and scroll inside it. */
+  max-height: 340px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
 }
 
 .admin-dropzone {
@@ -459,6 +469,8 @@
   display: flex;
   justify-content: flex-start;
   align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .admin-upload-cta {

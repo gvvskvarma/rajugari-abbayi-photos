@@ -15,6 +15,7 @@ export function UploadPage() {
     uploadBusy,
     uploadMessage,
     uploadInputRef,
+    uploadFolderInputRef,
     selectedUploadClient,
     filteredReuseClientEmailOptions,
     reuseClientEmailOptions,
@@ -23,6 +24,7 @@ export function UploadPage() {
     dispatch,
     handleFilesChange,
     handleBrowseClick,
+    handleBrowseFolderClick,
     handleDrop,
     handleDragEnter,
     handleDragOver,
@@ -209,16 +211,34 @@ export function UploadPage() {
               multiple
               onChange={handleFilesChange}
             />
+            {/* Folder picker. `webkitdirectory` is set via the ref callback because
+                React's TS types don't know the attribute; with it, the OS dialog
+                selects a whole folder and every file arrives with
+                webkitRelativePath ("Folder/IMG.jpg"), so the queue groups it as
+                one folder — same as drag-and-drop. */}
+            <input
+              ref={(el) => {
+                uploadFolderInputRef.current = el
+                el?.setAttribute('webkitdirectory', '')
+              }}
+              className="admin-dropzone-input"
+              type="file"
+              multiple
+              onChange={handleFilesChange}
+            />
             <div className="admin-dropzone-copy">
               <p className="eyebrow">Upload content</p>
               <h3>{uploadDropActive ? 'Drop to upload' : 'Drop files or folders here'}</h3>
               <p>
                 {uploadDropActive
                   ? 'Release to add files to the upload queue.'
-                  : 'Drag a folder, drag individual files, or use the browse action to pick multiple items.'}
+                  : 'Drag folders or files here, or browse — Browse folder keeps the folder name in the gallery.'}
               </p>
             </div>
             <div className="admin-dropzone-actions">
+              <button className="button ghost" type="button" onClick={handleBrowseFolderClick}>
+                Browse folder
+              </button>
               <button className="button ghost" type="button" onClick={handleBrowseClick}>
                 Browse files
               </button>

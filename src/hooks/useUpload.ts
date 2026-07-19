@@ -29,6 +29,7 @@ export function useUpload() {
   } = state
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
+  const uploadFolderInputRef = useRef<HTMLInputElement | null>(null)
   const uploadDragDepthRef = useRef(0)
 
   const selectedUploadClient = useMemo(() => {
@@ -67,9 +68,13 @@ export function useUpload() {
   /* ── Handlers ──────────────────────────────────────────────────── */
 
   const handleFilesChange = (event: ChangeEvent<HTMLInputElement>) => {
+    /* Files picked via the webkitdirectory input carry webkitRelativePath
+       ("Haldi/RGA1.jpg"), which makes them group under their folder exactly
+       like drag-and-drop. Plain file picks have an empty string there, so
+       they fall back to the bare name and stay individual entries. */
     const selected = Array.from(event.target.files ?? []).map((file) => ({
       file,
-      path: file.name,
+      path: file.webkitRelativePath || file.name,
     }))
     dispatch({ type: 'APPEND_ITEMS', items: selected })
     event.target.value = ''
@@ -77,6 +82,10 @@ export function useUpload() {
 
   const handleBrowseClick = () => {
     uploadInputRef.current?.click()
+  }
+
+  const handleBrowseFolderClick = () => {
+    uploadFolderInputRef.current?.click()
   }
 
   const handleDrop = async (event: DragEvent<HTMLDivElement>) => {
@@ -360,6 +369,7 @@ export function useUpload() {
     uploadBusy,
     uploadMessage,
     uploadInputRef,
+    uploadFolderInputRef,
     selectedUploadClient,
     filteredReuseClientEmailOptions,
     reuseClientEmailOptions,
@@ -368,6 +378,7 @@ export function useUpload() {
     dispatch,
     handleFilesChange,
     handleBrowseClick,
+    handleBrowseFolderClick,
     handleDrop,
     handleDragEnter,
     handleDragOver,
