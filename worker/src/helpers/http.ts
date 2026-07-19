@@ -11,7 +11,7 @@ export const buildBaseHeaders = (origin: string) => ({
   'content-type': 'application/json',
   'access-control-allow-origin': origin,
   'access-control-allow-headers': 'content-type,authorization',
-  'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+  'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
 })
 
 export const responseHeaders = (c: Context<{ Bindings: Env }>) =>

@@ -120,13 +120,29 @@ export function useUpload() {
     }
   }
 
-  const uploadFileToSignedUrl = async (uploadUrl: string, file: File) => {
-    const response = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: { 'content-type': file.type || 'application/octet-stream' },
-      body: file,
-    })
-    if (!response.ok) throw new Error(`Upload failed for ${file.name}`)
+  const uploadFileToSignedUrl = async (uploadUrl: string, file: File, fallbackUploadUrl?: string) => {
+    const putTo = async (url: string) => {
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: { 'content-type': file.type || 'application/octet-stream' },
+        body: file,
+      })
+      if (!response.ok) throw new Error(`Upload failed for ${file.name} (${response.status})`)
+    }
+    try {
+      await putTo(uploadUrl)
+    } catch (primaryError) {
+      /* Primary URL is the worker proxy (immune to ad-block filter lists that
+         kill the raw R2 host with "Failed to fetch"). It can reject very large
+         files past Cloudflare's request-body cap — those retry on the direct
+         presigned R2 URL below. If both fail, surface the original error. */
+      if (!fallbackUploadUrl) throw primaryError
+      try {
+        await putTo(fallbackUploadUrl)
+      } catch {
+        throw primaryError
+      }
+    }
   }
 
   const handleDelivery = async (event: FormEvent) => {
@@ -257,6 +273,7 @@ export function useUpload() {
           objectKey: string
           uploadToken: string
           uploadUrl: string
+          fallbackUploadUrl?: string
         }>('/api/v1/request-upload-url', token, {
           method: 'POST',
           body: {
@@ -267,7 +284,7 @@ export function useUpload() {
           },
         })
 
-        await uploadFileToSignedUrl(requestResult.uploadUrl, item.file)
+        await uploadFileToSignedUrl(requestResult.uploadUrl, item.file, requestResult.fallbackUploadUrl)
 
         await workerRequest('/api/v1/upload/complete', token, {
           method: 'POST',

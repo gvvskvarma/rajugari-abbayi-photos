@@ -48,7 +48,7 @@ const handleRequestUploadUrl = async (c: Context<{ Bindings: Env }>) => {
     const objectKey = `deliveries/${body.deliveryId}/raw/${Date.now()}-${safeFileName}`
     const uploadToken = crypto.randomUUID().replace(/-/g, '')
     const expiresAt = new Date(Date.now() + uploadUrlExpirySeconds * 1000).toISOString()
-    const uploadUrl = await buildR2SignedUrl(c.env, 'PUT', objectKey, uploadUrlExpirySeconds, 'view')
+    const presignedUrl = await buildR2SignedUrl(c.env, 'PUT', objectKey, uploadUrlExpirySeconds, 'view')
     const signedUploadToken = await createUploadToken(getTokenSigningSecret(c.env), {
       v: 1,
       uploadId: uploadToken,
@@ -63,11 +63,21 @@ const handleRequestUploadUrl = async (c: Context<{ Bindings: Env }>) => {
       expiresAt,
     })
 
+    /* Primary upload target is the worker itself (PUT /upload/direct), NOT the
+       raw R2 host. Ad-block/privacy filter lists block r2.cloudflarestorage.com
+       (the domain is abused by malware campaigns), which surfaced as
+       "Failed to fetch" on every upload for admins running a blocker — while
+       our own API domain sails through. The raw presigned URL is kept as a
+       fallback for very large files, since requests proxied through the worker
+       are subject to Cloudflare's ~100MB request-body cap. */
+    const proxyUploadUrl = `${new URL(c.req.url).origin}/api/v1/upload/direct?token=${encodeURIComponent(signedUploadToken)}`
+
     return c.json(
       {
         objectKey,
         uploadToken: signedUploadToken,
-        uploadUrl,
+        uploadUrl: proxyUploadUrl,
+        fallbackUploadUrl: presignedUrl,
         expiresInSeconds: uploadUrlExpirySeconds,
         maxFileBytes: maxUploadBytes,
       },
@@ -82,6 +92,56 @@ const handleRequestUploadUrl = async (c: Context<{ Bindings: Env }>) => {
 upload.post('/request', handleRequestUploadUrl)
 
 export { handleRequestUploadUrl }
+
+/* Proxied upload: the browser PUTs the file body to our own API domain, which
+   ad-block filter lists never block — unlike the raw r2.cloudflarestorage.com
+   host (abused by malware, so blockers kill it and every upload "Failed to
+   fetch"). Auth is the HMAC-signed upload token minted by /request; the object
+   key, content type, and expected size all come from the token, never the
+   client, so this grants exactly what the presigned URL granted. */
+upload.put('/direct', async (c) => {
+  try {
+    const token = c.req.query('token')
+    if (!token) return jsonError('token is required', 400)
+    const session = await verifyUploadToken(getTokenSigningSecret(c.env), token)
+
+    const contentLengthHeader = c.req.header('content-length')
+    const contentLength = contentLengthHeader ? Number(contentLengthHeader) : null
+    if (contentLength !== null && contentLength > maxUploadBytes) {
+      return jsonError('File size must be between 1 byte and 5GB', 413)
+    }
+    if (
+      contentLength !== null &&
+      contentLength > 0 &&
+      Math.abs(session.expectedBytes - contentLength) > Math.max(1024, session.expectedBytes * 0.02)
+    ) {
+      return jsonError('Uploaded byte count does not match the requested file size', 400)
+    }
+
+    if (contentLength !== null && contentLength > 0 && c.req.raw.body) {
+      /* Streamed straight into R2 — the incoming request's known length lets
+         the binding accept the stream, so worker memory stays flat. */
+      await c.env.R2_MEDIA_BUCKET.put(session.objectKey, c.req.raw.body, {
+        httpMetadata: { contentType: session.mimeType },
+      })
+    } else {
+      /* No usable length on the stream (rare) — buffer, but only within a
+         bound that keeps the worker well under its memory limit. */
+      if (session.expectedBytes > 95 * 1024 * 1024) {
+        return jsonError('Upload stream is missing a length and is too large to buffer', 411)
+      }
+      const bytes = await c.req.arrayBuffer()
+      if (bytes.byteLength < 1) return jsonError('File body is required', 400)
+      await c.env.R2_MEDIA_BUCKET.put(session.objectKey, bytes, {
+        httpMetadata: { contentType: session.mimeType },
+      })
+    }
+
+    return c.json({ ok: true, objectKey: session.objectKey }, 200, responseHeaders(c))
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : 'Upload failed', 400)
+  }
+})
 
 upload.post('/complete', async (c) => {
   try {
