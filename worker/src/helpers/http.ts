@@ -1,4 +1,3 @@
-import type { Context } from 'hono'
 import type { Env } from '../types'
 
 export const resolveAllowedOrigin = (env: Env, requestOrigin?: string): string => {
@@ -14,7 +13,10 @@ export const buildBaseHeaders = (origin: string) => ({
   'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
 })
 
-export const responseHeaders = (c: Context<{ Bindings: Env }>) =>
+/* Structural param (not Hono's Context) so routers with extra Variables —
+   e.g. the admin router's `{ user }` — can pass their context without
+   fighting Hono's generic invariance. */
+export const responseHeaders = (c: { env: Env; req: { header(name: string): string | undefined } }) =>
   buildBaseHeaders(resolveAllowedOrigin(c.env, c.req.header('Origin')))
 
 export const jsonError = (message: string, status = 400, origin = '*') =>
@@ -22,6 +24,17 @@ export const jsonError = (message: string, status = 400, origin = '*') =>
     status,
     headers: buildBaseHeaders(origin),
   })
+
+/* Map known failure classes to honest status codes — auth problems are 401,
+   authorization 403, missing/unowned things 404. `fallback` is the route's
+   status for anything unrecognized: 400 where remaining errors are client-ish,
+   500 where they mean a downstream outage (Supabase/Resend). Returning 500
+   for an auth failure would mislead monitoring and the admin UI. */
+export const statusForError = (message: string, fallback = 400): number =>
+  /bearer token|session token|not available in session/i.test(message) ? 401 :
+  /admin access/i.test(message) ? 403 :
+  /not found|not owned/i.test(message) ? 404 :
+  fallback
 
 export const SAFE_ERROR_PATTERNS = [
   /not found/i, /unauthorized/i, /forbidden/i, /expired/i,

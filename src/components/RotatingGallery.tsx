@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ResponsiveAsset } from '../types'
-import { getPrimaryPreloadSource, ResponsiveImage } from '../lib/media.tsx'
+import { ResponsiveImage } from '../lib/media.tsx'
 
 type RotatingGalleryProps = {
   title: string
@@ -41,7 +41,7 @@ export const RotatingGallery = ({
 
     let canceled = false
     const preloadImage = new Image()
-    preloadImage.src = getPrimaryPreloadSource(images[nextIndex])
+    preloadImage.src = images[nextIndex].sources[0]?.src ?? ''
 
     const beginTransition = () => {
       if (canceled) return

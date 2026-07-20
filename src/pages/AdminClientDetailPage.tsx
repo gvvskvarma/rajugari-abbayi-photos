@@ -5,7 +5,7 @@ import { AdminClientEditForm } from '../components/AdminClientEditForm'
 import { AdminProjectCard } from '../components/AdminProjectCard'
 import { AdminBulkActions } from '../components/AdminBulkActions'
 import { AdminDetailToolbar } from '../components/AdminDetailToolbar'
-import { AdminLightbox } from '../components/AdminLightbox'
+import { Lightbox } from '../components/Lightbox'
 import { RetentionPanel } from '../components/RetentionPanel'
 
 export function AdminClientDetailPage() {
@@ -151,14 +151,30 @@ export function AdminClientDetailPage() {
         </div>
 
         {detail.adminLightboxAsset && detail.adminLightbox && (
-          <AdminLightbox
-            asset={detail.adminLightboxAsset}
-            previewUrl={detail.adminAssetPreviewUrls[detail.adminLightboxAsset.id]}
+          <Lightbox
+            imageKey={detail.adminLightboxAsset.id}
             index={detail.adminLightboxIndex}
             total={detail.adminLightboxAssets.length}
             onClose={detail.closeAdminLightbox}
             onMove={detail.moveAdminLightbox}
-            onDownload={(assetId) => void detail.handleOpenAsset(assetId, 'download')}
+            renderImage={() => {
+              const asset = detail.adminLightboxAsset!
+              const previewUrl = detail.adminAssetPreviewUrls[asset.id]
+              return previewUrl ? (
+                <img key={asset.id} src={previewUrl} alt={`${asset.filename} — ${detail.adminLightboxIndex + 1} of ${detail.adminLightboxAssets.length}`} />
+              ) : (
+                <div className="customer-lightbox-loading">Loading preview…</div>
+              )
+            }}
+            bottomBar={
+              <button
+                className="button ghost"
+                type="button"
+                onClick={() => void detail.handleOpenAsset(detail.adminLightboxAsset!.id, 'download')}
+              >
+                Download
+              </button>
+            }
           />
         )}
       </section>

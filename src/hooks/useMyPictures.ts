@@ -109,20 +109,6 @@ export function useMyPictures() {
 
   // ── Mutations ────────────────────────────────────────────────────────
 
-  const downloadAllMutation = useMutation({
-    mutationFn: async (deliveryId: string) => {
-      const token = await getAccessToken()
-      if (!token) throw new Error('Login session expired. Please log in again.')
-      const delivery = myDeliveries.find((d) => d.deliveryId === deliveryId)
-      const blob = await loadWorkerBlob(`/api/v1/deliveries/${deliveryId}/download`, token, {
-        method: 'POST', body: {},
-      })
-      const name = sanitizeDownloadName(delivery?.projectName || delivery?.clientName || 'photos')
-      triggerBrowserDownload(blob, `${name}.zip`)
-    },
-    onError: (error: Error) => { setActionMessage(error.message) },
-  })
-
   const downloadSelectedMutation = useMutation({
     mutationFn: async ({ deliveryId, assetIds }: { deliveryId: string; assetIds: string[] }) => {
       const token = await getAccessToken()
@@ -138,53 +124,21 @@ export function useMyPictures() {
     onError: (error: Error) => { setActionMessage(error.message) },
   })
 
-  /* Download an explicit asset set with a caller-chosen filename — used for
-     split "Part N of M" downloads. Reuses the same /download endpoint. */
-  const downloadNamedMutation = useMutation({
-    mutationFn: async ({ deliveryId, assetIds, filename }: { deliveryId: string; assetIds: string[]; filename: string }) => {
-      const token = await getAccessToken()
-      if (!token) throw new Error('Login session expired. Please log in again.')
-      const blob = await loadWorkerBlob(`/api/v1/deliveries/${deliveryId}/download`, token, {
-        method: 'POST', body: { assetIds },
-      })
-      triggerBrowserDownload(blob, filename)
-    },
-    onError: (error: Error) => { setActionMessage(error.message) },
-  })
-
-  const shareAllMutation = useMutation({
-    mutationFn: async (deliveryId: string) => {
+  const shareMutation = useMutation({
+    mutationFn: async ({ deliveryId, scope, assetIds }: { deliveryId: string; scope: ShareLinkScope; assetIds: string[] }) => {
       const token = await getAccessToken()
       if (!token) throw new Error('Login session expired. Please log in again.')
       const payload = await workerRequest<{ url: string; scopeType: ShareLinkScope }>(
         '/api/v1/share-links', token,
-        { method: 'POST', body: { deliveryId, expiresInDays: 7, scope: 'all', assetIds: [] } },
+        { method: 'POST', body: { deliveryId, expiresInDays: 7, scope, assetIds: [...new Set(assetIds)] } },
       )
-      return { deliveryId, url: payload.url, scopeType: payload.scopeType ?? 'all' as ShareLinkScope }
+      return { deliveryId, scope, url: payload.url, scopeType: payload.scopeType ?? scope }
     },
-    onSuccess: ({ deliveryId, url, scopeType }) => {
+    onSuccess: ({ deliveryId, scope, url, scopeType }) => {
       setNewShareLinks((current) => ({ ...current, [deliveryId]: url }))
       setNewShareLinkScopes((current) => ({ ...current, [deliveryId]: scopeType }))
       setShareCopyState((current) => ({ ...current, [deliveryId]: '' }))
-    },
-    onError: (error: Error) => { setActionMessage(error.message) },
-  })
-
-  const shareSelectedMutation = useMutation({
-    mutationFn: async ({ deliveryId, assetIds }: { deliveryId: string; assetIds: string[] }) => {
-      const token = await getAccessToken()
-      if (!token) throw new Error('Login session expired. Please log in again.')
-      const payload = await workerRequest<{ url: string; scopeType: ShareLinkScope }>(
-        '/api/v1/share-links', token,
-        { method: 'POST', body: { deliveryId, expiresInDays: 7, scope: 'selected', assetIds: [...new Set(assetIds)] } },
-      )
-      return { deliveryId, url: payload.url, scopeType: payload.scopeType ?? 'selected' as ShareLinkScope }
-    },
-    onSuccess: ({ deliveryId, url, scopeType }) => {
-      setNewShareLinks((current) => ({ ...current, [deliveryId]: url }))
-      setNewShareLinkScopes((current) => ({ ...current, [deliveryId]: scopeType }))
-      setShareCopyState((current) => ({ ...current, [deliveryId]: '' }))
-      exitSelectMode()
+      if (scope === 'selected') exitSelectMode()
     },
     onError: (error: Error) => { setActionMessage(error.message) },
   })
@@ -210,23 +164,18 @@ export function useMyPictures() {
   const nativeDownloadBusy = nativeDownloadMutation.isPending
 
   const actionBusy =
-    downloadAllMutation.isPending ||
     downloadSelectedMutation.isPending ||
-    downloadNamedMutation.isPending ||
     nativeDownloadMutation.isPending ||
-    shareAllMutation.isPending ||
-    shareSelectedMutation.isPending
+    shareMutation.isPending
 
   // ── Action handlers ─────────────────────────────────────────────────
-
-  const handleDownloadAll = (deliveryId: string) => downloadAllMutation.mutate(deliveryId)
 
   const handleDownloadSelected = () => {
     if (selectedAssetIds.length === 0 || !selectDeliveryId) return
     downloadSelectedMutation.mutate({ deliveryId: selectDeliveryId, assetIds: selectedAssetIds })
   }
 
-  const handleShareAll = (deliveryId: string) => shareAllMutation.mutate(deliveryId)
+  const handleShareAll = (deliveryId: string) => shareMutation.mutate({ deliveryId, scope: 'all', assetIds: [] })
 
   /* Folder-scoped bulk actions: download/share a specific set of assets (one
      folder within a delivery) by reusing the selected-asset mutations. */
@@ -236,13 +185,7 @@ export function useMyPictures() {
   }
   const handleShareAssets = (deliveryId: string, assetIds: string[]) => {
     if (assetIds.length === 0) return
-    shareSelectedMutation.mutate({ deliveryId, assetIds })
-  }
-
-  /* Download one split part with an explicit filename (e.g. "Haldi-part-1-of-3.zip"). */
-  const handleDownloadPart = (deliveryId: string, assetIds: string[], filename: string) => {
-    if (assetIds.length === 0) return
-    downloadNamedMutation.mutate({ deliveryId, assetIds, filename })
+    shareMutation.mutate({ deliveryId, scope: 'selected', assetIds })
   }
 
   const startNativeDownload = (deliveryId: string, folder: string | null, baseName: string) => {
@@ -251,7 +194,7 @@ export function useMyPictures() {
 
   const handleShareSelected = () => {
     if (selectedAssetIds.length === 0 || !selectDeliveryId) return
-    shareSelectedMutation.mutate({ deliveryId: selectDeliveryId, assetIds: selectedAssetIds })
+    shareMutation.mutate({ deliveryId: selectDeliveryId, scope: 'selected', assetIds: selectedAssetIds })
   }
 
   const handleCopyShareLink = async (deliveryId: string) => {
@@ -336,13 +279,11 @@ export function useMyPictures() {
     moveCustomerLightbox,
 
     // actions
-    handleDownloadAll,
     handleDownloadSelected,
     handleShareAll,
     handleShareSelected,
     handleDownloadAssets,
     handleShareAssets,
-    handleDownloadPart,
     startNativeDownload,
     nativeDownloadBusy,
     handleCopyShareLink,

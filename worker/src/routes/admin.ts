@@ -1,9 +1,9 @@
 import { Hono } from 'hono'
-import type { Env, AdminActivityKind, AdminActivityRow } from '../types'
+import type { Env, User, AdminActivityKind, AdminActivityRow } from '../types'
 import { runLifecycle } from '../helpers/lifecycle'
 import {
   adminActivityKinds, MAX_LONG_TEXT,
-  responseHeaders, jsonError,
+  responseHeaders, jsonError, statusForError,
   supabaseRequest, getUserFromBearer, ensureAdmin, ensureAdminAndOwnedDelivery, ensureAdminOwnedAsset,
   insertAdminActivity, serializeAdminActivity,
   deleteStoredAssets, streamZipResponse,
@@ -12,14 +12,30 @@ import {
   getTokenSigningSecret, createProjectZipDownloadToken, verifyProjectZipDownloadToken,
 } from '../lib'
 
-const admin = new Hono<{ Bindings: Env }>()
+const admin = new Hono<{ Bindings: Env; Variables: { user: User } }>()
+
+/* Every admin route requires an authenticated admin — resolved once here
+   instead of a copy-pasted preamble in each handler; routes read
+   `c.get('user')`. Exception: /downloads/file authenticates via a signed
+   token in its URL, because native browser downloads can't send headers. */
+admin.use('*', async (c, next) => {
+  if (c.req.path.endsWith('/downloads/file')) return next()
+  try {
+    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
+    ensureAdmin(user)
+    c.set('user', user)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unauthorized'
+    return jsonError(message, statusForError(message))
+  }
+  await next()
+})
 
 /* ── Activity ──────────────────────────────────────────────────── */
 
 admin.get('/activity', async (c) => {
   try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    ensureAdmin(user)
+    const user = c.get('user')
 
     const limitRaw = Number.parseInt(c.req.query('limit') ?? '', 10)
     const limit = Number.isFinite(limitRaw) ? Math.min(50, Math.max(1, limitRaw)) : 24
@@ -49,8 +65,7 @@ admin.get('/activity', async (c) => {
 
 admin.post('/activity', async (c) => {
   try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    ensureAdmin(user)
+    const user = c.get('user')
     const body = await c.req.json<{
       kind?: string
       title?: string
@@ -97,8 +112,7 @@ admin.post('/activity', async (c) => {
 
 admin.get('/clients', async (c) => {
   try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    ensureAdmin(user)
+    const user = c.get('user')
 
     const clients = await supabaseRequest<
       Array<{ id: string; full_name: string; email: string; phone: string | null; notes: string | null }>
@@ -114,8 +128,7 @@ admin.get('/clients', async (c) => {
    GET /api/v1/admin/clients/:clientId/deliveries */
 admin.get('/clients/:clientId/deliveries', async (c) => {
   try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    ensureAdmin(user)
+    const user = c.get('user')
     const clientId = c.req.param('clientId')
     if (!clientId) return jsonError('clientId is required', 400)
 
@@ -179,8 +192,7 @@ admin.get('/clients/:clientId/deliveries', async (c) => {
 
 admin.post('/clients', async (c) => {
   try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    ensureAdmin(user)
+    const user = c.get('user')
     const body = await c.req.json<{ fullName?: string; email?: string; phone?: string; notes?: string }>()
 
     const fullName = parseNullableText(body.fullName)
@@ -214,8 +226,7 @@ admin.post('/clients', async (c) => {
 
 admin.patch('/clients/:clientId', async (c) => {
   try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    ensureAdmin(user)
+    const user = c.get('user')
     const clientId = c.req.param('clientId')
     const body = await c.req.json<{ fullName?: string; email?: string; phone?: string; notes?: string }>()
     if (!clientId) return jsonError('clientId is required', 400)
@@ -247,8 +258,7 @@ admin.patch('/clients/:clientId', async (c) => {
 
 admin.delete('/clients/:clientId', async (c) => {
   try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    ensureAdmin(user)
+    const user = c.get('user')
     const clientId = c.req.param('clientId')
     if (!clientId) return jsonError('clientId is required', 400)
 
@@ -293,8 +303,7 @@ admin.delete('/clients/:clientId', async (c) => {
 
 admin.get('/projects', async (c) => {
   try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    ensureAdmin(user)
+    const user = c.get('user')
     const clientId = c.req.query('clientId')
 
     const filters = [`owner_user_id=eq.${encodeURIComponent(user.id)}`]
@@ -320,8 +329,7 @@ admin.get('/projects', async (c) => {
 
 admin.post('/projects', async (c) => {
   try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    ensureAdmin(user)
+    const user = c.get('user')
     const body = await c.req.json<{
       clientId?: string
       name?: string
@@ -370,8 +378,7 @@ admin.post('/projects', async (c) => {
 
 admin.patch('/projects/:projectId', async (c) => {
   try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    ensureAdmin(user)
+    const user = c.get('user')
     const projectId = c.req.param('projectId')
     const body = await c.req.json<{
       name?: string
@@ -422,8 +429,7 @@ admin.patch('/projects/:projectId', async (c) => {
 
 admin.delete('/projects/:projectId', async (c) => {
   try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    ensureAdmin(user)
+    const user = c.get('user')
     const projectId = c.req.param('projectId')
     if (!projectId) return jsonError('projectId is required', 400)
 
@@ -453,40 +459,11 @@ admin.delete('/projects/:projectId', async (c) => {
   }
 })
 
-/* ── Project Download ──────────────────────────────────────────── */
-
-admin.post('/projects/:projectId/download', async (c) => {
-  try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    ensureAdmin(user)
-    const projectId = c.req.param('projectId')
-    if (!projectId) return jsonError('projectId is required', 400)
-
-    const projects = await supabaseRequest<Array<{ id: string; name: string }>>(
-      c.env,
-      `projects?id=eq.${encodeURIComponent(projectId)}&owner_user_id=eq.${encodeURIComponent(user.id)}&select=id,name&limit=1`
-    )
-    const project = projects[0]
-    if (!project) return jsonError('Project not found', 404)
-
-    const assets = await supabaseRequest<Array<{ id: string; filename: string; r2_object_key: string }>>(
-      c.env,
-      `assets?project_id=eq.${encodeURIComponent(projectId)}&owner_user_id=eq.${encodeURIComponent(user.id)}&select=id,filename,r2_object_key,created_at&order=created_at.asc`
-    )
-    if (assets.length === 0) return jsonError('No files found for this project', 404)
-
-    return streamZipResponse(c, assets, `${sanitizeArchiveEntryName(project.name)}.zip`)
-  } catch (error) {
-    return jsonError(error instanceof Error ? error.message : 'Project download failed', 400)
-  }
-})
-
 /* ── Bulk Download ─────────────────────────────────────────────── */
 
 admin.post('/downloads', async (c) => {
   try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    ensureAdmin(user)
+    const user = c.get('user')
     const body = await c.req.json<{ assetIds?: string[]; filename?: string }>()
     /* Validate UUIDs (interpolated into PostgREST or=() filter) and filter at
        SQL level rather than fetching every asset the admin owns. */
@@ -514,8 +491,7 @@ admin.post('/downloads', async (c) => {
    disk natively — no in-memory blob, any size. */
 admin.post('/downloads/token', async (c) => {
   try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    ensureAdmin(user)
+    const user = c.get('user')
     const body = await c.req.json<{ projectId?: string; filename?: string }>().catch(() => ({} as { projectId?: string; filename?: string }))
     const projectId = (body.projectId ?? '').trim()
     if (!projectId) return jsonError('projectId is required', 400)
@@ -541,8 +517,7 @@ admin.post('/downloads/token', async (c) => {
     return c.json({ token, path: `/api/v1/admin/downloads/file?token=${encodeURIComponent(token)}` }, 200, responseHeaders(c))
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not prepare download'
-    const status = /bearer token|session token/i.test(message) ? 401 : /admin access/i.test(message) ? 403 : 400
-    return jsonError(message, status)
+    return jsonError(message, statusForError(message))
   }
 })
 
@@ -568,7 +543,7 @@ admin.get('/downloads/file', async (c) => {
 
 admin.delete('/assets/:assetId', async (c) => {
   try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
+    const user = c.get('user')
     const assetId = c.req.param('assetId')
     if (!assetId) return jsonError('assetId is required', 400)
 
@@ -632,8 +607,7 @@ const firstName = (fullName: string | null | undefined): string => {
 
 admin.post('/deliveries/:deliveryId/notify', async (c) => {
   try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    ensureAdmin(user)
+    const user = c.get('user')
 
     if (!c.env.RESEND_API_KEY || !c.env.EMAIL_FROM) {
       return jsonError('Email is not configured yet. Add RESEND_API_KEY and EMAIL_FROM, then redeploy.', 503)
@@ -760,17 +734,8 @@ admin.post('/deliveries/:deliveryId/notify', async (c) => {
       responseHeaders(c)
     )
   } catch (error) {
-    /* Map known failure classes to honest status codes. Auth/authorization
-       and not-found errors are client errors (4xx); anything else (Supabase
-       down, Resend down, unexpected) is a genuine 5xx. Returning 500 for an
-       auth failure would mislead monitoring and the admin UI. */
     const message = error instanceof Error ? error.message : 'Failed to notify client'
-    const status =
-      /bearer token|session token|not available in session/i.test(message) ? 401 :
-      /admin access/i.test(message) ? 403 :
-      /not found|not owned/i.test(message) ? 404 :
-      500
-    return jsonError(message, status)
+    return jsonError(message, statusForError(message, 500))
   }
 })
 
@@ -789,8 +754,7 @@ admin.post('/deliveries/:deliveryId/notify', async (c) => {
    failure is clean. */
 admin.post('/deliveries/:deliveryId/recipients', async (c) => {
   try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    ensureAdmin(user)
+    const user = c.get('user')
 
     if (!c.env.RESEND_API_KEY || !c.env.EMAIL_FROM) {
       return jsonError('Email is not configured yet. Add RESEND_API_KEY and EMAIL_FROM, then redeploy.', 503)
@@ -882,12 +846,7 @@ admin.post('/deliveries/:deliveryId/recipients', async (c) => {
     )
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to share delivery'
-    const status =
-      /bearer token|session token|not available in session/i.test(message) ? 401 :
-      /admin access/i.test(message) ? 403 :
-      /not found|not owned/i.test(message) ? 404 :
-      500
-    return jsonError(message, status)
+    return jsonError(message, statusForError(message, 500))
   }
 })
 
@@ -900,8 +859,7 @@ admin.post('/deliveries/:deliveryId/recipients', async (c) => {
    delivery has been purged (files are already gone). */
 admin.post('/deliveries/:deliveryId/extend', async (c) => {
   try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    ensureAdmin(user)
+    const user = c.get('user')
     const deliveryId = c.req.param('deliveryId')
     if (!deliveryId) return jsonError('deliveryId is required', 400)
     await ensureAdminAndOwnedDelivery(c.env, user, deliveryId)
@@ -944,12 +902,7 @@ admin.post('/deliveries/:deliveryId/extend', async (c) => {
     return c.json({ ok: true, deliveryId, expiresAt: newExpiry }, 200, responseHeaders(c))
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to extend retention'
-    const status =
-      /bearer token|session token|not available in session/i.test(message) ? 401 :
-      /admin access/i.test(message) ? 403 :
-      /not found|not owned/i.test(message) ? 404 :
-      500
-    return jsonError(message, status)
+    return jsonError(message, statusForError(message, 500))
   }
 })
 
@@ -961,17 +914,11 @@ admin.post('/deliveries/:deliveryId/extend', async (c) => {
    verification — in dry-run it only logs/reports, changing nothing. */
 admin.post('/lifecycle/run', async (c) => {
   try {
-    const user = await getUserFromBearer(c.env, c.req.header('authorization'))
-    ensureAdmin(user)
     const report = await runLifecycle(c.env)
     return c.json(report, 200, responseHeaders(c))
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Lifecycle run failed'
-    const status =
-      /bearer token|session token|not available in session/i.test(message) ? 401 :
-      /admin access/i.test(message) ? 403 :
-      500
-    return jsonError(message, status)
+    return jsonError(message, statusForError(message, 500))
   }
 })
 

@@ -51,43 +51,25 @@ export const createResponsiveAsset = (originalPath: string): ResponsiveAsset => 
     .replace(/^project-rga\//, 'project-rga/optimized/')
     .replace(/\.[^.]+$/, '')
 
-  const remote640 = toRemoteMediaUrl(`${optimizedBase}-640.jpg`)
-  const remote1200 = toRemoteMediaUrl(`${optimizedBase}-1200.jpg`)
-  const remote1800 = toRemoteMediaUrl(`${optimizedBase}-1800.jpg`)
+  const widths = [640, 1200, 1800]
+  const remote = widths.map((width) => ({ url: toRemoteMediaUrl(`${optimizedBase}-${width}.jpg`), width }))
+  const local = widths.map((width) => ({ url: toLocalMediaUrl(`${optimizedBase}-${width}.jpg`), width }))
+  const remoteSrcSet = buildSrcSet(remote)
+  const localSrcSet = buildSrcSet(local)
 
-  const local640 = toLocalMediaUrl(`${optimizedBase}-640.jpg`)
-  const local1200 = toLocalMediaUrl(`${optimizedBase}-1200.jpg`)
-  const local1800 = toLocalMediaUrl(`${optimizedBase}-1800.jpg`)
-
-  const remoteSrcSet = buildSrcSet([
-    { url: remote640, width: 640 },
-    { url: remote1200, width: 1200 },
-    { url: remote1800, width: 1800 },
-  ])
-
-  const localSrcSet = buildSrcSet([
-    { url: local640, width: 640 },
-    { url: local1200, width: 1200 },
-    { url: local1800, width: 1800 },
-  ])
-
-  const sources = uniqueSources([
-    { src: remote640, srcSet: remoteSrcSet },
-    { src: local640, srcSet: localSrcSet },
-    { src: remote1200 },
-    { src: local1200 },
-    { src: remote1800 },
-    { src: local1800 },
-  ])
+  /* Fallback ladder: remote before local at each width, srcSet on the first pair. */
+  const sources = uniqueSources(
+    widths.flatMap((_, i) => [
+      { src: remote[i].url, ...(i === 0 ? { srcSet: remoteSrcSet } : {}) },
+      { src: local[i].url, ...(i === 0 ? { srcSet: localSrcSet } : {}) },
+    ]),
+  )
 
   return {
     key: normalizedPath,
     sources,
   }
 }
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const getPrimaryPreloadSource = (asset: ResponsiveAsset) => asset.sources[0]?.src ?? ''
 
 export const ResponsiveImage = ({
   asset,

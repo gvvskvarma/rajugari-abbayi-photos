@@ -1,4 +1,3 @@
-import type { Context } from 'hono'
 import type {
   Env, Mode, MediaVariant, PreviewAccessContext, AdminActivityKind, AdminActivityRow, DeliveryAssetRule,
 } from './types'
@@ -22,6 +21,7 @@ export {
   resolveAllowedOrigin,
   responseHeaders,
   SAFE_ERROR_PATTERNS,
+  statusForError,
   supabaseRequest,
 } from './helpers/http'
 export {
@@ -338,7 +338,7 @@ const U32_MAX = 0xffffffff
  * NOTE: assumes each INDIVIDUAL file is < 4 GB (always true for photos). A
  * single file >= 4 GB would additionally need ZIP64 fields in its local header.
  */
-export const streamZipResponse = async (c: Context<{ Bindings: Env }>, entries: Array<{ filename: string; r2_object_key: string }>, archiveName: string) => {
+export const streamZipResponse = async (c: { env: Env; req: { header(name: string): string | undefined } }, entries: Array<{ filename: string; r2_object_key: string }>, archiveName: string) => {
   const encoder = new TextEncoder()
   const seenNames = new Set<string>()
   const named = entries.map((entry) => ({ ...entry, nameBytes: encoder.encode(uniquifyArchiveEntryName(entry.filename, seenNames)) }))

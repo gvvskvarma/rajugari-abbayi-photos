@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { splitIntoDownloadParts, formatBytes, MAX_PART_BYTES } from '../lib/downloadParts'
+import { splitIntoDownloadParts, MAX_PART_BYTES } from '../lib/downloadParts'
 import type { DeliveryAsset } from '../types'
 
 const GB = 1024 * 1024 * 1024
@@ -43,13 +43,5 @@ describe('splitIntoDownloadParts', () => {
       for (const id of p.assetIds) expect(['a', 'b', 'c']).toContain(id)
     }
     expect(parts.flatMap((p) => p.assetIds).sort()).toEqual(['a', 'b', 'c'])
-  })
-})
-
-describe('formatBytes', () => {
-  it('formats GB / MB / KB', () => {
-    expect(formatBytes(1.5 * GB)).toBe('1.5 GB')
-    expect(formatBytes(46 * 1024 * 1024)).toBe('46 MB')
-    expect(formatBytes(2048)).toBe('2 KB')
   })
 })

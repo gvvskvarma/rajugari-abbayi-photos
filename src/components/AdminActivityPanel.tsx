@@ -80,54 +80,26 @@ export function AdminActivityPanel({
       {expanded && (
         <>
           <div className="admin-activity-toolbar" role="toolbar" aria-label="Audit trail filters">
-            <button
-              className={`button ghost admin-activity-chip ${kindFilter === 'all' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => onKindFilterChange('all')}
-            >
-              All events
-              <span>{activityCounts.all}</span>
-            </button>
-            <button
-              className={`button ghost admin-activity-chip ${kindFilter === 'upload' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => onKindFilterChange('upload')}
-            >
-              Uploads
-              <span>{activityCounts.upload}</span>
-            </button>
-            <button
-              className={`button ghost admin-activity-chip ${kindFilter === 'download' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => onKindFilterChange('download')}
-            >
-              Downloads
-              <span>{activityCounts.download}</span>
-            </button>
-            <button
-              className={`button ghost admin-activity-chip ${kindFilter === 'create' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => onKindFilterChange('create')}
-            >
-              Creates
-              <span>{activityCounts.create}</span>
-            </button>
-            <button
-              className={`button ghost admin-activity-chip ${kindFilter === 'edit' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => onKindFilterChange('edit')}
-            >
-              Edits
-              <span>{activityCounts.edit}</span>
-            </button>
-            <button
-              className={`button ghost admin-activity-chip ${kindFilter === 'delete' ? 'is-active' : ''}`}
-              type="button"
-              onClick={() => onKindFilterChange('delete')}
-            >
-              Deletes
-              <span>{activityCounts.delete}</span>
-            </button>
+            {(
+              [
+                ['all', 'All events'],
+                ['upload', 'Uploads'],
+                ['download', 'Downloads'],
+                ['create', 'Creates'],
+                ['edit', 'Edits'],
+                ['delete', 'Deletes'],
+              ] as Array<['all' | AdminActivityKind, string]>
+            ).map(([kind, label]) => (
+              <button
+                key={kind}
+                className={`button ghost admin-activity-chip ${kindFilter === kind ? 'is-active' : ''}`}
+                type="button"
+                onClick={() => onKindFilterChange(kind)}
+              >
+                {label}
+                <span>{activityCounts[kind]}</span>
+              </button>
+            ))}
           </div>
 
           {contextHint && <p className="portal-hint">{contextHint}</p>}
