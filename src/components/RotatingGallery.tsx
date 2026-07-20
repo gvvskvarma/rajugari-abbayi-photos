@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import type { ResponsiveAsset } from '../types'
 import { ResponsiveImage } from '../lib/media.tsx'
 
@@ -110,9 +111,9 @@ export const RotatingGallery = ({
   return (
     <div className="rotator">
       {href ? (
-        <a href={href} className="rotator-link" aria-label={`View ${title}`}>
+        <Link to={href} className="rotator-link" aria-label={`View ${title}`}>
           {card}
-        </a>
+        </Link>
       ) : (
         card
       )}

@@ -1,16 +1,19 @@
-import { Outlet, useNavigate } from 'react-router-dom'
+import { useEffect, useRef } from 'react'
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import '../App.css'
 import { isSupabaseConfigured } from '../lib/supabase'
 import { useAuthContext } from '../context/AuthContext'
 import { useAuth } from '../hooks/useAuth'
 import { useLiveConfig } from '../hooks/queries/useLiveConfig'
-import { personalInstagramUrl } from '../lib/constants'
+import { personalInstagramUrl, instagramUrl, contactEmail } from '../lib/constants'
 import { queryClient } from '../lib/queryClient'
 import { AuthProvider } from '../context/AuthContext'
 
 function LayoutInner() {
   const navigate = useNavigate()
+  const { pathname } = useLocation()
+  const authBoxRef = useRef<HTMLDivElement>(null)
   const { session, role, loginLabel } = useAuthContext()
   const { data: liveData } = useLiveConfig()
   const isLive = liveData?.config?.isLive ?? false
@@ -30,22 +33,45 @@ function LayoutInner() {
     handleSignOut,
   } = useAuth({ onSignOut: () => navigate('/') })
 
+  /* SPA navigation keeps scroll position — land each new page at the top. */
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' })
+    setAuthMenuOpen(false)
+  }, [pathname, setAuthMenuOpen])
+
+  /* Close the login menu on outside click or Escape. */
+  useEffect(() => {
+    if (!authMenuOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (!authBoxRef.current?.contains(event.target as Node)) setAuthMenuOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setAuthMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [authMenuOpen, setAuthMenuOpen])
+
   return (
     <div className="page">
       <a href="#main-content" className="skip-link">Skip to content</a>
       <header className="topbar">
         <div className="brand">
-          <a className="brand-mark" href="/" aria-label="Go to top">
+          <Link className="brand-mark" to="/" aria-label="Go to top">
             <img
               src="/logo/logo-200.png"
               alt="Rajugari_Abbayi Photography logo"
               loading="eager"
             />
-          </a>
+          </Link>
           <div>
-            <a className="brand-title" href="/">
+            <Link className="brand-title" to="/">
               Rajugari_Abbayi_Photography
-            </a>
+            </Link>
             <a
               className="brand-subtitle"
               href={personalInstagramUrl}
@@ -59,16 +85,16 @@ function LayoutInner() {
 
         <div className="topbar-right">
           <nav className="nav">
-            {session && role === 'customer' && <a href="/my-pictures">My Pictures</a>}
-            {session && role === 'admin' && <a href="/upload">Upload</a>}
-            {session && role === 'admin' && <a href="/admin/clients">Clients</a>}
-            {!(session && role === 'admin') && <a href="/work">Work</a>}
-            {!(session && role === 'admin') && <a href="/about">About</a>}
-            {(isLive || isAdmin) && <a href="/live">{isLive ? 'Live' : 'Live (off)'}</a>}
-            {!(session && role === 'admin') && <a href="/book">Contact</a>}
+            {session && role === 'customer' && <NavLink to="/my-pictures">My Pictures</NavLink>}
+            {session && role === 'admin' && <NavLink to="/upload">Upload</NavLink>}
+            {session && role === 'admin' && <NavLink to="/admin/clients">Clients</NavLink>}
+            {!(session && role === 'admin') && <NavLink to="/work">Work</NavLink>}
+            {!(session && role === 'admin') && <NavLink to="/about">About</NavLink>}
+            {(isLive || isAdmin) && <NavLink to="/live">{isLive ? 'Live' : 'Live (off)'}</NavLink>}
+            {!(session && role === 'admin') && <NavLink to="/book">Contact</NavLink>}
           </nav>
 
-          <div className="auth-box">
+          <div className="auth-box" ref={authBoxRef}>
             <button
               className="login-icon"
               type="button"
@@ -153,7 +179,16 @@ function LayoutInner() {
       </main>
 
       <footer className="footer">
-        <p>© 2026 Rajugari_Abbayi Photography. Crafted with intention.</p>
+        <p className="footer-mark">Rajugari Abbayi</p>
+        <p className="footer-tag">every frame with feeling</p>
+        <div className="footer-links">
+          <a href={instagramUrl} target="_blank" rel="noreferrer">Instagram</a>
+          <span className="footer-dot" aria-hidden="true" />
+          <a href={`mailto:${contactEmail}`}>Email</a>
+          <span className="footer-dot" aria-hidden="true" />
+          <Link to="/book">Book a shoot</Link>
+        </div>
+        <p className="footer-copy">© 2026 Rajugari_Abbayi Photography. Crafted with intention.</p>
       </footer>
     </div>
   )

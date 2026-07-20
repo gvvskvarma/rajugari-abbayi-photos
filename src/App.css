@@ -1954,6 +1954,8 @@ main > section {
 }
 
 .button {
+  position: relative;
+  overflow: hidden;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3959,4 +3961,434 @@ img.rotator-image {
   border: 1px solid currentColor;
   border-radius: 999px;
   white-space: nowrap;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Cinematic polish layer — atmosphere, motion, and micro-detail.
+   Pure CSS; every animation is gated behind prefers-reduced-motion.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Type punch ──────────────────────────────────────────────────── */
+.hero-v2-content h1 {
+  background: linear-gradient(115deg, #fdfaf3 38%, #ecd3a4 78%, #cfa96f 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: none;
+  filter: drop-shadow(0 4px 28px rgba(0, 0, 0, 0.55));
+}
+
+.hero-v2-tagline {
+  background: linear-gradient(100deg, #f2ddb6 0%, #d1b07f 55%, #b28d55 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: none;
+  filter: drop-shadow(0 4px 28px rgba(0, 0, 0, 0.55));
+}
+
+.hero-stat-value {
+  background: linear-gradient(120deg, #f4e3c2, #cfa96f);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.section-head h2 {
+  text-wrap: balance;
+}
+
+.section-head h2::after {
+  content: '';
+  display: block;
+  width: 56px;
+  height: 2px;
+  margin-top: 12px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), transparent);
+}
+
+/* ── Button sheen sweep ──────────────────────────────────────────── */
+.button::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -80%;
+  width: 55%;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.34) 50%,
+    transparent 100%
+  );
+  transform: skewX(-18deg);
+  opacity: 0;
+}
+
+.button:hover::after,
+.button:focus-visible::after {
+  animation: buttonSheen 0.65s ease forwards;
+}
+
+@keyframes buttonSheen {
+  from {
+    opacity: 1;
+    left: -80%;
+  }
+  to {
+    opacity: 1;
+    left: 130%;
+  }
+}
+
+/* ── Service cards: numbered, gold underline grows on hover ─────── */
+.services-grid {
+  counter-reset: service;
+}
+
+.service-card {
+  position: relative;
+}
+
+.service-card::before {
+  counter-increment: service;
+  content: '0' counter(service);
+  display: block;
+  margin-bottom: 12px;
+  font-family: 'Playfair Display', serif;
+  font-size: 0.86rem;
+  font-style: italic;
+  letter-spacing: 0.14em;
+  color: rgba(209, 176, 127, 0.66);
+}
+
+.service-card::after {
+  content: '';
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 16px;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(209, 176, 127, 0.7), transparent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.service-card:hover::after {
+  transform: scaleX(1);
+}
+
+/* ── Rotator cards: hover hint ───────────────────────────────────── */
+.rotator-overlay::after {
+  content: 'View gallery →';
+  display: block;
+  margin-top: 8px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.rotator-card:hover .rotator-overlay::after,
+.rotator-link:focus-visible .rotator-overlay::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── Portfolio thumbs: filmic hover lift ─────────────────────────── */
+.portfolio-thumb-img {
+  transition: transform 0.4s ease, filter 0.4s ease;
+}
+
+.portfolio-thumb:hover .portfolio-thumb-img {
+  filter: saturate(1.1) contrast(1.05);
+}
+
+.portfolio-thumb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(209, 176, 127, 0);
+  transition: box-shadow 0.3s ease;
+}
+
+.portfolio-thumb:hover::after {
+  box-shadow: inset 0 0 0 1px rgba(209, 176, 127, 0.45);
+}
+
+/* ── Marquee ribbon (homepage) ───────────────────────────────────── */
+.marquee-band {
+  overflow: hidden;
+  padding: 6px 0;
+  border-top: 1px solid rgba(236, 232, 223, 0.07);
+  border-bottom: 1px solid rgba(236, 232, 223, 0.07);
+  margin: -58px 0;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+}
+
+.marquee-track {
+  display: flex;
+  width: max-content;
+}
+
+.marquee-group {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.marquee-item {
+  display: inline-flex;
+  align-items: center;
+  padding: 10px 0;
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(1.05rem, 2vw, 1.5rem);
+  font-style: italic;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(236, 232, 223, 0.4);
+  white-space: nowrap;
+}
+
+.marquee-star {
+  margin: 0 26px;
+  font-style: normal;
+  font-size: 0.7em;
+  color: rgba(209, 176, 127, 0.55);
+}
+
+/* ── Footer: signature block ─────────────────────────────────────── */
+.footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding-top: 40px;
+}
+
+.footer-mark {
+  margin: 0;
+  font-family: 'Twigs', serif;
+  font-size: 1.5rem;
+  letter-spacing: 0.06em;
+  text-transform: none;
+  color: rgba(236, 232, 223, 0.88);
+}
+
+.footer-tag {
+  margin: 0;
+  font-family: 'Playfair Display', serif;
+  font-style: italic;
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: none;
+  color: rgba(209, 176, 127, 0.7);
+}
+
+.footer-links {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 4px 0 2px;
+}
+
+.footer-links a {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: rgba(236, 232, 223, 0.66);
+  transition: color 0.2s ease;
+}
+
+.footer-links a:hover {
+  color: var(--accent);
+}
+
+.footer-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(236, 232, 223, 0.3);
+}
+
+.footer-copy {
+  margin: 0;
+}
+
+/* ── Motion (skipped entirely under prefers-reduced-motion) ─────── */
+@media (prefers-reduced-motion: no-preference) {
+  /* Slow Ken Burns drift on the hero image — transform only, no CLS. */
+  .hero-v2-bg-img {
+    animation: kenBurns 18s ease-out both;
+    transform-origin: 52% 38%;
+  }
+
+  @keyframes kenBurns {
+    from {
+      transform: scale(1);
+    }
+    to {
+      transform: scale(1.07);
+    }
+  }
+
+  /* Topbar drops in on load. */
+  .topbar {
+    animation: fadeDown 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes fadeDown {
+    from {
+      opacity: 0;
+      transform: translateY(-14px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Auth dropdown pops. */
+  .auth-menu {
+    animation: menuPop 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+    transform-origin: top right;
+  }
+
+  @keyframes menuPop {
+    from {
+      opacity: 0;
+      transform: translateY(-6px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  /* Shared rise-in used by staggered reveals. `backwards` fill keeps
+     items hidden through their delay, then releases the transform so
+     hover lifts still transition normally afterwards. */
+  @keyframes riseIn {
+    from {
+      opacity: 0;
+      transform: translateY(26px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Hero content cascade. */
+  .reveal-section.revealed .hero-v2-content > * {
+    animation: riseIn 0.7s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+
+  .reveal-section.revealed .hero-v2-content > *:nth-child(1) { animation-delay: 0.05s; }
+  .reveal-section.revealed .hero-v2-content > *:nth-child(2) { animation-delay: 0.14s; }
+  .reveal-section.revealed .hero-v2-content > *:nth-child(3) { animation-delay: 0.23s; }
+  .reveal-section.revealed .hero-v2-content > *:nth-child(4) { animation-delay: 0.32s; }
+  .reveal-section.revealed .hero-v2-content > *:nth-child(5) { animation-delay: 0.41s; }
+
+  .reveal-section.revealed .hero-stat {
+    animation: riseIn 0.7s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+
+  .reveal-section.revealed .hero-stat:nth-child(1) { animation-delay: 0.5s; }
+  .reveal-section.revealed .hero-stat:nth-child(2) { animation-delay: 0.58s; }
+  .reveal-section.revealed .hero-stat:nth-child(3) { animation-delay: 0.66s; }
+
+  /* Card grids cascade as their section reveals. */
+  .reveal-section.revealed .service-card,
+  .reveal-section.revealed .rotator,
+  .reveal-section.revealed .about-page-value,
+  .reveal-section.revealed .portfolio-thumb {
+    animation: riseIn 0.65s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+
+  .reveal-section.revealed .service-card:nth-child(1) { animation-delay: 0.05s; }
+  .reveal-section.revealed .service-card:nth-child(2) { animation-delay: 0.12s; }
+  .reveal-section.revealed .service-card:nth-child(3) { animation-delay: 0.19s; }
+  .reveal-section.revealed .service-card:nth-child(4) { animation-delay: 0.26s; }
+  .reveal-section.revealed .service-card:nth-child(5) { animation-delay: 0.33s; }
+  .reveal-section.revealed .service-card:nth-child(6) { animation-delay: 0.4s; }
+
+  .reveal-section.revealed .rotator:nth-child(1) { animation-delay: 0.05s; }
+  .reveal-section.revealed .rotator:nth-child(2) { animation-delay: 0.14s; }
+  .reveal-section.revealed .rotator:nth-child(3) { animation-delay: 0.23s; }
+  .reveal-section.revealed .rotator:nth-child(4) { animation-delay: 0.32s; }
+
+  .reveal-section.revealed .about-page-value:nth-child(1) { animation-delay: 0.05s; }
+  .reveal-section.revealed .about-page-value:nth-child(2) { animation-delay: 0.14s; }
+  .reveal-section.revealed .about-page-value:nth-child(3) { animation-delay: 0.23s; }
+
+  .reveal-section.revealed .portfolio-thumb:nth-child(1) { animation-delay: 0.04s; }
+  .reveal-section.revealed .portfolio-thumb:nth-child(2) { animation-delay: 0.09s; }
+  .reveal-section.revealed .portfolio-thumb:nth-child(3) { animation-delay: 0.14s; }
+  .reveal-section.revealed .portfolio-thumb:nth-child(4) { animation-delay: 0.19s; }
+  .reveal-section.revealed .portfolio-thumb:nth-child(5) { animation-delay: 0.24s; }
+  .reveal-section.revealed .portfolio-thumb:nth-child(6) { animation-delay: 0.29s; }
+  .reveal-section.revealed .portfolio-thumb:nth-child(n + 7) { animation-delay: 0.34s; }
+
+  /* Portal / booking pages: soft entrance for their sections. */
+  .portal-section,
+  .book-main > section {
+    animation: riseIn 0.55s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+
+  .book-main > section:nth-child(2) { animation-delay: 0.1s; }
+  .book-main > section:nth-child(3) { animation-delay: 0.2s; }
+
+  /* Marquee scroll. */
+  .marquee-track {
+    animation: marqueeScroll 36s linear infinite;
+  }
+
+  @keyframes marqueeScroll {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+}
+
+@media (max-width: 680px) {
+  /* main's section gap shrinks to 48px on mobile — the desktop pull-in
+     would overlap neighbours, so ease off. */
+  .marquee-band {
+    margin: -12px 0;
+  }
+
+  .marquee-star {
+    margin: 0 16px;
+  }
+
+  .footer-mark {
+    font-size: 1.28rem;
+  }
+}
+
+/* Eyebrow pills inside column-flex heroes stretch to full width — pin them. */
+.about-page-hero .eyebrow,
+.live-page-hero .eyebrow {
+  align-self: flex-start;
+}
+
+/* Active page pill in the nav (react-router NavLink). */
+.nav a.active {
+  border-color: rgba(209, 176, 127, 0.6);
+  background: rgba(209, 176, 127, 0.14);
+  color: #f0e2c8;
 }

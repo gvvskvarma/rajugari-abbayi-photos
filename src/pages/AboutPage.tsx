@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { instagramUrl, contactEmail } from '../lib/constants'
 import { useDocumentMeta } from '../hooks/useDocumentMeta.ts'
 import { useReveal } from '../hooks/useReveal'
@@ -97,9 +98,9 @@ export function AboutPage() {
           If you're looking for something that feels real — I'd love to create that with you.
         </p>
         <div className="about-page-cta-actions">
-          <a className="button primary" href="/book">
+          <Link className="button primary" to="/book">
             Start your story
-          </a>
+          </Link>
         </div>
         <div className="about-page-cta-contact">
           <a href={`mailto:${contactEmail}`}>{contactEmail}</a>

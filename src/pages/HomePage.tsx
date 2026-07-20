@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { createResponsiveAsset, ResponsiveImage } from '../lib/media.tsx'
 import { instagramUrl, contactEmail } from '../lib/constants'
 import { fallbackLandscapes, fallbackBaby, fallbackPortraits, fallbackEvents } from '../lib/galleryFallbacks'
@@ -97,12 +98,12 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
             moments into visuals you'll keep coming back to.
           </p>
           <div className="hero-actions">
-            <a className="button primary" href="/book">
+            <Link className="button primary" to="/book">
               Start your story
-            </a>
-            <a className="button ghost" href="/work">
+            </Link>
+            <Link className="button ghost" to="/work">
               View my work
-            </a>
+            </Link>
           </div>
         </div>
 
@@ -116,6 +117,22 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
           ))}
         </div>
       </section>
+
+      {/* ── MARQUEE RIBBON ── */}
+      <div className="marquee-band" aria-hidden="true">
+        <div className="marquee-track">
+          {[0, 1].map((group) => (
+            <div className="marquee-group" key={group}>
+              {[...services, ...services].map((svc, index) => (
+                <span className="marquee-item" key={index}>
+                  {svc.label}
+                  <span className="marquee-star">✦</span>
+                </span>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
 
       {/* ── SERVICES ── */}
       <section className="services-section reveal-section" ref={servicesRef}>
@@ -159,9 +176,9 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
             need some fire portraits? I'd love to hear about it.
           </p>
           <div className="contact-actions">
-            <a className="button primary" href="/book">
+            <Link className="button primary" to="/book">
               Start your story
-            </a>
+            </Link>
           </div>
         </div>
         <div className="contact-card">
