@@ -4,6 +4,9 @@ import './App.css'
 import { Layout } from './components/Layout.tsx'
 import { AdminLayout } from './components/AdminLayout.tsx'
 import { LegacyRedirect } from './components/LegacyRedirect.tsx'
+/* Eager: the landing page ships in the first bundle — a lazy boundary here
+   means every first-time visitor stares at a loading screen. */
+import { HomePage } from './pages/HomePage.tsx'
 
 /* Auto-reload on stale chunk (happens after a new deployment) */
 function lazyRetry(factory: () => Promise<Record<string, unknown>>, name: string) {
@@ -28,7 +31,6 @@ function lazyRetry(factory: () => Promise<Record<string, unknown>>, name: string
   )
 }
 
-const HomePage = lazyRetry(() => import('./pages/HomePage.tsx'), 'HomePage')
 const BookPage = lazyRetry(() => import('./pages/BookPage.tsx'), 'BookPage')
 const MyPicturesPage = lazyRetry(() => import('./pages/MyPicturesPage.tsx'), 'MyPicturesPage')
 const AuthCallbackPage = lazyRetry(() => import('./pages/AuthCallbackPage.tsx'), 'AuthCallbackPage')
@@ -41,14 +43,25 @@ const PortfolioPage = lazyRetry(() => import('./pages/PortfolioPage.tsx'), 'Port
 const LivePage = lazyRetry(() => import('./pages/LivePage.tsx'), 'LivePage')
 
 function LazyPage({ children }: { children: React.ReactNode }) {
-  return <Suspense fallback={<div className="portal-section"><p className="portal-hint">Loading...</p></div>}>{children}</Suspense>
+  return (
+    <Suspense
+      fallback={
+        <div className="skeleton-card-list" aria-busy="true" aria-label="Loading page">
+          <div className="skeleton skeleton-card" />
+          <div className="skeleton skeleton-thumbnail" />
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
+  )
 }
 
 const router = createBrowserRouter([
   {
     element: <Layout />,
     children: [
-      { path: '/', element: <LazyPage><HomePage /></LazyPage> },
+      { path: '/', element: <HomePage /> },
       { path: '/work', element: <LazyPage><PortfolioPage /></LazyPage> },
       { path: '/portfolio', element: <LazyPage><PortfolioPage /></LazyPage> },
       { path: '/about', element: <LazyPage><AboutPage /></LazyPage> },
