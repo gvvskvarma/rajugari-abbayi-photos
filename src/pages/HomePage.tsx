@@ -28,6 +28,9 @@ const stats = [
 /* ── Hero tagline rotation ────────────────────────────────────────── */
 const taglineWords = ['iconic.', 'cinematic.', 'timeless.', 'unforgettable.']
 
+/* ── Behind-the-lens polaroid (same photo the About page uses) ────── */
+const aboutPhoto = createResponsiveAsset('project-rga/about/about-vishnu.jpg')
+
 /* Counts a stat up from 0 on mount (skipped under reduced motion). */
 function CountUpValue({ value }: { value: string }) {
   const target = parseInt(value.replace(/\D/g, ''), 10)
@@ -113,16 +116,16 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
   const igRef = useReveal<HTMLElement>()
   const contactRef = useReveal<HTMLElement>()
 
-  /* Polaroid picks for the Instagram section — notes echo the feed's captions */
+  /* Behind-the-lens polaroids — the person and the feed, not more portfolio.
+     Leads with the About photo; notes speak in the feed's first-person voice. */
   const igShots = useMemo(
     () =>
       [
-        { asset: portraitAssets[1] ?? portraitAssets[0], note: 'candid hours 🖤' },
-        { asset: eventAssets[2] ?? eventAssets[0], note: 'color, laughter & love ✨' },
-        { asset: babyAssets[1] ?? babyAssets[0], note: 'tiny humans, big smiles 🤍' },
-        { asset: landscapeAssets[1] ?? landscapeAssets[0], note: 'golden hour, always 🌅' },
+        { asset: aboutPhoto, note: 'the guy behind the lens 📸' },
+        { asset: eventAssets[3] ?? eventAssets[1], note: 'reels, BTS & everyday chaos 🎬' },
+        { asset: portraitAssets[2] ?? portraitAssets[0], note: 'your story could be next ✨' },
       ].filter((shot) => Boolean(shot.asset)),
-    [portraitAssets, eventAssets, babyAssets, landscapeAssets],
+    [portraitAssets, eventAssets],
   )
 
   return (
@@ -233,8 +236,11 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
       {/* ── INSTAGRAM / FOLLOW THE VIBE ── */}
       <section className="ig-section reveal-section" ref={igRef}>
         <div className="section-head">
-          <h2>Follow the vibe</h2>
-          <p>Candids · Events · Pre-Wed · Collabs — the feed is where the fun lives.</p>
+          <h2>Behind the lens</h2>
+          <p>
+            The galleries are the work — the feed is the personality. Reels,
+            behind-the-scenes, and a little Telugu cinema energy.
+          </p>
         </div>
         <div className="polaroid-row">
           {igShots.map((shot, index) => (
