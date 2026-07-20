@@ -181,6 +181,7 @@ function LayoutInner() {
       <footer className="footer">
         <p className="footer-mark">Rajugari Abbayi</p>
         <p className="footer-tag">every frame with feeling</p>
+        <p className="footer-telugu" lang="te">ప్రతి ఫ్రేమ్‌లో ఒక కథ</p>
         <div className="footer-links">
           <a href={instagramUrl} target="_blank" rel="noreferrer">Instagram</a>
           <span className="footer-dot" aria-hidden="true" />

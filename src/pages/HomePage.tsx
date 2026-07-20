@@ -25,11 +25,51 @@ const stats = [
   { value: '5+', label: 'Years shooting' },
 ]
 
+/* ── Hero tagline rotation ────────────────────────────────────────── */
+const taglineWords = ['iconic.', 'cinematic.', 'timeless.', 'unforgettable.']
+
+/* Counts a stat up from 0 on mount (skipped under reduced motion). */
+function CountUpValue({ value }: { value: string }) {
+  const target = parseInt(value.replace(/\D/g, ''), 10)
+  const suffix = value.replace(/[\d,]/g, '')
+  const [current, setCurrent] = useState(target)
+
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    let raf = 0
+    const start = performance.now()
+    const duration = 1400
+    const tick = (now: number) => {
+      const progress = Math.min((now - start) / duration, 1)
+      const eased = 1 - Math.pow(1 - progress, 3)
+      setCurrent(Math.round(target * eased))
+      if (progress < 1) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [target])
+
+  return (
+    <>
+      {current.toLocaleString('en-US')}
+      {suffix}
+    </>
+  )
+}
+
 /* ── Component ────────────────────────────────────────────────────── */
 export function HomePage({ sectionId }: { sectionId?: string }) {
   useDocumentMeta('', 'Bold portraits, cinematic events, and candid magic by Vishnu Varma. Book your shoot today.')
   const [cycleStep, setCycleStep] = useState(0)
+  const [taglineIndex, setTaglineIndex] = useState(0)
   const { data: galleryData } = useHomepageGallery()
+
+  /* Rotate the hero tagline word */
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const id = window.setInterval(() => setTaglineIndex((i) => (i + 1) % taglineWords.length), 2600)
+    return () => window.clearInterval(id)
+  }, [])
 
   /* Build responsive assets from dynamic keys (or fallbacks) */
   const { landscapeAssets, babyAssets, portraitAssets, eventAssets } = useMemo(() => {
@@ -70,7 +110,20 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
   const heroRef = useReveal<HTMLElement>()
   const servicesRef = useReveal<HTMLElement>()
   const workRef = useReveal<HTMLElement>()
+  const igRef = useReveal<HTMLElement>()
   const contactRef = useReveal<HTMLElement>()
+
+  /* Polaroid picks for the Instagram section — notes echo the feed's captions */
+  const igShots = useMemo(
+    () =>
+      [
+        { asset: portraitAssets[1] ?? portraitAssets[0], note: 'candid hours 🖤' },
+        { asset: eventAssets[2] ?? eventAssets[0], note: 'color, laughter & love ✨' },
+        { asset: babyAssets[1] ?? babyAssets[0], note: 'tiny humans, big smiles 🤍' },
+        { asset: landscapeAssets[1] ?? landscapeAssets[0], note: 'golden hour, always 🌅' },
+      ].filter((shot) => Boolean(shot.asset)),
+    [portraitAssets, eventAssets, babyAssets, landscapeAssets],
+  )
 
   return (
     <>
@@ -89,10 +142,18 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
           )}
           <div className="hero-v2-overlay" />
         </div>
+        <span className="hero-twinkle" style={{ top: '16%', left: '72%' }} aria-hidden="true">✦</span>
+        <span className="hero-twinkle" style={{ top: '30%', left: '88%' }} aria-hidden="true">✦</span>
+        <span className="hero-twinkle" style={{ top: '12%', left: '48%' }} aria-hidden="true">✦</span>
         <div className="hero-v2-content">
           <p className="eyebrow">Rajugari Abbayi Photography</p>
           <h1>Your moments.</h1>
-          <p className="hero-v2-tagline">Made&nbsp;iconic.</p>
+          <p className="hero-v2-tagline">
+            Made&nbsp;
+            <span className="tagline-word" key={taglineWords[taglineIndex]}>
+              {taglineWords[taglineIndex]}
+            </span>
+          </p>
           <p className="lead">
             Bold portraits, cinematic events, candid magic — I turn everyday
             moments into visuals you'll keep coming back to.
@@ -111,7 +172,9 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
         <div className="hero-stats">
           {stats.map((s) => (
             <div key={s.label} className="hero-stat">
-              <span className="hero-stat-value">{s.value}</span>
+              <span className="hero-stat-value">
+                <CountUpValue value={s.value} />
+              </span>
               <span className="hero-stat-label">{s.label}</span>
             </div>
           ))}
@@ -164,6 +227,36 @@ export function HomePage({ sectionId }: { sectionId?: string }) {
           <RotatingGallery title="Baby shoots" subtitle="Tiny humans, big smiles" images={babyAssets} cycleStep={cycleStep} href="/work?tab=baby" />
           <RotatingGallery title="Events" subtitle="The energy, captured" images={eventAssets} cycleStep={cycleStep} href="/work?tab=events" />
           <RotatingGallery title="Landscapes" subtitle="Wide skies, golden light" images={landscapeAssets} cycleStep={cycleStep} href="/work?tab=landscapes" />
+        </div>
+      </section>
+
+      {/* ── INSTAGRAM / FOLLOW THE VIBE ── */}
+      <section className="ig-section reveal-section" ref={igRef}>
+        <div className="section-head">
+          <h2>Follow the vibe</h2>
+          <p>Candids · Events · Pre-Wed · Collabs — the feed is where the fun lives.</p>
+        </div>
+        <div className="polaroid-row">
+          {igShots.map((shot, index) => (
+            <a
+              key={`${shot.asset.key}-${index}`}
+              className="polaroid"
+              href={instagramUrl}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Open Instagram profile"
+            >
+              <span className="polaroid-photo">
+                <ResponsiveImage asset={shot.asset} alt="" sizes="(max-width: 680px) 44vw, 240px" />
+              </span>
+              <span className="polaroid-note">{shot.note}</span>
+            </a>
+          ))}
+        </div>
+        <div className="ig-cta">
+          <a className="button primary" href={instagramUrl} target="_blank" rel="noreferrer">
+            Follow @rajugari_abbayi_photography
+          </a>
         </div>
       </section>
 
